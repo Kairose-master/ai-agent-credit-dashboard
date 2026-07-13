@@ -20,7 +20,6 @@ import {
   ChevronsUpDown,
   LogOut,
 } from "lucide-react"
-import { authClient } from "@/lib/auth-client"
 import { cn } from "@/lib/utils"
 
 const nav = [
@@ -105,7 +104,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   const handleLogout = async () => {
-    await authClient.signOut()
+    // Clear session cookie on client-side for now
+    document.cookie = 'auth_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;'
     router.push('/sign-in')
     router.refresh()
   }

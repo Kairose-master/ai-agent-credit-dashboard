@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { authClient } from '@/lib/auth-client'
 import { DashboardShell } from '@/components/dashboard-shell'
 
 export default function DashboardLayout({
@@ -16,8 +15,8 @@ export default function DashboardLayout({
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const session = await authClient.getSession()
-        if (!session?.user) {
+        const res = await fetch('/api/me')
+        if (!res.ok) {
           router.push('/sign-in')
           return
         }
