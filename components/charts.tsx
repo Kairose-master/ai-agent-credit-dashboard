@@ -64,6 +64,42 @@ export function CreditScoreChart({ data }: { data: { month: string; score: numbe
   )
 }
 
+export function CreditEvolutionChart({ data }: { data: { label: string; score: number }[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+        <defs>
+          <linearGradient id="evolutionFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--color-chart-1)" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="var(--color-chart-1)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+        <XAxis dataKey="label" {...axisProps} />
+        <YAxis domain={["auto", "auto"]} {...axisProps} />
+        <Tooltip
+          cursor={{ stroke: "var(--color-border)" }}
+          content={({ active, payload, label }) =>
+            active && payload?.length ? (
+              <TooltipBox>
+                <p className="text-muted-foreground">{label}</p>
+                <p className="font-mono text-sm font-semibold text-foreground">{payload[0].value} pts</p>
+              </TooltipBox>
+            ) : null
+          }
+        />
+        <Area
+          type="monotone"
+          dataKey="score"
+          stroke="var(--color-chart-1)"
+          strokeWidth={2}
+          fill="url(#evolutionFill)"
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  )
+}
+
 export function PerformanceChart({ data }: { data: { month: string; tasks: number; success: number }[] }) {
   return (
     <ResponsiveContainer width="100%" height={260}>

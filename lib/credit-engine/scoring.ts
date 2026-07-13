@@ -1,0 +1,214 @@
+/**
+ * Credit Scoring Engine — pure calculation layer.
+ *
+ * Converts an agent's behavioral event history into economic trust.
+ * No I/O happens here; persistence lives in lib/credit-engine/index.ts
+ * and API routes only orchestrate. This module is the single source of
+ * truth for the financial logic.
+ *
+ * Formula (weights fixed by product spec):
+ *   Performance  40%  — task success rate, output quality, completed volume
+ *   Reliability  30%  — quality consistency, recent failure frequency, SLA compliance
+ *   Reputation   20%  — verified achievements, accumulated successful interactions
+ *   Risk         10%  — failures, abnormal behavior, small-sample uncertainty
+ *
+ * Each factor is scored 0–100, dampened toward the neutral value (50)
+ * while the sample is small (an agent must EARN certainty), then combined
+ * into a composite that maps onto a 300–990 credit score.
+ */
+
+export type AgentEventInput = {
+  eventType: string
+  success: boolean
+  executionTime: number // seconds
+  tokenCost: number
+  qualityScore: number | null // 0–1
+  createdAt: Date
+}
+
+export type CreditAssessment = {
+  score: number // 300–990
+  rating: Rating
+  creditLimit: number // USD
+  riskLevel: RiskLevel
+  breakdown: {
+    performance: number
+    reliability: number
+    reputation: number
+    risk: number
+    composite: number
+    completedTasks: number
+    failedTasks: number
+    successRate: number // 0–1
+    avgQuality: number // 0–1
+  }
+}
+
+export type Rating = 'AAA' | 'AA' | 'A' | 'BBB' | 'BB' | 'B' | 'C' | 'D'
+export type RiskLevel = 'LOW' | 'MODERATE' | 'ELEVATED' | 'HIGH'
+
+/** Tasks slower than this breach the SLA used for reliability scoring. */
+const SLA_SECONDS = 120
+/** Recent window (task count) used for failure-frequency scoring. */
+const RECENT_WINDOW = 20
+/** Sample size at which factor scores carry ~2/3 of their raw weight. */
+const CONFIDENCE_K = 5
+
+const clamp = (v: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, v))
+
+/** Shrink a raw 0–100 factor toward neutral 50 while the sample is small. */
+function dampen(raw: number, sampleSize: number): number {
+  const confidence = sampleSize / (sampleSize + CONFIDENCE_K)
+  return 50 + (raw - 50) * confidence
+}
+
+export function assessCredit(events: AgentEventInput[]): CreditAssessment {
+  // Terminal task events are the unit of behavioral history.
+  const tasks = events
+    .filter((e) => e.eventType === 'TASK_COMPLETED' || e.eventType === 'TASK_FAILED')
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+
+  const completed = tasks.filter((t) => t.eventType === 'TASK_COMPLETED' && t.success)
+  const failed = tasks.filter((t) => !(t.eventType === 'TASK_COMPLETED' && t.success))
+  const n = tasks.length
+
+  // Cold start: no behavioral history means no credit. Dampening pulls
+  // factors toward neutral, but an agent with zero recorded tasks must
+  // start at the floor and earn its way up.
+  if (n === 0) {
+    return {
+      score: 300,
+      rating: 'D',
+      creditLimit: 0,
+      riskLevel: 'HIGH',
+      breakdown: {
+        performance: 0,
+        reliability: 0,
+        reputation: 0,
+        risk: 0,
+        composite: 0,
+        completedTasks: 0,
+        failedTasks: 0,
+        successRate: 0,
+        avgQuality: 0,
+      },
+    }
+  }
+
+  const successRate = n > 0 ? completed.length / n : 0
+  const qualities = completed
+    .map((t) => t.qualityScore)
+    .filter((q): q is number => q !== null)
+  const avgQuality = qualities.length > 0 ? qualities.reduce((a, b) => a + b, 0) / qualities.length : 0
+
+  // ── Performance (40%) ────────────────────────────────────────────
+  // Volume is log-scaled: the 10th task proves more than the 1000th.
+  const volumeScore = clamp(Math.log10(completed.length + 1) * 50)
+  const performance = dampen(
+    clamp(0.5 * successRate * 100 + 0.35 * avgQuality * 100 + 0.15 * volumeScore),
+    n,
+  )
+
+  // ── Reliability (30%) ────────────────────────────────────────────
+  // Consistency: low variance in output quality signals a stable agent.
+  const meanQ = avgQuality
+  const variance =
+    qualities.length > 1
+      ? qualities.reduce((a, q) => a + (q - meanQ) ** 2, 0) / qualities.length
+      : 0
+  const consistency = clamp(100 - Math.sqrt(variance) * 250)
+
+  // Failure frequency over the recent window (recency matters for trust).
+  const recent = tasks.slice(-RECENT_WINDOW)
+  const recentFailures = recent.filter((t) => !(t.eventType === 'TASK_COMPLETED' && t.success)).length
+  const failureFrequency = recent.length > 0 ? clamp(100 * (1 - recentFailures / recent.length)) : 0
+
+  // SLA compliance: share of tasks finishing within the SLA budget.
+  const slaCompliance =
+    n > 0 ? clamp((tasks.filter((t) => t.executionTime <= SLA_SECONDS).length / n) * 100) : 0
+
+  const reliability = dampen(
+    clamp(0.4 * consistency + 0.35 * failureFrequency + 0.25 * slaCompliance),
+    n,
+  )
+
+  // ── Reputation (20%) ─────────────────────────────────────────────
+  // Verified achievements are explicit third-party attestations; the
+  // rest accrues from the volume of successful interactions.
+  const achievements = events.filter((e) => e.eventType === 'ACHIEVEMENT_VERIFIED').length
+  const reputation = dampen(
+    clamp(Math.log10(completed.length + 1) * 40 + achievements * 10),
+    n + achievements,
+  )
+
+  // ── Risk (10%) — higher is safer ─────────────────────────────────
+  const anomalies = events.filter((e) => e.eventType.includes('ANOMALY')).length
+  const risk = dampen(clamp(100 - failed.length * 8 - anomalies * 15), n)
+
+  // ── Composite → score ────────────────────────────────────────────
+  const composite = 0.4 * performance + 0.3 * reliability + 0.2 * reputation + 0.1 * risk
+  const score = Math.round(300 + composite * 6.9) // 300 (floor) – 990 (ceiling)
+
+  return {
+    score,
+    rating: ratingForScore(score),
+    creditLimit: creditLimitForScore(score),
+    riskLevel: riskLevelForScore(score),
+    breakdown: {
+      performance: Math.round(performance * 10) / 10,
+      reliability: Math.round(reliability * 10) / 10,
+      reputation: Math.round(reputation * 10) / 10,
+      risk: Math.round(risk * 10) / 10,
+      composite: Math.round(composite * 10) / 10,
+      completedTasks: completed.length,
+      failedTasks: failed.length,
+      successRate: Math.round(successRate * 1000) / 1000,
+      avgQuality: Math.round(avgQuality * 1000) / 1000,
+    },
+  }
+}
+
+export function ratingForScore(score: number): Rating {
+  if (score >= 900) return 'AAA'
+  if (score >= 840) return 'AA'
+  if (score >= 760) return 'A'
+  if (score >= 680) return 'BBB'
+  if (score >= 600) return 'BB'
+  if (score >= 520) return 'B'
+  if (score >= 440) return 'C'
+  return 'D'
+}
+
+/**
+ * Programmable credit limit, quadratic above the lending floor:
+ *   limit = (score − 500)² / 5.625, rounded to $250.
+ * e.g. score 875 → $25,000; score 990 → $42,750; below 520 → $0.
+ */
+export function creditLimitForScore(score: number): number {
+  if (score < 520) return 0
+  return Math.round((score - 500) ** 2 / 5.625 / 250) * 250
+}
+
+export function riskLevelForScore(score: number): RiskLevel {
+  if (score >= 800) return 'LOW'
+  if (score >= 680) return 'MODERATE'
+  if (score >= 560) return 'ELEVATED'
+  return 'HIGH'
+}
+
+/** Human-readable explanation of a score change, stored with each entry. */
+export function buildCalculationReason(
+  next: CreditAssessment,
+  previousScore: number | null,
+): string {
+  const b = next.breakdown
+  const parts = [
+    previousScore === null
+      ? `Initial assessment: ${next.score}`
+      : `Score ${previousScore} → ${next.score}`,
+    `${b.completedTasks} completed / ${b.failedTasks} failed tasks (success rate ${(b.successRate * 100).toFixed(1)}%)`,
+    `avg output quality ${(b.avgQuality * 100).toFixed(0)}%`,
+    `factors — performance ${b.performance}, reliability ${b.reliability}, reputation ${b.reputation}, risk ${b.risk}`,
+  ]
+  return parts.join('; ')
+}

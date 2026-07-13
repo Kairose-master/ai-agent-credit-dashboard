@@ -1,138 +1,376 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Image from 'next/image'
-import { Wallet, CalendarDays, ShieldCheck, Cpu } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Wallet,
+  CalendarDays,
+  Cpu,
+  Play,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  ListChecks,
+  Wrench,
+  Sparkles,
+} from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
+import { CreditEvolutionChart } from '@/components/charts'
+
+type CreditState = {
+  score: number
+  rating: string
+  creditLimit: number
+  availableCredit?: number
+  riskLevel: string
+}
+
+type AgentProfile = {
+  identity: {
+    id: string
+    name: string
+    description: string | null
+    walletAddress: string
+    modelVersion: string | null
+    createdAt: string
+  }
+  performance: {
+    totalTasks: number
+    completedTasks: number
+    failedTasks: number
+    successRate: number | null
+    avgQuality: number | null
+    totalTokenCost: number
+  }
+  credit: CreditState
+}
+
+type AgentEvent = {
+  id: string
+  taskId: string
+  eventType: string
+  success: boolean
+  executionTime: number
+  tokenCost: number
+  qualityScore: number | null
+  detail: Record<string, unknown>
+  createdAt: string
+}
+
+type CreditHistoryEntry = {
+  id: string
+  score: number
+  rating: string
+  creditLimit: number
+  riskLevel: string
+  calculationReason: string
+  createdAt: string
+}
+
+type TaskRunResponse = {
+  taskId: string
+  result: {
+    success: boolean
+    output: string
+    plan: string
+    qualityScore: number
+    executionTime: number
+    tokenCost: number
+  }
+  credit: CreditState & { previousScore: number | null; calculationReason: string }
+}
+
+const EVENT_META: Record<string, { label: string; Icon: typeof Play }> = {
+  TASK_STARTED: { label: 'Task started', Icon: Play },
+  PLAN_CREATED: { label: 'Execution plan created', Icon: ListChecks },
+  TOOL_EXECUTED: { label: 'Tool executed', Icon: Wrench },
+  TASK_COMPLETED: { label: 'Task completed', Icon: CheckCircle2 },
+  TASK_FAILED: { label: 'Task failed', Icon: XCircle },
+  ACHIEVEMENT_VERIFIED: { label: 'Achievement verified', Icon: Sparkles },
+}
 
 export default function ProfilePage() {
-  const [agent, setAgent] = useState<any>(null)
+  const [agentId, setAgentId] = useState<string | null>(null)
+  const [profile, setProfile] = useState<AgentProfile | null>(null)
+  const [events, setEvents] = useState<AgentEvent[]>([])
+  const [history, setHistory] = useState<CreditHistoryEntry[]>([])
   const [loading, setLoading] = useState(true)
 
+  const [task, setTask] = useState('')
+  const [running, setRunning] = useState(false)
+  const [lastRun, setLastRun] = useState<TaskRunResponse | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
+
+  const refresh = useCallback(async (id: string) => {
+    const [profileRes, eventsRes, historyRes] = await Promise.all([
+      fetch(`/api/agents/${id}`),
+      fetch(`/api/agents/${id}/events?limit=30`),
+      fetch(`/api/agents/${id}/credit-history`),
+    ])
+    if (profileRes.ok) setProfile(await profileRes.json())
+    if (eventsRes.ok) setEvents((await eventsRes.json()).events)
+    if (historyRes.ok) setHistory((await historyRes.json()).history)
+  }, [])
+
   useEffect(() => {
-    const load = async () => {
+    const init = async () => {
       try {
         const agents = await getAgents()
-        if (agents.length > 0) setAgent(agents[0])
+        if (agents.length > 0) {
+          setAgentId(agents[0].id)
+          await refresh(agents[0].id)
+        }
       } catch (error) {
         console.error('[v0] Error:', error)
       } finally {
         setLoading(false)
       }
     }
-    load()
-  }, [])
+    init()
+  }, [refresh])
+
+  const runTask = async () => {
+    if (!agentId || !task.trim() || running) return
+    setRunning(true)
+    setRunError(null)
+    setLastRun(null)
+    try {
+      const response = await fetch(`/api/agents/${agentId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: task.trim() }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`)
+      setLastRun(data)
+      setTask('')
+      await refresh(agentId)
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRunning(false)
+    }
+  }
 
   if (loading) return <div className="p-8">Loading...</div>
-  if (!agent) return <div className="p-8">No agent found</div>
+  if (!agentId || !profile) return <div className="p-8">No agent found</div>
+
+  const { identity, performance, credit } = profile
+  const evolution = [...history]
+    .reverse()
+    .map((entry) => ({
+      label: new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      score: entry.score,
+    }))
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Agent Profile</h1>
-        <p className="text-muted-foreground">Economic identity and credit standing</p>
+        <h1 className="text-3xl font-bold mb-2">Agent Credit Profile</h1>
+        <p className="text-muted-foreground">
+          Identity → Behavior → Reputation → Credit Score → Credit Capacity
+        </p>
       </div>
 
-      {/* Identity banner */}
+      {/* Credit profile banner */}
       <div className="border border-border rounded-lg p-6">
-        <div className="flex flex-col md:flex-row md:items-center gap-6">
-          <div className="relative size-24 shrink-0 overflow-hidden rounded-xl border border-border">
-            <Image src="/agent-atlas.png" alt={`${agent.name} emblem`} fill className="object-cover" />
-          </div>
+        <div className="flex flex-col md:flex-row md:items-start gap-6">
           <div className="flex-1">
-            <h2 className="text-2xl font-bold">{agent.name}</h2>
-            <p className="text-sm text-muted-foreground mt-1">{agent.description}</p>
-            <div className="grid grid-cols-3 gap-4 mt-4">
-              <div>
-                <p className="text-2xl font-bold">{Math.round(parseFloat(agent.creditScore))}</p>
-                <p className="text-xs text-muted-foreground">Credit Score</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{agent.riskRating}</p>
-                <p className="text-xs text-muted-foreground">Risk Rating</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold">${Math.round(parseFloat(agent.availableCredit || 0) / 1000)}K</p>
-                <p className="text-xs text-muted-foreground">Available Credit</p>
-              </div>
+            <h2 className="text-2xl font-bold">{identity.name}</h2>
+            <p className="text-sm text-muted-foreground mt-1">{identity.description}</p>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Wallet className="size-3.5" />
+                <span className="font-mono">{identity.walletAddress.slice(0, 10)}…{identity.walletAddress.slice(-6)}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Cpu className="size-3.5" />
+                {identity.modelVersion ?? 'claude-sonnet-5'}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <CalendarDays className="size-3.5" />
+                {new Date(identity.createdAt).toLocaleDateString()}
+              </span>
             </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+            <div>
+              <p className="text-3xl font-bold font-mono">{credit.score}</p>
+              <p className="text-xs text-muted-foreground mt-1">Credit Score</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold">{credit.rating}</p>
+              <p className="text-xs text-muted-foreground mt-1">Credit Rating</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold font-mono">${credit.creditLimit.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">Credit Limit</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold">{credit.riskLevel}</p>
+              <p className="text-xs text-muted-foreground mt-1">Risk Level</p>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-4 border-t border-border text-sm">
+          <div>
+            <span className="text-muted-foreground">Tasks completed</span>{' '}
+            <span className="font-mono font-semibold">{performance.completedTasks}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Success rate</span>{' '}
+            <span className="font-mono font-semibold">
+              {performance.successRate === null ? '—' : `${(performance.successRate * 100).toFixed(1)}%`}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Avg quality</span>{' '}
+            <span className="font-mono font-semibold">
+              {performance.avgQuality === null ? '—' : `${(performance.avgQuality * 100).toFixed(0)}%`}
+            </span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">Token cost</span>{' '}
+            <span className="font-mono font-semibold">{performance.totalTokenCost.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Identity Details */}
-        <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-4">Identity</h3>
-          <div className="space-y-3">
-            <div className="flex items-start justify-between">
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Wallet className="size-4" />
-                Wallet Address
-              </span>
-              <span className="font-mono text-xs break-all text-right max-w-xs">{agent.walletAddress}</span>
-            </div>
-            <div className="flex items-start justify-between">
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <CalendarDays className="size-4" />
-                Created
-              </span>
-              <span className="text-sm">{new Date(agent.createdAt).toLocaleDateString()}</span>
-            </div>
-            <div className="flex items-start justify-between">
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ShieldCheck className="size-4" />
-                Status
-              </span>
-              <span className="text-sm font-medium text-success">Verified</span>
-            </div>
-            <div className="flex items-start justify-between">
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Cpu className="size-4" />
-                Type
-              </span>
-              <span className="text-sm">AI Agent</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Credit Information */}
-        <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-4">Credit Information</h3>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Total Credit Line</span>
-              <span className="font-mono font-bold">${Math.round(parseFloat(agent.totalCreditLine || 0)).toLocaleString()}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Used</span>
-              <span className="font-mono font-bold">${Math.round(parseFloat(agent.usedCredit || 0)).toLocaleString()}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Available</span>
-              <span className="font-mono font-bold text-success">${Math.round(parseFloat(agent.availableCredit || 0)).toLocaleString()}</span>
-            </div>
-            <div className="flex items-center justify-between pt-3 border-t border-border">
-              <span className="text-sm text-muted-foreground">Interest Rate</span>
-              <span className="font-mono font-bold">8.5% APR</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Attestations */}
+      {/* Task runner — the entry point of the vertical slice */}
       <div className="border border-border rounded-lg p-6">
-        <h3 className="font-bold text-lg mb-4">On-Chain Attestations</h3>
-        <p className="text-sm text-muted-foreground">Verifiable credentials from third parties</p>
-        <div className="mt-4 space-y-2">
-          {agent.attestations && agent.attestations.length > 0 ? (
-            agent.attestations.map((att: any, i: number) => (
-              <div key={i} className="p-3 bg-secondary/50 rounded text-sm">
-                {att}
+        <h3 className="font-bold text-lg mb-1">Run a Task</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          The Claude-powered research agent executes the task; its behavior is recorded as events
+          and the credit score is recalculated automatically.
+        </p>
+        <textarea
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          placeholder="e.g. Research the main differences between optimistic and ZK rollups and summarize them."
+          rows={3}
+          className="w-full rounded-md border border-border bg-background p-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          disabled={running}
+        />
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-muted-foreground">
+            {running ? 'Agent is planning, executing tools, and self-evaluating…' : ' '}
+          </p>
+          <button
+            onClick={runTask}
+            disabled={running || !task.trim()}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+            {running ? 'Running…' : 'Execute Task'}
+          </button>
+        </div>
+
+        {runError && (
+          <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {runError}
+          </div>
+        )}
+
+        {lastRun && (
+          <div className="mt-4 space-y-3">
+            <div className="rounded-md border border-border p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                {lastRun.result.success ? (
+                  <CheckCircle2 className="size-4 text-success" />
+                ) : (
+                  <XCircle className="size-4 text-destructive" />
+                )}
+                {lastRun.result.success ? 'Task completed' : 'Task failed'}
+                <span className="text-xs font-normal text-muted-foreground font-mono">
+                  {lastRun.taskId} · {lastRun.result.executionTime}s ·{' '}
+                  {lastRun.result.tokenCost.toLocaleString()} tokens · quality{' '}
+                  {(lastRun.result.qualityScore * 100).toFixed(0)}%
+                </span>
               </div>
-            ))
+              <p className="mt-2 text-sm whitespace-pre-wrap">{lastRun.result.output}</p>
+            </div>
+            <div className="rounded-md border border-border p-4 text-sm">
+              <p className="font-semibold mb-1">Credit update</p>
+              <p className="font-mono text-lg">
+                {lastRun.credit.previousScore ?? '—'} → {lastRun.credit.score}{' '}
+                <span className="text-sm">
+                  ({lastRun.credit.rating} · ${lastRun.credit.creditLimit.toLocaleString()} limit ·{' '}
+                  {lastRun.credit.riskLevel} risk)
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{lastRun.credit.calculationReason}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Credit evolution */}
+        <div className="border border-border rounded-lg p-6">
+          <h3 className="font-bold text-lg mb-4">Credit Evolution</h3>
+          {evolution.length > 1 ? (
+            <CreditEvolutionChart data={evolution} />
           ) : (
-            <p className="text-sm text-muted-foreground">No attestations yet</p>
+            <p className="text-sm text-muted-foreground">
+              Run at least two tasks to see the score evolve.
+            </p>
+          )}
+          <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
+            {history.slice(0, 5).map((entry) => (
+              <div key={entry.id} className="text-xs border-t border-border pt-2">
+                <span className="font-mono font-semibold">{entry.score}</span>{' '}
+                <span className="text-muted-foreground">
+                  {entry.rating} · ${entry.creditLimit.toLocaleString()} ·{' '}
+                  {new Date(entry.createdAt).toLocaleString()}
+                </span>
+                <p className="text-muted-foreground mt-0.5">{entry.calculationReason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Activity timeline */}
+        <div className="border border-border rounded-lg p-6">
+          <h3 className="font-bold text-lg mb-4">Agent Activity Timeline</h3>
+          {events.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No activity yet — run a task to generate behavioral events.
+            </p>
+          ) : (
+            <ul className="space-y-3 max-h-[420px] overflow-y-auto">
+              {events.map((event) => {
+                const meta = EVENT_META[event.eventType] ?? { label: event.eventType, Icon: Play }
+                return (
+                  <li key={event.id} className="flex items-start gap-3 text-sm">
+                    <meta.Icon
+                      className={`size-4 mt-0.5 shrink-0 ${
+                        event.eventType === 'TASK_FAILED'
+                          ? 'text-destructive'
+                          : event.eventType === 'TASK_COMPLETED'
+                            ? 'text-success'
+                            : 'text-muted-foreground'
+                      }`}
+                    />
+                    <div className="min-w-0">
+                      <p className="font-medium">
+                        {meta.label}
+                        {event.eventType === 'TOOL_EXECUTED' && event.detail?.tool ? (
+                          <span className="font-mono text-xs text-muted-foreground"> · {String(event.detail.tool)}</span>
+                        ) : null}
+                        {event.qualityScore !== null && (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {' '}· quality {(event.qualityScore * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {event.taskId} · {new Date(event.createdAt).toLocaleString()}
+                        {event.tokenCost > 0 && ` · ${event.tokenCost.toLocaleString()} tokens`}
+                      </p>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </div>
       </div>

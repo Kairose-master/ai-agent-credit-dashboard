@@ -1,33 +1,96 @@
-# ai-agent-credit-dashboard
+# AI Agent Credit Dashboard
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [v0](https://v0.app).
+Prototype of an **AI Agent Credit Infrastructure** — a new financial primitive:
 
-## Built with v0
+> Payment allows AI agents to transact. **Credit allows AI agents to scale.**
 
-This repository is linked to a [v0](https://v0.app) project. You can continue developing by visiting the link below -- start new chats to make changes, and v0 will push commits directly to this repo. Every merge to `main` will automatically deploy.
+The system lets autonomous AI agents perform economic tasks, generate behavioral
+history, build reputation, receive credit scores, and obtain programmable credit
+limits.
 
-[Continue working on v0 →](https://v0.app/chat/projects/prj_xQNHbAoGUfKypcNYlv8jaT2Bz3tq)
+## The vertical slice
 
-## Getting Started
+```
+AI Agent executes task (Python · LangGraph · Claude)
+  ↓
+Behavior emits structured events (TASK_STARTED, PLAN_CREATED, TOOL_EXECUTED, TASK_COMPLETED/FAILED)
+  ↓
+Events persisted in Neon PostgreSQL (agent_events)
+  ↓
+Credit scoring engine recalculates (Performance 40% · Reliability 30% · Reputation 20% · Risk 10%)
+  ↓
+Score, rating, limit, and risk level update (credit_scores + agent)
+  ↓
+Dashboard reflects the agent's economic state
+```
 
-First, run the development server:
+## Repository layout
+
+| Path                 | Role                                                             |
+| -------------------- | ---------------------------------------------------------------- |
+| `agent-runtime/`     | Python LangGraph agent runtime (Claude planner → tools → evaluator), FastAPI service |
+| `lib/credit-engine/` | Credit scoring engine — all financial logic lives here, outside API routes |
+| `app/api/agents/`    | REST API: run tasks, read agent state, events, credit history    |
+| `app/(dashboard)/`   | Next.js dashboard (credit profile, task runner, activity timeline, credit evolution) |
+| `scripts/migrate.mjs`| Idempotent database migration for Neon PostgreSQL                |
+
+## Getting started
+
+### 1. Database (Neon PostgreSQL)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+cp .env.example .env.local   # fill in DATABASE_URL
+pnpm install
+pnpm db:migrate
+```
+
+### 2. Agent runtime (Claude-powered)
+
+```bash
+cd agent-runtime
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY=sk-ant-...
+uvicorn runtime.server:app --port 8000
+```
+
+### 3. Dashboard
+
+```bash
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000), sign up, then go to
+**Profile** and run a task — the agent executes it, events land in the
+database, and the credit score updates live.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API
 
-## Learn More
+| Endpoint                              | Description                                    |
+| ------------------------------------- | ---------------------------------------------- |
+| `POST /api/agents/:id/tasks`          | Execute a task on the agent runtime, persist events, recalculate credit |
+| `GET  /api/agents/:id`                | Identity, performance metrics, credit state    |
+| `GET  /api/agents/:id/events`         | Behavioral event history                       |
+| `GET  /api/agents/:id/credit-history` | Score/limit changes with calculation reasons   |
 
-To learn more, take a look at the following resources:
+## Credit scoring
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [v0 Documentation](https://v0.app/docs) - learn about v0 and how to use it.
+Implemented in `lib/credit-engine/scoring.ts` (documented in-code):
+
+- **Performance (40%)** — task success rate, output quality, completed volume
+- **Reliability (30%)** — quality consistency, recent failure frequency, SLA compliance
+- **Risk-adjusted trust** builds with sample size: factor scores are dampened
+  toward neutral while behavioral history is thin, so agents must *earn* certainty
+- Score maps to a 300–990 scale → rating (AAA–D), programmable credit limit
+  (quadratic above the lending floor), and risk level (LOW–HIGH)
+
+## Future architecture compatibility
+
+The event ledger and append-only score history are designed so ERC-4337 smart
+accounts, Ethereum Attestation Service reputation, and an insurance layer can
+attach later without schema rework (see `Claude.md`). Not implemented yet.
+
+## Built with v0
+
+This repository is linked to a [v0](https://v0.app) project:
+[Continue working on v0 →](https://v0.app/chat/projects/prj_xQNHbAoGUfKypcNYlv8jaT2Bz3tq)

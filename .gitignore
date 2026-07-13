@@ -13,3 +13,10 @@ __v0_jsx-dev-runtime.ts
 node_modules
 .next/
 .DS_Store
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+agent-runtime/.venv/

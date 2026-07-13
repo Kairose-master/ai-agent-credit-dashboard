@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, decimal, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, decimal, integer, jsonb } from 'drizzle-orm/pg-core'
 
 // Better Auth Tables
 export const user = pgTable('user', {
@@ -52,7 +52,10 @@ export const agent = pgTable('agent', {
   name: text('name').notNull(),
   description: text('description'),
   walletAddress: text('walletAddress').notNull().unique(),
-  creditScore: decimal('creditScore', { precision: 5, scale: 2 }).notNull().default('0'),
+  modelVersion: text('modelVersion').default('claude-sonnet-5'),
+  creditScore: decimal('creditScore', { precision: 6, scale: 2 }).notNull().default('0'),
+  creditRating: text('creditRating').default('unrated'),
+  riskLevel: text('riskLevel').default('UNKNOWN'),
   riskRating: text('riskRating').default('unrated'),
   totalCreditLine: decimal('totalCreditLine', { precision: 18, scale: 2 }).default('0'),
   availableCredit: decimal('availableCredit', { precision: 18, scale: 2 }).default('0'),
@@ -60,6 +63,42 @@ export const agent = pgTable('agent', {
   performanceMetrics: jsonb('performanceMetrics').default({}),
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * agent_events — the behavioral ledger.
+ * Every action taken by an agent runtime produces one structured event.
+ * These rows are the raw input of the credit scoring engine: credit is
+ * derived exclusively from recorded behavior, never assigned manually.
+ */
+export const agentEvent = pgTable('agent_events', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull(),
+  taskId: text('task_id').notNull(),
+  eventType: text('event_type').notNull(), // TASK_STARTED | PLAN_CREATED | TOOL_EXECUTED | TASK_COMPLETED | TASK_FAILED | ACHIEVEMENT_VERIFIED
+  success: boolean('success').notNull().default(true),
+  executionTime: integer('execution_time').notNull().default(0), // seconds
+  tokenCost: integer('token_cost').notNull().default(0),
+  qualityScore: decimal('quality_score', { precision: 4, scale: 3 }), // 0.000 – 1.000, set by the evaluation node
+  detail: jsonb('detail').default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * credit_scores — append-only score history.
+ * One row per recalculation, so the dashboard can show credit evolution
+ * (before → after) together with the reason for each change.
+ */
+export const creditScoreEntry = pgTable('credit_scores', {
+  id: text('id').primaryKey(),
+  agentId: text('agent_id').notNull(),
+  score: integer('score').notNull(), // 300 – 990
+  rating: text('rating').notNull(), // AAA … D
+  creditLimit: decimal('credit_limit', { precision: 18, scale: 2 }).notNull(),
+  riskLevel: text('risk_level').notNull(), // LOW | MODERATE | ELEVATED | HIGH
+  calculationReason: text('calculation_reason').notNull(),
+  breakdown: jsonb('breakdown').default({}), // per-factor component scores
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const creditLine = pgTable('creditLine', {
