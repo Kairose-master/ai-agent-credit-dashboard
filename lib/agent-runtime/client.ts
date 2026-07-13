@@ -27,7 +27,19 @@ export type AgentRunResult = {
   events: RuntimeEvent[]
 }
 
-const RUNTIME_URL = process.env.AGENT_RUNTIME_URL ?? 'http://localhost:8000'
+/**
+ * Normalize AGENT_RUNTIME_URL: a bare host like
+ * "my-service.up.railway.app" (no scheme) makes fetch() throw
+ * "Failed to parse URL", so default a missing scheme to https and
+ * trim any trailing slash.
+ */
+function resolveRuntimeUrl(): string {
+  const raw = (process.env.AGENT_RUNTIME_URL ?? 'http://localhost:8000').trim()
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+  return withScheme.replace(/\/+$/, '')
+}
+
+const RUNTIME_URL = resolveRuntimeUrl()
 
 export async function runAgentTask(input: {
   agentId: string
