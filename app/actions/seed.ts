@@ -1,6 +1,6 @@
 'use server'
 
-import { auth } from '@/lib/auth'
+import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import {
   agent,
@@ -10,12 +10,11 @@ import {
   creditTransaction,
   insurancePolicy,
 } from '@/lib/db/schema'
-import { headers } from 'next/headers'
 import { nanoid } from 'nanoid'
 import { eq } from 'drizzle-orm'
 
 export async function seedDemoData() {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const session = await getSession()
   if (!session?.user) throw new Error('Unauthorized')
 
   const userId = session.user.id

@@ -1,5 +1,4 @@
-import { headers } from 'next/headers'
-import { auth } from '@/lib/auth'
+import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -15,7 +14,7 @@ export class ApiError extends Error {
 
 /** Resolve the authenticated user's agent or throw a typed API error. */
 export async function requireAgent(agentId: string) {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const session = await getSession()
   if (!session?.user) throw new ApiError(401, 'Unauthorized')
 
   const [found] = await db.select().from(agent).where(eq(agent.id, agentId))

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight } from 'lucide-react'
-import { authClient } from '@/lib/auth-client'
 import { getAgents } from '@/app/actions/agents'
 import { seedDemoData } from '@/app/actions/seed'
 
@@ -15,8 +14,8 @@ export default function DashboardPage() {
   useEffect(() => {
     const init = async () => {
       try {
-        const session = await authClient.getSession()
-        setUser(session?.user)
+        const me = await fetch('/api/me')
+        if (me.ok) setUser((await me.json()).user)
 
         // Seed demo data
         await seedDemoData().catch(() => {})

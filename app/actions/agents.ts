@@ -1,15 +1,14 @@
 'use server'
 
-import { auth } from '@/lib/auth'
+import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent, creditLine, creditAssessment, riskMetric } from '@/lib/db/schema'
 import { eq, desc } from 'drizzle-orm'
-import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 
 async function getUserId() {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const session = await getSession()
   if (!session?.user) throw new Error('Unauthorized')
   return session.user.id
 }

@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { authClient } from '@/lib/auth-client'
 
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null)
@@ -10,8 +9,8 @@ export default function SettingsPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const session = await authClient.getSession()
-        setUser(session?.user)
+        const me = await fetch('/api/me')
+        if (me.ok) setUser((await me.json()).user)
       } catch (error) {
         console.error('[v0] Error:', error)
       } finally {
