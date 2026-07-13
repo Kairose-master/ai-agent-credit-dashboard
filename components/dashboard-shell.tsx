@@ -3,7 +3,7 @@
 import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
   Bot,
@@ -18,7 +18,9 @@ import {
   X,
   Command,
   ChevronsUpDown,
+  LogOut,
 } from "lucide-react"
+import { authClient } from "@/lib/auth-client"
 import { cn } from "@/lib/utils"
 
 const nav = [
@@ -98,7 +100,15 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+
+  const handleLogout = async () => {
+    await authClient.signOut()
+    router.push('/sign-in')
+    router.refresh()
+  }
 
   return (
     <div className="min-h-svh bg-background">
@@ -157,8 +167,24 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <Bell className="size-4" />
               <span className="absolute right-2 top-2 size-1.5 rounded-full bg-destructive" />
             </button>
-            <div className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-              A7
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary hover:opacity-80"
+              >
+                A7
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-40 rounded-md border border-border bg-background shadow-lg">
+                  <button
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-secondary"
+                  >
+                    <LogOut className="size-4" />
+                    Sign out
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>
