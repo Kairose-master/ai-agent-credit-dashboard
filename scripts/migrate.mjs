@@ -48,6 +48,34 @@ CREATE TABLE IF NOT EXISTS "verification" (
   updatedat  timestamptz DEFAULT now()
 );
 
+-- ── Legacy repair ──────────────────────────────────────────────────
+-- Early versions of this database were created with all-lowercase
+-- column names (userid, creditscore, ...) that don't match the quoted
+-- camelCase identifiers the app uses. Drop such tables when they are
+-- empty so they are recreated correctly below; refuse when they hold
+-- data, since that needs a manual migration.
+DO $$
+DECLARE
+  t text;
+  n bigint;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['agent','creditLine','creditTransaction','creditAssessment','riskMetric','insurancePolicy'] LOOP
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = t)
+       AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = 'public' AND table_name = t AND column_name = 'userId')
+    THEN
+      EXECUTE format('SELECT count(*) FROM %I', t) INTO n;
+      IF n = 0 THEN
+        EXECUTE format('DROP TABLE %I', t);
+        RAISE NOTICE 'Dropped legacy lowercase-column table: %', t;
+      ELSE
+        RAISE EXCEPTION 'Legacy table % has % rows; migrate its data manually before rerunning', t, n;
+      END IF;
+    END IF;
+  END LOOP;
+END $$;
+
 -- ── Agent identity ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "agent" (
   id                   text PRIMARY KEY,
@@ -72,7 +100,13 @@ CREATE TABLE IF NOT EXISTS "agent" (
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "modelVersion" text DEFAULT 'claude-sonnet-5';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "creditRating" text DEFAULT 'unrated';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "riskLevel" text DEFAULT 'UNKNOWN';
-ALTER TABLE "agent" ALTER COLUMN "creditScore" TYPE numeric(6,2);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'agent' AND column_name = 'creditScore') THEN
+    ALTER TABLE "agent" ALTER COLUMN "creditScore" TYPE numeric(6,2);
+  END IF;
+END $$;
 
 -- ── Behavioral event ledger ────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_events (
