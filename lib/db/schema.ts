@@ -5,43 +5,43 @@ export const user = pgTable('user', {
   id: text('id').primaryKey(),
   name: text('name'),
   email: text('email').notNull().unique(),
-  emailVerified: boolean('emailVerified').notNull().default(false),
+  emailVerified: boolean('emailverified').notNull().default(false),
   image: text('image'),
-  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('createdat', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updatedat', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const session = pgTable('session', {
   id: text('id').primaryKey(),
-  userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  userId: text('userid').notNull().references(() => user.id, { onDelete: 'cascade' }),
   token: text('token').notNull(),
-  expiresAt: timestamp('expiresAt', { withTimezone: true }).notNull(),
-  ipAddress: text('ipAddress'),
-  userAgent: text('userAgent'),
-  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expiresat', { withTimezone: true }).notNull(),
+  ipAddress: text('ipaddress'),
+  userAgent: text('useragent'),
+  createdAt: timestamp('createdat', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updatedat', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const account = pgTable('account', {
   id: text('id').primaryKey(),
-  userId: text('userId').notNull().references(() => user.id, { onDelete: 'cascade' }),
-  accountId: text('accountId').notNull(),
+  userId: text('userid').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  accountId: text('accountid').notNull(),
   provider: text('provider').notNull(),
-  providerAccountId: text('providerAccountId').notNull(),
-  refreshToken: text('refreshToken'),
-  accessToken: text('accessToken'),
-  expiresAt: timestamp('expiresAt', { withTimezone: true }),
-  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+  providerAccountId: text('provideraccountid').notNull(),
+  refreshToken: text('refreshtoken'),
+  accessToken: text('accesstoken'),
+  expiresAt: timestamp('expiresat', { withTimezone: true }),
+  createdAt: timestamp('createdat', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updatedat', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const verification = pgTable('verification', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: timestamp('expiresAt', { withTimezone: true }).notNull(),
-  createdAt: timestamp('createdAt', { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp('updatedAt', { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp('expiresat', { withTimezone: true }).notNull(),
+  createdAt: timestamp('createdat', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updatedat', { withTimezone: true }).defaultNow(),
 })
 
 // App Tables
