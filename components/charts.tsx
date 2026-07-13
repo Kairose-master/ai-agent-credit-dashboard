@@ -114,8 +114,8 @@ export function DefaultProbabilityChart({
             ) : null
           }
         />
-        <Area type="monotone" dataKey="portfolio" stroke="var(--color-muted-foreground)" strokeWidth={1.5} fill="var(--color-muted-foreground)" fillOpacity={0.08} />
-        <Area type="monotone" dataKey="agent" stroke="var(--color-chart-1)" strokeWidth={2} fill="var(--color-chart-1)" fillOpacity={0.12} />
+        <Area isAnimationActive={false} type="monotone" dataKey="portfolio" stroke="var(--color-muted-foreground)" strokeWidth={1.5} fill="var(--color-muted-foreground)" fillOpacity={0.08} />
+        <Area isAnimationActive={false} type="monotone" dataKey="agent" stroke="var(--color-chart-1)" strokeWidth={2} fill="var(--color-chart-1)" fillOpacity={0.12} />
       </AreaChart>
     </ResponsiveContainer>
   )
