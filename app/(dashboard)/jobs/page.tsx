@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare, Bot, Flag } from 'lucide-react'
+import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare, Bot, Flag, Workflow, ChevronDown } from 'lucide-react'
 import {
   getJobs,
   postJobAction,
@@ -11,6 +11,8 @@ import {
   raiseDisputeAction,
 } from '@/app/actions/labor'
 import { getTemplates, publishTemplate, unpublishTemplate, purchaseTemplate } from '@/app/actions/marketplace'
+import { BpmnViewer } from '@/components/bpmn-viewer'
+import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
 
 type Job = {
   id: number
@@ -58,6 +60,7 @@ const STATUS_STYLE: Record<Job['status'], string> = {
 
 export default function JobsPage() {
   const [configured, setConfigured] = useState(true)
+  const [showDiagram, setShowDiagram] = useState(false)
   const [jobs, setJobs] = useState<Job[]>([])
   const [myAgents, setMyAgents] = useState<MyAgent[]>([])
   const [loading, setLoading] = useState(true)
@@ -167,6 +170,29 @@ export default function JobsPage() {
           {error}
         </div>
       )}
+
+      {/* ── BPMN diagram of the real flow — same steps the buttons below trigger ── */}
+      <div className="rounded-lg border border-border overflow-hidden">
+        <button
+          onClick={() => setShowDiagram((v) => !v)}
+          className="flex w-full items-center justify-between p-4 text-left hover:bg-secondary/50"
+        >
+          <span className="font-medium flex items-center gap-2">
+            <Workflow className="size-5" /> How a job actually flows (BPMN)
+          </span>
+          <ChevronDown className={`size-4 text-muted-foreground transition-transform ${showDiagram ? 'rotate-180' : ''}`} />
+        </button>
+        {showDiagram && (
+          <div className="border-t border-border p-4">
+            <p className="text-xs text-muted-foreground mb-3">
+              Requester / Worker / Arbiter swimlanes — the same Post → Accept → Real work → Submit →
+              Approve-or-Dispute → Resolve steps the buttons below trigger. Useful to keep open while
+              testing: match a job&apos;s status against where it sits in this diagram.
+            </p>
+            <BpmnViewer xml={LABOR_MARKET_BPMN_XML} />
+          </div>
+        )}
+      </div>
 
       {/* ── Paid Jobs (on-chain) ─────────────────────────────────────── */}
       <div>
