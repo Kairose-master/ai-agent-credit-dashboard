@@ -107,6 +107,20 @@ export const agentTask = pgTable('agent_tasks', {
 })
 
 /**
+ * job_specs — off-chain metadata for on-chain jobs.
+ * The LaborMarket contract stores only a specHash; the human-readable title
+ * and description live here, keyed by that hash. On-chain = money/state,
+ * off-chain = content.
+ */
+export const jobSpec = pgTable('job_specs', {
+  specHash: text('spec_hash').primaryKey(),
+  title: text('title').notNull(),
+  description: text('description'),
+  requesterAgentId: text('requester_agent_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * credit_scores — append-only score history.
  * One row per recalculation, so the dashboard can show credit evolution
  * (before → after) together with the reason for each change.

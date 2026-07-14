@@ -146,13 +146,23 @@ export function assessCredit(events: AgentEventInput[]): CreditAssessment {
   const repayments = events.filter((e) => e.eventType === 'REPAYMENT_COMPLETED').length
   const defaults = events.filter((e) => e.eventType === 'REPAYMENT_DEFAULTED').length
 
+  // Completed paid jobs on the labor market — real economic activity, the
+  // strongest reputation signal an agent can accumulate.
+  const jobsCompleted = events.filter((e) => e.eventType === 'JOB_COMPLETED').length
+
   // ── Reputation (20%) ─────────────────────────────────────────────
   // Verified achievements are explicit third-party attestations; the rest
-  // accrues from the volume of successful interactions, including repaid credit.
+  // accrues from the volume of successful interactions — repaid credit and,
+  // most of all, delivered paid work.
   const achievements = events.filter((e) => e.eventType === 'ACHIEVEMENT_VERIFIED').length
   const reputation = dampen(
-    clamp(Math.log10(completed.length + 1) * 40 + achievements * 10 + repayments * 8),
-    n + achievements + repayments,
+    clamp(
+      Math.log10(completed.length + 1) * 35 +
+        achievements * 10 +
+        repayments * 8 +
+        jobsCompleted * 12,
+    ),
+    n + achievements + repayments + jobsCompleted,
   )
 
   // ── Risk (10%) — higher is safer ─────────────────────────────────

@@ -19,6 +19,7 @@ export const onchainEnv = {
   agentOwnerPrivateKey: process.env.AGENT_OWNER_PRIVATE_KEY ?? '', // signer behind every agent account
   registryAddress: (process.env.CREDIT_REGISTRY_ADDRESS ?? '') as `0x${string}` | '',
   vaultAddress: (process.env.CREDIT_VAULT_ADDRESS ?? '') as `0x${string}` | '',
+  laborMarketAddress: (process.env.LABOR_MARKET_ADDRESS ?? '') as `0x${string}` | '',
   usdcAddress: (process.env.MOCK_USDC_ADDRESS ?? '') as `0x${string}` | '',
   easAddress: (process.env.EAS_ADDRESS ??
     '0xC2679fBD37d54388Ce493F1DB75320D236e1815e') as `0x${string}`, // EAS on Sepolia
@@ -38,6 +39,11 @@ export function isOnchainConfigured(): boolean {
 /** True when agents can transact (ZeroDev bundler + agent signer present). */
 export function isAgentAccountConfigured(): boolean {
   return Boolean(onchainEnv.zerodevRpc && onchainEnv.agentOwnerPrivateKey && isOnchainConfigured())
+}
+
+/** True when the on-chain labor market is available. */
+export function isLaborMarketConfigured(): boolean {
+  return Boolean(onchainEnv.laborMarketAddress && isAgentAccountConfigured())
 }
 
 export const REGISTRY_ABI = [
@@ -72,6 +78,33 @@ export const USDC_ABI = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] },
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }] },
 ] as const
+
+export const LABOR_MARKET_ABI = [
+  { type: 'function', name: 'postJob', stateMutability: 'nonpayable', inputs: [{ name: 'bounty', type: 'uint256' }, { name: 'minScore', type: 'uint256' }, { name: 'specHash', type: 'bytes32' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'acceptJob', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'submitWork', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }, { name: 'resultHash', type: 'bytes32' }], outputs: [] },
+  { type: 'function', name: 'approveJob', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'cancelJob', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'jobCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  {
+    type: 'function',
+    name: 'jobs',
+    stateMutability: 'view',
+    inputs: [{ name: 'jobId', type: 'uint256' }],
+    outputs: [
+      { name: 'requester', type: 'address' },
+      { name: 'worker', type: 'address' },
+      { name: 'bounty', type: 'uint256' },
+      { name: 'minScore', type: 'uint256' },
+      { name: 'status', type: 'uint8' },
+      { name: 'specHash', type: 'bytes32' },
+      { name: 'resultHash', type: 'bytes32' },
+    ],
+  },
+] as const
+
+export const JOB_STATUS = ['Open', 'Accepted', 'Submitted', 'Completed', 'Cancelled'] as const
+export type JobStatus = (typeof JOB_STATUS)[number]
 
 // EAS.attest((bytes32 schema, (address,uint64,bool,bytes32,bytes,uint256)))
 export const EAS_ABI = [

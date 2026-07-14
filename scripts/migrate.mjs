@@ -142,6 +142,15 @@ CREATE INDEX IF NOT EXISTS credit_scores_agent_id_idx ON credit_scores (agent_id
 ALTER TABLE credit_scores ADD COLUMN IF NOT EXISTS registry_tx_hash text;
 ALTER TABLE credit_scores ADD COLUMN IF NOT EXISTS attestation_tx_hash text;
 
+-- ── Labor market job metadata (on-chain spec is just a hash) ────────
+CREATE TABLE IF NOT EXISTS job_specs (
+  spec_hash          text PRIMARY KEY,
+  title              text NOT NULL,
+  description        text,
+  requester_agent_id text,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+
 -- ── Async task lifecycle ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_tasks (
   id         text PRIMARY KEY,
