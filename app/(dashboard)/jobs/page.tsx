@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck } from 'lucide-react'
+import Link from 'next/link'
+import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare } from 'lucide-react'
 import {
   getJobs,
   postJobAction,
@@ -33,6 +34,7 @@ type Template = {
   description: string | null
   priceUsd: number
   mine: boolean
+  creatorUserId: string
   creator: { agentName: string; score: number | null; rating: string }
   portfolio: {
     sampleOutputs: { taskId: string; preview: string; quality: number | null }[]
@@ -510,12 +512,20 @@ function TemplateCard({
               Unpublish
             </button>
           ) : (
-            <button
-              onClick={() => setBuying((v) => !v)}
-              className="rounded bg-primary/15 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/25"
-            >
-              {template.priceUsd > 0 ? `Buy for $${template.priceUsd}` : 'Get free'}
-            </button>
+            <>
+              <button
+                onClick={() => setBuying((v) => !v)}
+                className="rounded bg-primary/15 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/25"
+              >
+                {template.priceUsd > 0 ? `Buy for $${template.priceUsd}` : 'Get free'}
+              </button>
+              <Link
+                href={`/messages?with=${template.creatorUserId}`}
+                className="inline-flex items-center justify-center gap-1.5 rounded bg-secondary px-3 py-1 text-xs font-medium hover:bg-secondary/70"
+              >
+                <MessageSquare className="size-3.5" /> Message
+              </Link>
+            </>
           )}
         </div>
       </div>

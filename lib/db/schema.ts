@@ -46,6 +46,40 @@ export const verification = pgTable('verification', {
 })
 
 /**
+ * dm_threads / dm_messages — direct messages between two platform users.
+ * One thread per unordered pair (userA, userB); userA is always the
+ * lexicographically smaller id so a pair maps to exactly one thread.
+ */
+export const dmThread = pgTable('dm_threads', {
+  id: text('id').primaryKey(),
+  userAId: text('user_a_id').notNull(),
+  userBId: text('user_b_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const dmMessage = pgTable('dm_messages', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull(),
+  senderId: text('sender_id').notNull(),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * platform_events — a lightweight, append-only feed of notable cross-user
+ * activity (job posted/completed, template published/bought, verified task
+ * settled) so the marketplace feels alive. Purely additive/read-only from
+ * the app's perspective; existing tables remain the source of truth.
+ */
+export const platformEvent = pgTable('platform_events', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(), // JOB_POSTED | JOB_COMPLETED | TEMPLATE_PUBLISHED | TEMPLATE_PURCHASED | VERIFIED_TASK_SETTLED
+  summary: text('summary').notNull(), // pre-rendered human-readable line, no join needed to display
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * user_api_keys — BYOK (bring your own key).
  * Each user's Anthropic key, AES-256-GCM encrypted at rest; their agent runs
  * bill their own account. Never returned to the client, never logged.

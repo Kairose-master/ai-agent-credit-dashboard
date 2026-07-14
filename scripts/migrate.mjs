@@ -76,6 +76,35 @@ BEGIN
   END LOOP;
 END $$;
 
+-- ── Direct messages ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS dm_threads (
+  id          text PRIMARY KEY,
+  user_a_id   text NOT NULL,
+  user_b_id   text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS dm_threads_user_a_idx ON dm_threads (user_a_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS dm_threads_user_b_idx ON dm_threads (user_b_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS dm_messages (
+  id         text PRIMARY KEY,
+  thread_id  text NOT NULL,
+  sender_id  text NOT NULL,
+  body       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS dm_messages_thread_idx ON dm_messages (thread_id, created_at ASC);
+
+-- ── Platform-wide activity feed ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS platform_events (
+  id         text PRIMARY KEY,
+  kind       text NOT NULL,
+  summary    text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS platform_events_created_idx ON platform_events (created_at DESC);
+
 -- ── BYOK user API keys (encrypted at rest) ──────────────────────────
 CREATE TABLE IF NOT EXISTS user_api_keys (
   user_id           text PRIMARY KEY,

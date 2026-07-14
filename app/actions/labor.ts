@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { asActionError } from '@/lib/action-error'
+import { logPlatformEvent } from '@/lib/platform-feed'
 
 async function requireUser() {
   const session = await getSession()
@@ -100,6 +101,7 @@ export async function postJobAction(input: {
     const { postJob } = await import('@/lib/onchain/labor')
     const txHash = await postJob(input.requesterAgentId, input.bountyUsd, Math.round(input.minScore), specHash)
 
+    await logPlatformEvent('JOB_POSTED', `${ag.name} posted "${input.title}" — $${input.bountyUsd.toLocaleString()} bounty`)
     revalidatePath('/jobs')
     return { txHash }
   } catch (error) {
@@ -175,6 +177,7 @@ export async function approveJobAction(requesterAgentId: string, jobId: number) 
         detail: { jobId, bounty: job.bounty, txHash, onchain: true },
       })
       await recalculateCredit(workerAgent.id)
+      await logPlatformEvent('JOB_COMPLETED', `${workerAgent.name} completed job #${jobId} — $${job.bounty.toLocaleString()}`)
     }
 
     revalidatePath('/jobs')

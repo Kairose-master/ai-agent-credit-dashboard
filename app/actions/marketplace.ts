@@ -9,6 +9,7 @@ import { nanoid } from 'nanoid'
 import { randomBytes } from 'node:crypto'
 import { enforceSpendingPolicy } from '@/lib/treasury-policy'
 import { asActionError } from '@/lib/action-error'
+import { logPlatformEvent } from '@/lib/platform-feed'
 
 async function requireUser() {
   const session = await getSession()
@@ -50,6 +51,7 @@ export async function publishTemplate(input: {
     customInstructions: input.customInstructions.trim(),
     priceUsd: input.priceUsd.toString(),
   })
+  await logPlatformEvent('TEMPLATE_PUBLISHED', `New template "${input.name.trim()}" listed for $${input.priceUsd.toLocaleString()}`)
   revalidatePath('/jobs')
   return { id }
 }
@@ -97,6 +99,7 @@ export async function getTemplates() {
         description: t.description,
         priceUsd: parseFloat(t.priceUsd),
         mine: t.creatorUserId === userId,
+        creatorUserId: t.creatorUserId,
         creator: {
           agentName: exemplar?.name ?? 'Unknown',
           score: exemplar ? Math.round(parseFloat(exemplar.creditScore)) : null,
@@ -199,6 +202,13 @@ export async function purchaseTemplate(templateId: string, payingAgentId: string
     priceUsd: price.toString(),
     txHash,
   })
+
+  await logPlatformEvent(
+    'TEMPLATE_PURCHASED',
+    price > 0
+      ? `"${tpl.name}" was purchased for $${price.toLocaleString()}`
+      : `"${tpl.name}" was cloned`,
+  )
 
   revalidatePath('/jobs')
   revalidatePath('/')

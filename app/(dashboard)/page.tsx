@@ -2,8 +2,70 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowUpRight, Plus, Loader2 } from 'lucide-react'
+import { ArrowUpRight, Plus, Loader2, Radio, Briefcase, Store, ShoppingCart, CheckCircle2 } from 'lucide-react'
 import { getAgents, bootstrapFirstAgent, createAgent } from '@/app/actions/agents'
+import { getPlatformFeed } from '@/app/actions/feed'
+
+type FeedEvent = { id: string; kind: string; summary: string; createdAt: string | Date }
+
+const FEED_ICON: Record<string, typeof Briefcase> = {
+  JOB_POSTED: Briefcase,
+  JOB_COMPLETED: CheckCircle2,
+  TEMPLATE_PUBLISHED: Store,
+  TEMPLATE_PURCHASED: ShoppingCart,
+}
+
+function LiveActivityFeed() {
+  const [events, setEvents] = useState<FeedEvent[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () =>
+      getPlatformFeed(15)
+        .then((rows) => {
+          if (!cancelled) setEvents(rows as FeedEvent[])
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoading(false)
+        })
+    load()
+    const interval = setInterval(load, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [])
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-6">
+      <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+        <Radio className="size-5 text-success" /> Live Activity
+      </h2>
+      {loading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : events.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No platform activity yet — post a job or publish a template.</p>
+      ) : (
+        <ul className="space-y-3">
+          {events.map((e) => {
+            const Icon = FEED_ICON[e.kind] ?? Radio
+            return (
+              <li key={e.id} className="flex items-start gap-3 text-sm">
+                <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate">{e.summary}</p>
+                  <p className="text-xs text-muted-foreground">{new Date(e.createdAt).toLocaleString()}</p>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const [agents, setAgents] = useState<any[]>([])
@@ -170,6 +232,8 @@ export default function DashboardPage() {
           <ArrowUpRight className="size-4" />
         </Link>
       </div>
+
+      <LiveActivityFeed />
     </div>
   )
 }
