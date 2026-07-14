@@ -1,10 +1,11 @@
 import { db } from '@/lib/db'
-import { agentEvent, agentTask, verifiableTask } from '@/lib/db/schema'
+import { agentEvent, agentTask, verifiableTask, jobSpec } from '@/lib/db/schema'
 import { recalculateCredit } from '@/lib/credit-engine'
 import { eq, and } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { extractAnswer } from '@/lib/verifiable/problems'
 import { resolveCallbackAuth } from '@/lib/webhook'
+import { logPlatformEvent } from '@/lib/platform-feed'
 
 // Verified-task settlement runs two UserOps; allow time for bundler inclusion.
 export const maxDuration = 300
@@ -73,6 +74,10 @@ export async function POST(request: Request) {
 
     // Verified task? Grade against the hidden answer and settle the escrow.
     await settleVerifiedTask(taskId, agentId, String(body?.output ?? ''))
+
+    // Labor Market job? Submit the REAL output on-chain — no more manual
+    // "Submit work" click, no more placeholder text.
+    await settleLaborMarketJob(taskId, String(body?.output ?? ''))
 
     const credit = await recalculateCredit(agentId)
 
@@ -203,5 +208,26 @@ async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, ou
         updatedAt: new Date(),
       })
       .where(eq(verifiableTask.id, row.id))
+  }
+}
+
+/**
+ * If this agent run was a Labor Market worker actually doing an accepted
+ * job: submit the REAL output on-chain now, automatically. The requester
+ * then reviews genuine work, not a placeholder — this is what makes
+ * "the agent did the job" true instead of a UI button pretending it did.
+ */
+async function settleLaborMarketJob(agentTaskId: string, output: string): Promise<void> {
+  const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, agentTaskId))
+  if (!spec || !spec.workerAgentId || spec.onchainJobId === null) return
+
+  try {
+    const { keccak256, toHex } = await import('viem')
+    const { submitWork } = await import('@/lib/onchain/labor')
+    const resultHash = keccak256(toHex(output || '(empty output)'))
+    await submitWork(spec.workerAgentId, spec.onchainJobId, resultHash)
+    await logPlatformEvent('JOB_SUBMITTED', `"${spec.title}" — worker submitted real output for review`)
+  } catch (error) {
+    console.error('[runtime/callback] labor market auto-submit failed:', error)
   }
 }

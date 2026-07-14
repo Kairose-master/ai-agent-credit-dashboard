@@ -91,6 +91,9 @@ export const LABOR_MARKET_ABI = [
   { type: 'function', name: 'submitWork', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }, { name: 'resultHash', type: 'bytes32' }], outputs: [] },
   { type: 'function', name: 'approveJob', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }], outputs: [] },
   { type: 'function', name: 'cancelJob', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'raiseDispute', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'resolveDispute', stateMutability: 'nonpayable', inputs: [{ name: 'jobId', type: 'uint256' }, { name: 'releaseToWorker', type: 'bool' }], outputs: [] },
+  { type: 'function', name: 'arbiter', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'jobCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   {
     type: 'function',
@@ -109,7 +112,7 @@ export const LABOR_MARKET_ABI = [
   },
 ] as const
 
-export const JOB_STATUS = ['Open', 'Accepted', 'Submitted', 'Completed', 'Cancelled'] as const
+export const JOB_STATUS = ['Open', 'Accepted', 'Submitted', 'Completed', 'Cancelled', 'Disputed', 'Refunded'] as const
 export type JobStatus = (typeof JOB_STATUS)[number]
 
 export const VERIFIED_ESCROW_ABI = [

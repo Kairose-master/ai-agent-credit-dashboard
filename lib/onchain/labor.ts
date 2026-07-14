@@ -4,7 +4,7 @@
  */
 import { encodeFunctionData, parseUnits, type Address, type Hex } from 'viem'
 import { LABOR_MARKET_ABI, USDC_ABI, USDC_DECIMALS, JOB_STATUS, onchainEnv } from './config'
-import { publicClient } from './clients'
+import { publicClient, oracleWallet } from './clients'
 import { getAgentKernel, sendAgentCall } from './account'
 
 const toUnits = (usd: number) => parseUnits(usd.toFixed(USDC_DECIMALS), USDC_DECIMALS)
@@ -51,7 +51,7 @@ export async function postJob(
   return receipt.receipt.transactionHash as Hex
 }
 
-function marketCall(fn: 'acceptJob' | 'approveJob' | 'cancelJob', jobId: number) {
+function marketCall(fn: 'acceptJob' | 'approveJob' | 'cancelJob' | 'raiseDispute', jobId: number) {
   return encodeFunctionData({ abi: LABOR_MARKET_ABI, functionName: fn, args: [BigInt(jobId)] })
 }
 
@@ -82,6 +82,27 @@ export async function cancelJob(requesterAgentId: string, jobId: number): Promis
   return sendAgentCall(requesterAgentId, {
     to: onchainEnv.laborMarketAddress as Address,
     data: marketCall('cancelJob', jobId),
+  })
+}
+
+/** Requester disputes a submission instead of approving it — locks the
+ *  escrow until the arbiter resolves it. */
+export async function raiseDispute(requesterAgentId: string, jobId: number): Promise<Hex> {
+  return sendAgentCall(requesterAgentId, {
+    to: onchainEnv.laborMarketAddress as Address,
+    data: marketCall('raiseDispute', jobId),
+  })
+}
+
+/** Arbiter (the oracle EOA, independent of both parties) settles a disputed
+ *  job. Signed directly by the oracle wallet, not an agent smart account. */
+export async function resolveDispute(jobId: number, releaseToWorker: boolean): Promise<Hex> {
+  const wallet = oracleWallet()
+  return wallet.writeContract({
+    address: onchainEnv.laborMarketAddress as Address,
+    abi: LABOR_MARKET_ABI,
+    functionName: 'resolveDispute',
+    args: [BigInt(jobId), releaseToWorker],
   })
 }
 

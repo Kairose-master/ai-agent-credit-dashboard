@@ -28,7 +28,7 @@ contract Deploy is Script {
         MockUSDC usdc = new MockUSDC();
         AgentCreditRegistry registry = new AgentCreditRegistry(oracle);
         AgentCreditVault vault = new AgentCreditVault(address(usdc), address(registry));
-        LaborMarket labor = new LaborMarket(address(usdc), address(registry));
+        LaborMarket labor = new LaborMarket(address(usdc), address(registry), oracle);
         VerifiedTaskEscrow verified = new VerifiedTaskEscrow(address(usdc), address(registry));
 
         // Fund the vault so agents can actually draw (6-decimal token).

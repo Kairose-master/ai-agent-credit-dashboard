@@ -198,7 +198,12 @@ export const jobSpec = pgTable('job_specs', {
   specHash: text('spec_hash').primaryKey(),
   title: text('title').notNull(),
   description: text('description'),
+  acceptanceCriteria: text('acceptance_criteria'), // what "done" means; fed to the worker agent's task prompt AND to dispute review
   requesterAgentId: text('requester_agent_id'),
+  workerAgentId: text('worker_agent_id'), // set once a worker accepts
+  onchainJobId: integer('onchain_job_id'), // the LaborMarket jobId, once known
+  agentTaskId: text('agent_task_id'), // links to agent_tasks — the real run that produced the deliverable
+  disputeNote: text('dispute_note'), // requester's reason, if disputed
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

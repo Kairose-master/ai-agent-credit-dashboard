@@ -20,16 +20,24 @@ interface ICreditRegistry {
 ///
 ///         Money and state live here; human-readable job specs live off-chain,
 ///         referenced by specHash.
+///
+///         If the requester disputes a submission instead of approving it,
+///         the job locks in Disputed status until `arbiter` — a fixed address
+///         set at deploy time, independent of both parties — calls
+///         resolveDispute() to force a settlement either way.
 contract LaborMarket {
     IERC20 public immutable usdc;
     ICreditRegistry public immutable registry;
+    address public immutable arbiter;
 
     enum Status {
         Open,
         Accepted,
         Submitted,
         Completed,
-        Cancelled
+        Cancelled,
+        Disputed,
+        Refunded
     }
 
     struct Job {
@@ -50,16 +58,20 @@ contract LaborMarket {
     event WorkSubmitted(uint256 indexed jobId, bytes32 resultHash);
     event JobCompleted(uint256 indexed jobId, address indexed worker, address indexed requester, uint256 bounty);
     event JobCancelled(uint256 indexed jobId);
+    event JobDisputed(uint256 indexed jobId, address indexed raisedBy);
+    event DisputeResolved(uint256 indexed jobId, bool releasedToWorker);
 
     error WrongStatus();
     error NotRequester();
     error NotWorker();
+    error NotArbiter();
     error ScoreTooLow(uint256 have, uint256 need);
     error SelfWork();
 
-    constructor(address _usdc, address _registry) {
+    constructor(address _usdc, address _registry, address _arbiter) {
         usdc = IERC20(_usdc);
         registry = ICreditRegistry(_registry);
+        arbiter = _arbiter;
     }
 
     /// @notice Post a job, escrowing `bounty` USDC. Requester must approve
@@ -116,6 +128,37 @@ contract LaborMarket {
         job.status = Status.Completed;
         require(usdc.transfer(job.worker, job.bounty), "release: transfer");
         emit JobCompleted(jobId, job.worker, job.requester, job.bounty);
+    }
+
+    /// @notice Requester disputes a submission instead of approving it. Locks
+    ///         the escrow until the arbiter resolves it — the requester alone
+    ///         can no longer unilaterally withhold payment forever.
+    function raiseDispute(uint256 jobId) external {
+        Job storage job = jobs[jobId];
+        if (job.status != Status.Submitted) revert WrongStatus();
+        if (msg.sender != job.requester) revert NotRequester();
+
+        job.status = Status.Disputed;
+        emit JobDisputed(jobId, msg.sender);
+    }
+
+    /// @notice Arbiter (independent of requester and worker) settles a
+    ///         disputed job by reviewing the deliverable against the spec:
+    ///         true releases escrow to the worker, false refunds the requester.
+    function resolveDispute(uint256 jobId, bool releaseToWorker) external {
+        Job storage job = jobs[jobId];
+        if (job.status != Status.Disputed) revert WrongStatus();
+        if (msg.sender != arbiter) revert NotArbiter();
+
+        if (releaseToWorker) {
+            job.status = Status.Completed;
+            require(usdc.transfer(job.worker, job.bounty), "release: transfer");
+            emit JobCompleted(jobId, job.worker, job.requester, job.bounty);
+        } else {
+            job.status = Status.Refunded;
+            require(usdc.transfer(job.requester, job.bounty), "refund: transfer");
+        }
+        emit DisputeResolved(jobId, releaseToWorker);
     }
 
     /// @notice Requester cancels an unaccepted job and reclaims the escrow.

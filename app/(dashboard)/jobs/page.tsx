@@ -1,14 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare } from 'lucide-react'
+import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare, Bot, Flag } from 'lucide-react'
 import {
   getJobs,
   postJobAction,
   acceptJobAction,
-  submitWorkAction,
   approveJobAction,
+  raiseDisputeAction,
 } from '@/app/actions/labor'
 import { getTemplates, publishTemplate, unpublishTemplate, purchaseTemplate } from '@/app/actions/marketplace'
 
@@ -18,12 +18,16 @@ type Job = {
   worker: string
   bounty: number
   minScore: number
-  status: 'Open' | 'Accepted' | 'Submitted' | 'Completed' | 'Cancelled'
+  status: 'Open' | 'Accepted' | 'Submitted' | 'Completed' | 'Cancelled' | 'Disputed' | 'Refunded'
   title: string
   description: string | null
+  acceptanceCriteria: string | null
   requesterName: string | null
   workerName: string | null
   mine: boolean
+  workerRunStatus: 'running' | 'processing' | 'completed' | 'failed' | null
+  output: string | null
+  disputeNote: string | null
 }
 
 type MyAgent = { id: string; name: string; provisioned: boolean }
@@ -48,6 +52,8 @@ const STATUS_STYLE: Record<Job['status'], string> = {
   Submitted: 'bg-chart-2/15 text-chart-2',
   Completed: 'bg-success/15 text-success',
   Cancelled: 'bg-muted text-muted-foreground',
+  Disputed: 'bg-destructive/15 text-destructive',
+  Refunded: 'bg-muted text-muted-foreground',
 }
 
 export default function JobsPage() {
@@ -64,9 +70,12 @@ export default function JobsPage() {
   // post job form
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState('')
   const [bounty, setBounty] = useState('')
   const [minScore, setMinScore] = useState('600')
   const [requesterId, setRequesterId] = useState('')
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const refresh = useCallback(async () => {
     const [jobData, templateData] = await Promise.all([getJobs(), getTemplates()])
@@ -82,6 +91,15 @@ export default function JobsPage() {
     refresh()
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
+  }, [refresh])
+
+  // Poll so a job flips from "agent is working" to "Submitted" (with real
+  // output) automatically, without the user having to click anything.
+  useEffect(() => {
+    pollRef.current = setInterval(() => refresh().catch(() => {}), 4000)
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
   }, [refresh])
 
   const provisioned = myAgents.filter((a) => a.provisioned)
@@ -105,12 +123,25 @@ export default function JobsPage() {
         requesterAgentId: requesterId,
         title,
         description,
+        acceptanceCriteria,
         bountyUsd: parseFloat(bounty),
         minScore: parseInt(minScore || '0', 10),
       }).then(() => {
         setTitle('')
         setDescription('')
+        setAcceptanceCriteria('')
         setBounty('')
+      }),
+    )
+
+  const [disputing, setDisputing] = useState<number | null>(null)
+  const [disputeNote, setDisputeNote] = useState('')
+
+  const submitDispute = (job: Job) =>
+    run(job.id, () =>
+      raiseDisputeAction(myAgents.find((a) => a.name === job.requesterName)!.id, job.id, disputeNote).then(() => {
+        setDisputing(null)
+        setDisputeNote('')
       }),
     )
 
@@ -141,8 +172,9 @@ export default function JobsPage() {
       <div>
         <h2 className="text-xl font-bold mb-1">Paid Jobs</h2>
         <p className="text-sm text-muted-foreground mb-4">
-          USDC escrow; creditworthy agents accept, deliver, and get paid — completion raises the
-          worker&apos;s credit score.
+          USDC escrow; a creditworthy agent accepts and its real runtime does the work — completion
+          raises the worker&apos;s credit score. Disagreements go to independent review, not the
+          requester&apos;s word alone.
         </p>
 
         {!configured ? (
@@ -183,9 +215,16 @@ export default function JobsPage() {
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Description"
+                    placeholder="Description — what the worker agent should actually do"
                     rows={2}
                     className="md:col-span-2 rounded-md border border-border bg-background p-3 text-sm"
+                  />
+                  <textarea
+                    value={acceptanceCriteria}
+                    onChange={(e) => setAcceptanceCriteria(e.target.value)}
+                    placeholder={'Acceptance criteria — specific enough to grade, e.g.:\n- Must include X\n- Must be under 200 words\n- Must cite at least one source'}
+                    rows={3}
+                    className="md:col-span-2 rounded-md border border-border bg-background p-3 text-sm font-mono"
                   />
                   <input
                     value={bounty}
@@ -205,7 +244,7 @@ export default function JobsPage() {
                   />
                   <button
                     onClick={post}
-                    disabled={busy === 'post' || !title.trim() || !bounty}
+                    disabled={busy === 'post' || !title.trim() || !bounty || acceptanceCriteria.trim().length < 10}
                     className="md:col-span-2 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                   >
                     {busy === 'post' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
@@ -222,7 +261,7 @@ export default function JobsPage() {
               {jobs.map((job) => (
                 <div key={job.id} className="rounded-lg border border-border p-4">
                   <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{job.title}</span>
                         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[job.status]}`}>
@@ -230,11 +269,39 @@ export default function JobsPage() {
                         </span>
                       </div>
                       {job.description && <p className="text-sm text-muted-foreground mt-1">{job.description}</p>}
+                      {job.acceptanceCriteria && (
+                        <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">
+                          <span className="font-medium">Acceptance criteria:</span> {job.acceptanceCriteria}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground mt-2 font-mono">
                         #{job.id} · bounty ${job.bounty.toLocaleString()} · min score {job.minScore} ·
                         by {job.requesterName ?? '—'}
                         {job.workerName && ` · worker ${job.workerName}`}
                       </p>
+
+                      {job.status === 'Accepted' && (job.workerRunStatus === 'running' || job.workerRunStatus === 'processing') && (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+                          <Bot className="size-3.5 animate-pulse" /> Agent is working on this…
+                        </p>
+                      )}
+                      {job.status === 'Accepted' && job.workerRunStatus === 'failed' && (
+                        <p className="mt-2 text-xs text-destructive">The worker&apos;s run failed — see its task log.</p>
+                      )}
+
+                      {job.output && (job.status === 'Submitted' || job.status === 'Disputed' || job.status === 'Completed') && (
+                        <div className="mt-2 rounded-md bg-secondary/40 p-3 text-xs">
+                          <p className="font-medium mb-1 flex items-center gap-1.5">
+                            <Bot className="size-3.5" /> Real submitted output:
+                          </p>
+                          <p className="whitespace-pre-wrap text-muted-foreground">{job.output}</p>
+                        </div>
+                      )}
+                      {job.status === 'Disputed' && job.disputeNote && (
+                        <p className="mt-2 text-xs text-destructive">
+                          <span className="font-medium">Dispute reason:</span> {job.disputeNote} — awaiting independent review.
+                        </p>
+                      )}
                     </div>
                     <div className="flex shrink-0 flex-col gap-2">
                       {job.status === 'Open' && workerFor(job) && (
@@ -246,32 +313,47 @@ export default function JobsPage() {
                           {busy === job.id ? '…' : 'Accept'}
                         </button>
                       )}
-                      {job.status === 'Accepted' && workerFor(job) && (
-                        <button
-                          onClick={() =>
-                            run(job.id, () => submitWorkAction(workerFor(job)!, job.id, `Delivered job ${job.id}`))
-                          }
-                          disabled={busy === job.id}
-                          className="rounded bg-chart-2/15 px-3 py-1 text-xs font-medium text-chart-2 hover:bg-chart-2/25 disabled:opacity-50"
-                        >
-                          {busy === job.id ? '…' : 'Submit work'}
-                        </button>
-                      )}
                       {job.status === 'Submitted' && job.mine && (
-                        <button
-                          onClick={() =>
-                            run(job.id, () =>
-                              approveJobAction(myAgents.find((a) => a.name === job.requesterName)!.id, job.id),
-                            )
-                          }
-                          disabled={busy === job.id}
-                          className="rounded bg-success/15 px-3 py-1 text-xs font-medium text-success hover:bg-success/25 disabled:opacity-50"
-                        >
-                          {busy === job.id ? '…' : 'Approve & pay'}
-                        </button>
+                        <>
+                          <button
+                            onClick={() =>
+                              run(job.id, () =>
+                                approveJobAction(myAgents.find((a) => a.name === job.requesterName)!.id, job.id),
+                              )
+                            }
+                            disabled={busy === job.id}
+                            className="rounded bg-success/15 px-3 py-1 text-xs font-medium text-success hover:bg-success/25 disabled:opacity-50"
+                          >
+                            {busy === job.id ? '…' : 'Approve & pay'}
+                          </button>
+                          <button
+                            onClick={() => setDisputing(disputing === job.id ? null : job.id)}
+                            className="inline-flex items-center justify-center gap-1.5 rounded bg-destructive/15 px-3 py-1 text-xs font-medium text-destructive hover:bg-destructive/25"
+                          >
+                            <Flag className="size-3.5" /> Dispute
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
+
+                  {disputing === job.id && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                      <input
+                        value={disputeNote}
+                        onChange={(e) => setDisputeNote(e.target.value)}
+                        placeholder="What's wrong with the submission?"
+                        className="h-9 flex-1 min-w-[200px] rounded-md border border-border bg-background px-3 text-sm"
+                      />
+                      <button
+                        onClick={() => submitDispute(job)}
+                        disabled={busy === job.id || !disputeNote.trim()}
+                        className="rounded bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-50"
+                      >
+                        {busy === job.id ? '…' : 'Submit dispute'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
