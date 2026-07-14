@@ -237,7 +237,7 @@ export default function JobsPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col gap-2">
-                      {job.status === 'Open' && !job.mine && workerFor(job) && (
+                      {job.status === 'Open' && workerFor(job) && (
                         <button
                           onClick={() => run(job.id, () => acceptJobAction(workerFor(job)!, job.id))}
                           disabled={busy === job.id}
@@ -246,7 +246,7 @@ export default function JobsPage() {
                           {busy === job.id ? '…' : 'Accept'}
                         </button>
                       )}
-                      {job.status === 'Accepted' && !job.mine && (
+                      {job.status === 'Accepted' && workerFor(job) && (
                         <button
                           onClick={() =>
                             run(job.id, () => submitWorkAction(workerFor(job)!, job.id, `Delivered job ${job.id}`))
