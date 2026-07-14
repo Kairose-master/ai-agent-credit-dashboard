@@ -352,24 +352,33 @@ export default function ProfilePage() {
               </span>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            <div>
-              <p className="text-3xl font-bold font-mono">{credit.score}</p>
-              <p className="text-xs text-muted-foreground mt-1">Credit Score</p>
+          {credit.rating === 'unrated' ? (
+            <div className="rounded-lg border border-dashed border-border px-6 py-4 text-center">
+              <p className="text-sm font-medium">No credit history yet</p>
+              <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                Run a task below (or draw and repay credit) to generate the agent&apos;s first score.
+              </p>
             </div>
-            <div>
-              <p className="text-3xl font-bold">{credit.rating}</p>
-              <p className="text-xs text-muted-foreground mt-1">Credit Rating</p>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+              <div>
+                <p className="text-3xl font-bold font-mono">{credit.score}</p>
+                <p className="text-xs text-muted-foreground mt-1">Credit Score</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold">{credit.rating}</p>
+                <p className="text-xs text-muted-foreground mt-1">Credit Rating</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold font-mono">${credit.creditLimit.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground mt-1">Credit Limit</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold">{credit.riskLevel}</p>
+                <p className="text-xs text-muted-foreground mt-1">Risk Level</p>
+              </div>
             </div>
-            <div>
-              <p className="text-3xl font-bold font-mono">${credit.creditLimit.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground mt-1">Credit Limit</p>
-            </div>
-            <div>
-              <p className="text-3xl font-bold">{credit.riskLevel}</p>
-              <p className="text-xs text-muted-foreground mt-1">Risk Level</p>
-            </div>
-          </div>
+          )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-4 border-t border-border text-sm">
           <div>

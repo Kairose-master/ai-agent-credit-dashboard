@@ -27,17 +27,23 @@ export default function AgentsPage() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">Agent Marketplace</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {agents.map((agent) => (
-          <div key={agent.id} className="p-4 border border-border rounded-lg">
-            <h3 className="font-semibold">{agent.name}</h3>
-            <p className="text-sm text-muted-foreground mt-1">{agent.description}</p>
-            <div className="mt-4 space-y-1">
-              <p className="text-sm"><span className="text-muted-foreground">Score:</span> {Math.round(parseFloat(agent.creditScore))}</p>
-              <p className="text-sm"><span className="text-muted-foreground">Rating:</span> {agent.riskRating}</p>
-              <p className="text-sm font-mono text-xs truncate"><span className="text-muted-foreground">Wallet:</span> {agent.walletAddress?.substring(0, 12)}...</p>
+        {agents.map((agent) => {
+          const unrated = agent.creditRating === 'unrated'
+          return (
+            <div key={agent.id} className="p-4 border border-border rounded-lg">
+              <h3 className="font-semibold">{agent.name}</h3>
+              <p className="text-sm text-muted-foreground mt-1">{agent.description}</p>
+              <div className="mt-4 space-y-1">
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Score:</span>{' '}
+                  {unrated ? 'No history yet' : Math.round(parseFloat(agent.creditScore))}
+                </p>
+                <p className="text-sm"><span className="text-muted-foreground">Rating:</span> {agent.riskRating}</p>
+                <p className="text-sm font-mono text-xs truncate"><span className="text-muted-foreground">Wallet:</span> {agent.walletAddress?.substring(0, 12)}...</p>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

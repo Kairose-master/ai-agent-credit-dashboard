@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight } from 'lucide-react'
-import { getAgents } from '@/app/actions/agents'
-import { seedDemoData } from '@/app/actions/seed'
+import { getAgents, bootstrapFirstAgent } from '@/app/actions/agents'
 
 export default function DashboardPage() {
   const [agents, setAgents] = useState<any[]>([])
@@ -17,8 +16,8 @@ export default function DashboardPage() {
         const me = await fetch('/api/me')
         if (me.ok) setUser((await me.json()).user)
 
-        // Seed demo data
-        await seedDemoData().catch(() => {})
+        // Give first-time users a single cold-start agent (score 0, unrated)
+        await bootstrapFirstAgent().catch(() => {})
 
         // Load agents
         const data = await getAgents()
@@ -50,18 +49,25 @@ export default function DashboardPage() {
           <p className="text-muted-foreground">No agents found. Create one to get started.</p>
         ) : (
           <ul className="space-y-3">
-            {agents.map((agent) => (
-              <li key={agent.id} className="flex items-center justify-between p-3 border border-border rounded">
-                <div>
-                  <p className="font-medium">{agent.name}</p>
-                  <p className="text-sm text-muted-foreground">{agent.walletAddress?.substring(0, 12)}...</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-mono font-medium">{Math.round(parseFloat(agent.creditScore))}</p>
-                  <p className="text-xs text-muted-foreground">{agent.riskRating}</p>
-                </div>
-              </li>
-            ))}
+            {agents.map((agent) => {
+              const unrated = agent.creditRating === 'unrated'
+              return (
+                <li key={agent.id} className="flex items-center justify-between p-3 border border-border rounded">
+                  <div>
+                    <p className="font-medium">{agent.name}</p>
+                    <p className="text-sm text-muted-foreground">{agent.walletAddress?.substring(0, 12)}...</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono font-medium">
+                      {unrated ? '—' : Math.round(parseFloat(agent.creditScore))}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {unrated ? 'No history yet' : agent.riskRating}
+                    </p>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>

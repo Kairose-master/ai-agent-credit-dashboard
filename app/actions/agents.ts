@@ -6,6 +6,7 @@ import { agent, creditLine, creditAssessment, riskMetric } from '@/lib/db/schema
 import { eq, desc } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
+import { randomBytes } from 'node:crypto'
 
 async function getUserId() {
   const session = await getSession()
@@ -32,6 +33,40 @@ export async function getAgentById(agentId: string) {
     throw new Error('Agent not found or unauthorized')
   }
   return result[0]
+}
+
+/**
+ * Bootstraps a single agent on first login — with a genuine cold-start
+ * state (score 0, rating 'unrated'), not seeded placeholder numbers. The
+ * credit engine only assigns a real score once the agent has behavioral
+ * history (a task run, a repayment, a completed job). The wallet address
+ * is just an internal identifier until the owner provisions a real
+ * on-chain smart account from the profile page.
+ */
+export async function bootstrapFirstAgent() {
+  const userId = await getUserId()
+  const existing = await db.select().from(agent).where(eq(agent.userId, userId))
+  if (existing.length > 0) return { created: false }
+
+  const agentId = nanoid()
+  await db.insert(agent).values({
+    id: agentId,
+    userId,
+    name: 'My Research Agent',
+    walletAddress: `0x${randomBytes(20).toString('hex')}`,
+    description: 'Provision an on-chain smart account and run your first task to start building credit.',
+    modelVersion: 'claude-sonnet-5',
+    creditScore: '0',
+    creditRating: 'unrated',
+    riskLevel: 'UNKNOWN',
+    riskRating: 'unrated',
+    totalCreditLine: '0',
+    availableCredit: '0',
+  })
+
+  revalidatePath('/')
+  revalidatePath('/agents')
+  return { created: true, id: agentId }
 }
 
 export async function createAgent(data: {
