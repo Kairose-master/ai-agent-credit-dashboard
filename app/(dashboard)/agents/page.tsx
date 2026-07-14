@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { getAgents } from '@/app/actions/agents'
 
 export default function AgentsPage() {
@@ -30,7 +31,11 @@ export default function AgentsPage() {
         {agents.map((agent) => {
           const unrated = agent.creditRating === 'unrated'
           return (
-            <div key={agent.id} className="p-4 border border-border rounded-lg">
+            <Link
+              key={agent.id}
+              href={`/profile?agent=${agent.id}`}
+              className="p-4 border border-border rounded-lg hover:bg-secondary/50"
+            >
               <h3 className="font-semibold">{agent.name}</h3>
               <p className="text-sm text-muted-foreground mt-1">{agent.description}</p>
               <div className="mt-4 space-y-1">
@@ -41,7 +46,7 @@ export default function AgentsPage() {
                 <p className="text-sm"><span className="text-muted-foreground">Rating:</span> {agent.riskRating}</p>
                 <p className="text-sm font-mono text-xs truncate"><span className="text-muted-foreground">Wallet:</span> {agent.walletAddress?.substring(0, 12)}...</p>
               </div>
-            </div>
+            </Link>
           )
         })}
       </div>

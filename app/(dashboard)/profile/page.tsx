@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Wallet,
   CalendarDays,
@@ -19,6 +20,7 @@ import {
   Send,
   Copy,
   Coins,
+  ChevronsUpDown,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
@@ -129,7 +131,10 @@ type Treasury = {
 }
 
 export default function ProfilePage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [agentId, setAgentId] = useState<string | null>(null)
+  const [allAgents, setAllAgents] = useState<{ id: string; name: string }[]>([])
   const [profile, setProfile] = useState<AgentProfile | null>(null)
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [history, setHistory] = useState<CreditHistoryEntry[]>([])
@@ -213,9 +218,12 @@ export default function ProfilePage() {
     const init = async () => {
       try {
         const agents = await getAgents()
+        setAllAgents(agents.map((a: any) => ({ id: a.id, name: a.name })))
         if (agents.length > 0) {
-          setAgentId(agents[0].id)
-          await refresh(agents[0].id)
+          const requested = searchParams.get('agent')
+          const target = agents.find((a: any) => a.id === requested) ?? agents[0]
+          setAgentId(target.id)
+          await refresh(target.id)
         }
       } catch (error) {
         console.error('[v0] Error:', error)
@@ -227,7 +235,18 @@ export default function ProfilePage() {
     return () => {
       if (pollRef.current) clearTimeout(pollRef.current)
     }
-  }, [refresh])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresh, searchParams])
+
+  const switchAgent = async (id: string) => {
+    if (id === agentId) return
+    router.replace(`/profile?agent=${id}`, { scroll: false })
+    setAgentId(id)
+    setLoading(true)
+    setLastRun(null)
+    await refresh(id)
+    setLoading(false)
+  }
 
   const pollTask = useCallback(
     (id: string, taskId: string) => {
@@ -344,11 +363,29 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-2">Agent Credit Profile</h1>
-        <p className="text-muted-foreground">
-          Identity → Behavior → Reputation → Credit Score → Credit Capacity
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold mb-2">Agent Credit Profile</h1>
+          <p className="text-muted-foreground">
+            Identity → Behavior → Reputation → Credit Score → Credit Capacity
+          </p>
+        </div>
+        {allAgents.length > 1 && (
+          <div className="relative">
+            <select
+              value={agentId ?? ''}
+              onChange={(e) => switchAgent(e.target.value)}
+              className="h-10 appearance-none rounded-md border border-border bg-background pl-3 pr-9 text-sm font-medium"
+            >
+              {allAgents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          </div>
+        )}
       </div>
 
       {/* Credit profile banner */}
