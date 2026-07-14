@@ -66,6 +66,7 @@ export const agent = pgTable('agent', {
   description: text('description'),
   walletAddress: text('walletAddress').notNull().unique(),
   smartAccountAddress: text('smartAccountAddress'), // ERC-4337 Kernel account (Sepolia)
+  customInstructions: text('customInstructions'), // from a purchased/cloned agent template, if any
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
   creditScore: decimal('creditScore', { precision: 6, scale: 2 }).notNull().default('0'),
   creditRating: text('creditRating').default('unrated'),
@@ -117,6 +118,37 @@ export const agentTask = pgTable('agent_tasks', {
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * agent_templates — published agent "recipes" (custom instructions) other
+ * users can buy to spawn their own new agent from. Credit history never
+ * transfers: the spawned agent starts at a genuine cold start and earns its
+ * own score. The exemplarAgentId points at the creator's real agent, whose
+ * actual behavioral history (lib/db/schema agentEvent/verifiableTask/etc.)
+ * serves as the portfolio proof shown to buyers — no fabricated claims.
+ */
+export const agentTemplate = pgTable('agent_templates', {
+  id: text('id').primaryKey(),
+  creatorUserId: text('creator_user_id').notNull(),
+  exemplarAgentId: text('exemplar_agent_id').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  customInstructions: text('custom_instructions').notNull(),
+  priceUsd: decimal('price_usd', { precision: 18, scale: 2 }).notNull().default('0'),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** One purchase = one newly spawned agent for the buyer. */
+export const agentTemplatePurchase = pgTable('agent_template_purchases', {
+  id: text('id').primaryKey(),
+  templateId: text('template_id').notNull(),
+  buyerUserId: text('buyer_user_id').notNull(),
+  buyerAgentId: text('buyer_agent_id').notNull(),
+  priceUsd: decimal('price_usd', { precision: 18, scale: 2 }).notNull(),
+  txHash: text('tx_hash'), // null for free templates
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 /**

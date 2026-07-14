@@ -110,6 +110,7 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "modelVersion" text DEFAULT 'claude
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "creditRating" text DEFAULT 'unrated';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "riskLevel" text DEFAULT 'UNKNOWN';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "smartAccountAddress" text;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "customInstructions" text;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -150,6 +151,29 @@ CREATE TABLE IF NOT EXISTS credit_scores (
 CREATE INDEX IF NOT EXISTS credit_scores_agent_id_idx ON credit_scores (agent_id, created_at DESC);
 ALTER TABLE credit_scores ADD COLUMN IF NOT EXISTS registry_tx_hash text;
 ALTER TABLE credit_scores ADD COLUMN IF NOT EXISTS attestation_tx_hash text;
+
+-- ── Agent template marketplace (publish a recipe, buyers spawn clones) ──
+CREATE TABLE IF NOT EXISTS agent_templates (
+  id                  text PRIMARY KEY,
+  creator_user_id     text NOT NULL,
+  exemplar_agent_id   text NOT NULL,
+  name                text NOT NULL,
+  description         text,
+  custom_instructions text NOT NULL,
+  price_usd           numeric(18,2) NOT NULL DEFAULT 0,
+  active              boolean NOT NULL DEFAULT true,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_template_purchases (
+  id             text PRIMARY KEY,
+  template_id    text NOT NULL,
+  buyer_user_id  text NOT NULL,
+  buyer_agent_id text NOT NULL,
+  price_usd      numeric(18,2) NOT NULL,
+  tx_hash        text,
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
 
 -- ── Labor market job metadata (on-chain spec is just a hash) ────────
 CREATE TABLE IF NOT EXISTS job_specs (

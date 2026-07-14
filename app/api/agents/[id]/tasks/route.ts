@@ -34,6 +34,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const taskId = `task-${nanoid(10)}`
 
+    // If this agent was spawned from a purchased/published template, its
+    // custom instructions steer every task it runs (not applied to verified
+    // tasks, which must stay uncontaminated for objective grading).
+    const effectiveTask = agent.customInstructions
+      ? `${agent.customInstructions}\n\n---\n\nTask: ${task}`
+      : task
+
     await db.insert(agentTask).values({
       id: taskId,
       userId: agent.userId,
@@ -45,7 +52,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const callbackUrl = `${new URL(request.url).origin}/api/runtime/callback`
 
     try {
-      await startAgentTask({ agentId: agent.id, taskId, task, callbackUrl, apiKey })
+      await startAgentTask({ agentId: agent.id, taskId, task: effectiveTask, callbackUrl, apiKey })
     } catch (error) {
       await db
         .update(agentTask)
