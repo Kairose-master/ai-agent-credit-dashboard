@@ -7,6 +7,7 @@ import { recalculateCredit } from '@/lib/credit-engine'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
+import { asActionError } from '@/lib/action-error'
 
 async function requireUser() {
   const session = await getSession()
@@ -79,27 +80,31 @@ export async function postJobAction(input: {
   if (!input.title.trim()) throw new Error('Title required')
   if (!Number.isFinite(input.bountyUsd) || input.bountyUsd <= 0) throw new Error('Bounty must be positive')
 
-  const { keccak256, toHex } = await import('viem')
-  const payload = JSON.stringify({
-    title: input.title,
-    description: input.description,
-    agent: input.requesterAgentId,
-    nonce: nanoid(),
-  })
-  const specHash = keccak256(toHex(payload))
+  try {
+    const { keccak256, toHex } = await import('viem')
+    const payload = JSON.stringify({
+      title: input.title,
+      description: input.description,
+      agent: input.requesterAgentId,
+      nonce: nanoid(),
+    })
+    const specHash = keccak256(toHex(payload))
 
-  await db.insert(jobSpec).values({
-    specHash,
-    title: input.title,
-    description: input.description,
-    requesterAgentId: input.requesterAgentId,
-  })
+    await db.insert(jobSpec).values({
+      specHash,
+      title: input.title,
+      description: input.description,
+      requesterAgentId: input.requesterAgentId,
+    })
 
-  const { postJob } = await import('@/lib/onchain/labor')
-  const txHash = await postJob(input.requesterAgentId, input.bountyUsd, Math.round(input.minScore), specHash)
+    const { postJob } = await import('@/lib/onchain/labor')
+    const txHash = await postJob(input.requesterAgentId, input.bountyUsd, Math.round(input.minScore), specHash)
 
-  revalidatePath('/jobs')
-  return { txHash }
+    revalidatePath('/jobs')
+    return { txHash }
+  } catch (error) {
+    throw asActionError(error, 'postJobAction')
+  }
 }
 
 export async function acceptJobAction(workerAgentId: string, jobId: number) {
@@ -107,23 +112,31 @@ export async function acceptJobAction(workerAgentId: string, jobId: number) {
   const ag = await requireOwnedAgent(workerAgentId, userId)
   if (!ag.smartAccountAddress) throw new Error('Provision the worker agent first')
 
-  const { acceptJob } = await import('@/lib/onchain/labor')
-  const txHash = await acceptJob(workerAgentId, jobId)
-  revalidatePath('/jobs')
-  return { txHash }
+  try {
+    const { acceptJob } = await import('@/lib/onchain/labor')
+    const txHash = await acceptJob(workerAgentId, jobId)
+    revalidatePath('/jobs')
+    return { txHash }
+  } catch (error) {
+    throw asActionError(error, 'acceptJobAction')
+  }
 }
 
 export async function submitWorkAction(workerAgentId: string, jobId: number, resultText: string) {
   const userId = await requireUser()
   await requireOwnedAgent(workerAgentId, userId)
 
-  const { keccak256, toHex } = await import('viem')
-  const resultHash = keccak256(toHex(resultText || 'delivered'))
+  try {
+    const { keccak256, toHex } = await import('viem')
+    const resultHash = keccak256(toHex(resultText || 'delivered'))
 
-  const { submitWork } = await import('@/lib/onchain/labor')
-  const txHash = await submitWork(workerAgentId, jobId, resultHash)
-  revalidatePath('/jobs')
-  return { txHash }
+    const { submitWork } = await import('@/lib/onchain/labor')
+    const txHash = await submitWork(workerAgentId, jobId, resultHash)
+    revalidatePath('/jobs')
+    return { txHash }
+  } catch (error) {
+    throw asActionError(error, 'submitWorkAction')
+  }
 }
 
 /**
@@ -135,35 +148,38 @@ export async function approveJobAction(requesterAgentId: string, jobId: number) 
   const userId = await requireUser()
   await requireOwnedAgent(requesterAgentId, userId)
 
-  const { readJobs } = await import('@/lib/onchain/labor')
-  const jobs = await readJobs()
-  const job = jobs.find((j) => j.id === jobId)
-  if (!job) throw new Error('Job not found on-chain')
+  try {
+    const { readJobs, approveJob } = await import('@/lib/onchain/labor')
+    const jobs = await readJobs()
+    const job = jobs.find((j) => j.id === jobId)
+    if (!job) throw new Error('Job not found on-chain')
 
-  const { approveJob } = await import('@/lib/onchain/labor')
-  const txHash = await approveJob(requesterAgentId, jobId)
+    const txHash = await approveJob(requesterAgentId, jobId)
 
-  // Map the worker address back to one of our agents to credit its reputation.
-  const [workerAgent] = await db
-    .select()
-    .from(agent)
-    .where(eq(agent.smartAccountAddress, job.worker))
+    // Map the worker address back to one of our agents to credit its reputation.
+    const [workerAgent] = await db
+      .select()
+      .from(agent)
+      .where(eq(agent.smartAccountAddress, job.worker))
 
-  if (workerAgent) {
-    await db.insert(agentEvent).values({
-      id: nanoid(),
-      agentId: workerAgent.id,
-      taskId: `job-${jobId}`,
-      eventType: 'JOB_COMPLETED',
-      success: true,
-      executionTime: 0,
-      tokenCost: 0,
-      qualityScore: '1.000',
-      detail: { jobId, bounty: job.bounty, txHash, onchain: true },
-    })
-    await recalculateCredit(workerAgent.id)
+    if (workerAgent) {
+      await db.insert(agentEvent).values({
+        id: nanoid(),
+        agentId: workerAgent.id,
+        taskId: `job-${jobId}`,
+        eventType: 'JOB_COMPLETED',
+        success: true,
+        executionTime: 0,
+        tokenCost: 0,
+        qualityScore: '1.000',
+        detail: { jobId, bounty: job.bounty, txHash, onchain: true },
+      })
+      await recalculateCredit(workerAgent.id)
+    }
+
+    revalidatePath('/jobs')
+    return { txHash }
+  } catch (error) {
+    throw asActionError(error, 'approveJobAction')
   }
-
-  revalidatePath('/jobs')
-  return { txHash }
 }

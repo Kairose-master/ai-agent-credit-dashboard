@@ -10,6 +10,7 @@ import { nanoid } from 'nanoid'
 import { randomBytes } from 'node:crypto'
 import { generateProblem, problemPrompt, type Difficulty } from '@/lib/verifiable/problems'
 import { startAgentTask } from '@/lib/agent-runtime/client'
+import { asActionError } from '@/lib/action-error'
 
 async function requireUser() {
   const session = await getSession()
@@ -101,48 +102,52 @@ export async function startVerifiedTask(input: {
     status: 'posting',
   })
 
-  // Escrow on-chain: specHash commits to the problem, answerHash to the truth.
-  const { keccak256, toHex } = await import('viem')
-  const { postVerifiedTask, answerHashOf } = await import('@/lib/onchain/verified')
-  const { txHash, taskId: onchainId } = await postVerifiedTask(
-    requester.id,
-    input.bountyUsd,
-    0, // minScore 0: the solver is chosen explicitly here, gating is for open markets
-    keccak256(toHex(spec.problem)),
-    answerHashOf(spec.answer),
-  )
+  try {
+    // Escrow on-chain: specHash commits to the problem, answerHash to the truth.
+    const { keccak256, toHex } = await import('viem')
+    const { postVerifiedTask, answerHashOf } = await import('@/lib/onchain/verified')
+    const { txHash, taskId: onchainId } = await postVerifiedTask(
+      requester.id,
+      input.bountyUsd,
+      0, // minScore 0: the solver is chosen explicitly here, gating is for open markets
+      keccak256(toHex(spec.problem)),
+      answerHashOf(spec.answer),
+    )
 
-  // Kick the solve — the agent sees the problem only, never the answer.
-  const agentTaskId = `task-${nanoid(10)}`
-  await db.insert(agentTask).values({
-    id: agentTaskId,
-    userId,
-    agentId: solver.id,
-    task: spec.problem,
-    status: 'running',
-  })
+    // Kick the solve — the agent sees the problem only, never the answer.
+    const agentTaskId = `task-${nanoid(10)}`
+    await db.insert(agentTask).values({
+      id: agentTaskId,
+      userId,
+      agentId: solver.id,
+      task: spec.problem,
+      status: 'running',
+    })
 
-  const { resolveUserAnthropicKey } = await import('@/lib/user-keys')
-  const apiKey = await resolveUserAnthropicKey(userId)
+    const { resolveUserAnthropicKey } = await import('@/lib/user-keys')
+    const apiKey = await resolveUserAnthropicKey(userId)
 
-  const h = await headers()
-  const proto = h.get('x-forwarded-proto') ?? 'https'
-  const host = h.get('x-forwarded-host') ?? h.get('host')
-  await startAgentTask({
-    agentId: solver.id,
-    taskId: agentTaskId,
-    task: problemPrompt(spec.problem),
-    callbackUrl: `${proto}://${host}/api/runtime/callback`,
-    apiKey,
-  })
+    const h = await headers()
+    const proto = h.get('x-forwarded-proto') ?? 'https'
+    const host = h.get('x-forwarded-host') ?? h.get('host')
+    await startAgentTask({
+      agentId: solver.id,
+      taskId: agentTaskId,
+      task: problemPrompt(spec.problem),
+      callbackUrl: `${proto}://${host}/api/runtime/callback`,
+      apiKey,
+    })
 
-  await db
-    .update(verifiableTask)
-    .set({ onchainId, agentTaskId, postTxHash: txHash, status: 'solving', updatedAt: new Date() })
-    .where(eq(verifiableTask.id, id))
+    await db
+      .update(verifiableTask)
+      .set({ onchainId, agentTaskId, postTxHash: txHash, status: 'solving', updatedAt: new Date() })
+      .where(eq(verifiableTask.id, id))
 
-  revalidatePath('/verify')
-  return { id, onchainId, postTxHash: txHash }
+    revalidatePath('/verify')
+    return { id, onchainId, postTxHash: txHash }
+  } catch (error) {
+    throw asActionError(error, 'startVerifiedTask')
+  }
 }
 
 /** Reclaim escrow from a task whose solve failed (on-chain task still Open). */
@@ -152,8 +157,13 @@ export async function reclaimVerifiedTask(id: string) {
   if (!row || row.userId !== userId) throw new Error('Task not found')
   if (row.status !== 'failed' || !row.onchainId) throw new Error('Nothing to reclaim')
 
-  const { cancelVerifiedTask } = await import('@/lib/onchain/verified')
-  const txHash = await cancelVerifiedTask(row.requesterAgentId, row.onchainId)
+  let txHash: string
+  try {
+    const { cancelVerifiedTask } = await import('@/lib/onchain/verified')
+    txHash = await cancelVerifiedTask(row.requesterAgentId, row.onchainId)
+  } catch (error) {
+    throw asActionError(error, 'reclaimVerifiedTask')
+  }
 
   await db
     .update(verifiableTask)

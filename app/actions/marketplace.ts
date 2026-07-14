@@ -8,6 +8,7 @@ import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { randomBytes } from 'node:crypto'
 import { enforceSpendingPolicy } from '@/lib/treasury-policy'
+import { asActionError } from '@/lib/action-error'
 
 async function requireUser() {
   const session = await getSession()
@@ -144,29 +145,33 @@ export async function purchaseTemplate(templateId: string, payingAgentId: string
     }
 
     await enforceSpendingPolicy(payingAgentId, price)
-    const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
-    const balance = await usdcBalanceOf(payer.smartAccountAddress as `0x${string}`)
-    if (price > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
+    try {
+      const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
+      const balance = await usdcBalanceOf(payer.smartAccountAddress as `0x${string}`)
+      if (price > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
 
-    txHash = await transferUsdc(payingAgentId, creatorExemplar.smartAccountAddress as `0x${string}`, price)
+      txHash = await transferUsdc(payingAgentId, creatorExemplar.smartAccountAddress as `0x${string}`, price)
 
-    await db.insert(agentEvent).values({
-      id: nanoid(),
-      agentId: payingAgentId,
-      taskId: `template-${templateId}`,
-      eventType: 'WALLET_TRANSFER',
-      success: true,
-      executionTime: 0,
-      tokenCost: 0,
-      qualityScore: null,
-      detail: {
-        amountUsd: price,
-        to: creatorExemplar.smartAccountAddress,
-        memo: `Bought template: ${tpl.name}`,
-        txHash,
-        initiator: 'owner',
-      },
-    })
+      await db.insert(agentEvent).values({
+        id: nanoid(),
+        agentId: payingAgentId,
+        taskId: `template-${templateId}`,
+        eventType: 'WALLET_TRANSFER',
+        success: true,
+        executionTime: 0,
+        tokenCost: 0,
+        qualityScore: null,
+        detail: {
+          amountUsd: price,
+          to: creatorExemplar.smartAccountAddress,
+          memo: `Bought template: ${tpl.name}`,
+          txHash,
+          initiator: 'owner',
+        },
+      })
+    } catch (error) {
+      throw asActionError(error, 'purchaseTemplate')
+    }
   }
 
   const newAgentId = nanoid()

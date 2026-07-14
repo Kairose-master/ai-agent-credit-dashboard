@@ -7,6 +7,7 @@ import { recalculateCredit } from '@/lib/credit-engine'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
+import { asActionError } from '@/lib/action-error'
 
 async function requireOwnedAgent(agentId: string) {
   const session = await getSession()
@@ -53,14 +54,18 @@ export async function provisionSmartAccount(agentId: string) {
     throw new Error('On-chain not configured (set ZERODEV_RPC, AGENT_OWNER_PRIVATE_KEY, etc.)')
   }
 
-  const { getAgentAccountAddress } = await import('@/lib/onchain/account')
-  const address = await getAgentAccountAddress(agentId)
+  try {
+    const { getAgentAccountAddress } = await import('@/lib/onchain/account')
+    const address = await getAgentAccountAddress(agentId)
 
-  await db.update(agent).set({ smartAccountAddress: address }).where(eq(agent.id, agentId))
-  await recalculateCredit(agentId) // publishes the limit to the registry now that we have an address
+    await db.update(agent).set({ smartAccountAddress: address }).where(eq(agent.id, agentId))
+    await recalculateCredit(agentId) // publishes the limit to the registry now that we have an address
 
-  revalidatePath('/profile')
-  return { address }
+    revalidatePath('/profile')
+    return { address }
+  } catch (error) {
+    throw asActionError(error, 'provisionSmartAccount')
+  }
 }
 
 /** Draw credit on-chain (real USDC via UserOp) and mirror to off-chain books. */
@@ -69,22 +74,26 @@ export async function drawOnchain(agentId: string, amount: number, description?:
   if (!ag.smartAccountAddress) throw new Error('Provision the smart account first')
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be positive')
 
-  const { drawOnchain: draw } = await import('@/lib/onchain/credit')
-  const txHash = await draw(agentId, amount)
+  try {
+    const { drawOnchain: draw } = await import('@/lib/onchain/credit')
+    const txHash = await draw(agentId, amount)
 
-  await db.insert(creditTransaction).values({
-    id: nanoid(),
-    userId,
-    fromAgentId: agentId,
-    status: 'active',
-    amount: amount.toString(),
-    type: 'credit_draw',
-    description: description || `On-chain draw (${txHash.slice(0, 10)}…)`,
-  })
+    await db.insert(creditTransaction).values({
+      id: nanoid(),
+      userId,
+      fromAgentId: agentId,
+      status: 'active',
+      amount: amount.toString(),
+      type: 'credit_draw',
+      description: description || `On-chain draw (${txHash.slice(0, 10)}…)`,
+    })
 
-  const credit = await recalculateCredit(agentId)
-  revalidatePath('/profile')
-  return { txHash, credit }
+    const credit = await recalculateCredit(agentId)
+    revalidatePath('/profile')
+    return { txHash, credit }
+  } catch (error) {
+    throw asActionError(error, 'drawOnchain')
+  }
 }
 
 /** Repay an active draw on-chain, then settle the off-chain record and emit a
@@ -99,27 +108,31 @@ export async function repayOnchain(txId: string) {
     throw new Error('Transaction is not an active credit draw')
   }
 
-  const { repayOnchain: repay } = await import('@/lib/onchain/credit')
-  const txHash = await repay(tx.fromAgentId, parseFloat(tx.amount))
+  try {
+    const { repayOnchain: repay } = await import('@/lib/onchain/credit')
+    const txHash = await repay(tx.fromAgentId, parseFloat(tx.amount))
 
-  await db
-    .update(creditTransaction)
-    .set({ status: 'settled', settledAt: new Date(), updatedAt: new Date() })
-    .where(eq(creditTransaction.id, txId))
+    await db
+      .update(creditTransaction)
+      .set({ status: 'settled', settledAt: new Date(), updatedAt: new Date() })
+      .where(eq(creditTransaction.id, txId))
 
-  await db.insert(agentEvent).values({
-    id: nanoid(),
-    agentId: tx.fromAgentId,
-    taskId: `repay-${txId}`,
-    eventType: 'REPAYMENT_COMPLETED',
-    success: true,
-    executionTime: 0,
-    tokenCost: 0,
-    qualityScore: '1.000',
-    detail: { amount: tx.amount, transactionId: txId, txHash, onchain: true },
-  })
+    await db.insert(agentEvent).values({
+      id: nanoid(),
+      agentId: tx.fromAgentId,
+      taskId: `repay-${txId}`,
+      eventType: 'REPAYMENT_COMPLETED',
+      success: true,
+      executionTime: 0,
+      tokenCost: 0,
+      qualityScore: '1.000',
+      detail: { amount: tx.amount, transactionId: txId, txHash, onchain: true },
+    })
 
-  const credit = await recalculateCredit(tx.fromAgentId)
-  revalidatePath('/profile')
-  return { txHash, credit }
+    const credit = await recalculateCredit(tx.fromAgentId)
+    revalidatePath('/profile')
+    return { txHash, credit }
+  } catch (error) {
+    throw asActionError(error, 'repayOnchain')
+  }
 }

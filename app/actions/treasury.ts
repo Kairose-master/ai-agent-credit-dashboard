@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { enforceSpendingPolicy, isValidAddress, spentLast24h, WALLET_DAILY_CAP_USD, WALLET_MAX_TX_USD } from '@/lib/treasury-policy'
+import { asActionError } from '@/lib/action-error'
 
 async function requireOwnedAgent(agentId: string) {
   const session = await getSession()
@@ -49,26 +50,30 @@ export async function sendFromTreasury(agentId: string, to: string, amountUsd: n
 
   await enforceSpendingPolicy(agentId, amountUsd)
 
-  const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
-  const balance = await usdcBalanceOf(ag.smartAccountAddress as `0x${string}`)
-  if (amountUsd > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
+  try {
+    const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
+    const balance = await usdcBalanceOf(ag.smartAccountAddress as `0x${string}`)
+    if (amountUsd > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
 
-  const txHash = await transferUsdc(agentId, to, amountUsd)
+    const txHash = await transferUsdc(agentId, to, amountUsd)
 
-  await db.insert(agentEvent).values({
-    id: nanoid(),
-    agentId,
-    taskId: `wallet-${nanoid(8)}`,
-    eventType: 'WALLET_TRANSFER',
-    success: true,
-    executionTime: 0,
-    tokenCost: 0,
-    qualityScore: null,
-    detail: { amountUsd, to, memo: memo ?? '', txHash, initiator: 'owner' },
-  })
+    await db.insert(agentEvent).values({
+      id: nanoid(),
+      agentId,
+      taskId: `wallet-${nanoid(8)}`,
+      eventType: 'WALLET_TRANSFER',
+      success: true,
+      executionTime: 0,
+      tokenCost: 0,
+      qualityScore: null,
+      detail: { amountUsd, to, memo: memo ?? '', txHash, initiator: 'owner' },
+    })
 
-  revalidatePath('/profile')
-  return { txHash }
+    revalidatePath('/profile')
+    return { txHash }
+  } catch (error) {
+    throw asActionError(error, 'sendFromTreasury')
+  }
 }
 
 const TEST_MINT_MAX_USD = 5000
@@ -82,23 +87,27 @@ export async function mintTestUsdc(agentId: string, amountUsd: number) {
   if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw new Error('Amount must be positive')
   if (amountUsd > TEST_MINT_MAX_USD) throw new Error(`Max ${TEST_MINT_MAX_USD} mUSDC per mint`)
 
-  const { mintTestUsdc: mint } = await import('@/lib/onchain/treasury')
-  const txHash = await mint(agentId, amountUsd, ag.smartAccountAddress as `0x${string}`)
+  try {
+    const { mintTestUsdc: mint } = await import('@/lib/onchain/treasury')
+    const txHash = await mint(agentId, amountUsd, ag.smartAccountAddress as `0x${string}`)
 
-  // Separate event type from WALLET_TRANSFER — minting isn't spending and
-  // must NOT count toward the 24h spending cap that gates real transfers.
-  await db.insert(agentEvent).values({
-    id: nanoid(),
-    agentId,
-    taskId: `mint-${nanoid(8)}`,
-    eventType: 'WALLET_MINT',
-    success: true,
-    executionTime: 0,
-    tokenCost: 0,
-    qualityScore: null,
-    detail: { amountUsd, to: ag.smartAccountAddress, memo: 'Test USDC mint', txHash, initiator: 'owner' },
-  })
+    // Separate event type from WALLET_TRANSFER — minting isn't spending and
+    // must NOT count toward the 24h spending cap that gates real transfers.
+    await db.insert(agentEvent).values({
+      id: nanoid(),
+      agentId,
+      taskId: `mint-${nanoid(8)}`,
+      eventType: 'WALLET_MINT',
+      success: true,
+      executionTime: 0,
+      tokenCost: 0,
+      qualityScore: null,
+      detail: { amountUsd, to: ag.smartAccountAddress, memo: 'Test USDC mint', txHash, initiator: 'owner' },
+    })
 
-  revalidatePath('/profile')
-  return { txHash }
+    revalidatePath('/profile')
+    return { txHash }
+  } catch (error) {
+    throw asActionError(error, 'mintTestUsdc')
+  }
 }
