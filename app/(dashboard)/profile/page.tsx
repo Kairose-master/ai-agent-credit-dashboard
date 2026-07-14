@@ -23,6 +23,7 @@ import {
   ChevronsUpDown,
   Webhook,
   RefreshCw,
+  Scale,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
@@ -34,6 +35,7 @@ import {
   drawOnchain,
   repayOnchain,
 } from '@/app/actions/onchain'
+import { getBalanceSheet, type BalanceSheet } from '@/app/actions/balance-sheet'
 import { CreditEvolutionChart } from '@/components/charts'
 
 type OnchainInfo = {
@@ -162,6 +164,8 @@ export default function ProfilePage() {
   const [treasuryBusy, setTreasuryBusy] = useState(false)
   const [treasuryMsg, setTreasuryMsg] = useState<string | null>(null)
 
+  const [balanceSheet, setBalanceSheet] = useState<BalanceSheet | null>(null)
+
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async (id: string) => {
@@ -178,6 +182,7 @@ export default function ProfilePage() {
     setDraws(drawsData as Draw[])
     setOnchain(onchainData as OnchainInfo | null)
     setTreasury(await getTreasury(id).catch(() => null))
+    setBalanceSheet(await getBalanceSheet(id).catch(() => null))
   }, [])
 
   const handleSend = async () => {
@@ -463,6 +468,9 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Financial statement — the agent's balance sheet, same lens used to evaluate a company */}
+      {balanceSheet && <BalanceSheetCard sheet={balanceSheet} />}
 
       {/* Runtime — platform Claude runtime, or bring your own agent */}
       {agentId && <RuntimeCard agentId={agentId} />}
@@ -879,6 +887,97 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The agent's balance sheet — the same lens used to evaluate a company,
+ * applied to an agent. Every figure is a real read (on-chain balance, vault
+ * headroom, escrowed-but-unreleased bounties, cumulative draws) — nothing
+ * here is inferred or estimated. Net Worth subtracts only Outstanding Debt
+ * (what's currently owed); Borrowed Credit (lifetime total drawn) is shown
+ * for context but isn't subtracted again, or repaid amounts would be
+ * double-counted against the agent.
+ */
+function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
+  const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`
+  const assetsTotal = sheet.assets.usdc + sheet.assets.creditLine + sheet.assets.receivables
+
+  if (!sheet.configured) {
+    return (
+      <div className="border border-border rounded-lg p-6">
+        <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
+          <Scale className="size-5" /> Financial Statement
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          Provision this agent&apos;s smart account to see its balance sheet.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border border-border rounded-lg p-6">
+      <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
+        <Scale className="size-5" /> Financial Statement
+      </h3>
+      <p className="text-sm text-muted-foreground mb-4">
+        The agent evaluated the way a company would be — assets, liabilities, and what&apos;s left over.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Assets</p>
+          <dl className="space-y-1.5 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">USDC</dt>
+              <dd className="font-mono font-semibold">{fmt(sheet.assets.usdc)}</dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">Credit Line (undrawn)</dt>
+              <dd className="font-mono font-semibold">{fmt(sheet.assets.creditLine)}</dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">Receivables</dt>
+              <dd className="font-mono font-semibold">{fmt(sheet.assets.receivables)}</dd>
+            </div>
+            <div className="flex items-center justify-between border-t border-border pt-1.5 mt-1.5">
+              <dt className="font-medium">Total Assets</dt>
+              <dd className="font-mono font-bold">{fmt(assetsTotal)}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Liabilities</p>
+          <dl className="space-y-1.5 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">Outstanding Debt</dt>
+              <dd className="font-mono font-semibold text-destructive">{fmt(sheet.liabilities.outstandingDebt)}</dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">Borrowed Credit (lifetime)</dt>
+              <dd className="font-mono text-muted-foreground">{fmt(sheet.liabilities.borrowedLifetime)}</dd>
+            </div>
+            <div className="flex items-center justify-between border-t border-border pt-1.5 mt-1.5">
+              <dt className="font-medium">Total Liabilities</dt>
+              <dd className="font-mono font-bold text-destructive">{fmt(sheet.liabilities.outstandingDebt)}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
+        <span className="font-semibold">Net Worth</span>
+        <span className={`font-mono text-xl font-bold ${sheet.netWorth >= 0 ? 'text-success' : 'text-destructive'}`}>
+          {fmt(sheet.netWorth)}
+        </span>
+      </div>
+      <p className="text-[11px] text-muted-foreground mt-1">
+        Assets − Outstanding Debt. Borrowed Credit is informational (lifetime drawn, including repaid
+        amounts) and isn&apos;t subtracted separately.
+      </p>
     </div>
   )
 }
