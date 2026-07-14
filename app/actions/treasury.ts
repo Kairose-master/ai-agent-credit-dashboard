@@ -70,3 +70,35 @@ export async function sendFromTreasury(agentId: string, to: string, amountUsd: n
   revalidatePath('/profile')
   return { txHash }
 }
+
+const TEST_MINT_MAX_USD = 5000
+
+/** Self-mint test USDC (testnet only — MockUSDC.mint is permissionless).
+ *  Not subject to the spending policy: minting isn't spending, it's the
+ *  faucet step users need before they can draw credit or post jobs. */
+export async function mintTestUsdc(agentId: string, amountUsd: number) {
+  const ag = await requireOwnedAgent(agentId)
+  if (!ag.smartAccountAddress) throw new Error('Provision the smart account first')
+  if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw new Error('Amount must be positive')
+  if (amountUsd > TEST_MINT_MAX_USD) throw new Error(`Max ${TEST_MINT_MAX_USD} mUSDC per mint`)
+
+  const { mintTestUsdc: mint } = await import('@/lib/onchain/treasury')
+  const txHash = await mint(agentId, amountUsd, ag.smartAccountAddress as `0x${string}`)
+
+  // Separate event type from WALLET_TRANSFER — minting isn't spending and
+  // must NOT count toward the 24h spending cap that gates real transfers.
+  await db.insert(agentEvent).values({
+    id: nanoid(),
+    agentId,
+    taskId: `mint-${nanoid(8)}`,
+    eventType: 'WALLET_MINT',
+    success: true,
+    executionTime: 0,
+    tokenCost: 0,
+    qualityScore: null,
+    detail: { amountUsd, to: ag.smartAccountAddress, memo: 'Test USDC mint', txHash, initiator: 'owner' },
+  })
+
+  revalidatePath('/profile')
+  return { txHash }
+}

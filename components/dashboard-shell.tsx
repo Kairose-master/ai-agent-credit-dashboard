@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Umbrella,
   Settings,
+  BookOpen,
   Search,
   Bell,
   Menu,
@@ -26,6 +27,7 @@ import { cn } from "@/lib/utils"
 
 const nav = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
+  { label: "Guide", href: "/guide", icon: BookOpen },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "Credit Scores", href: "/credit-scores", icon: Gauge },
   { label: "Transactions", href: "/transactions", icon: ArrowLeftRight },

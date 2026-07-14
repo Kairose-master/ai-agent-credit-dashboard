@@ -18,10 +18,11 @@ import {
   ExternalLink,
   Send,
   Copy,
+  Coins,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
-import { getTreasury, sendFromTreasury } from '@/app/actions/treasury'
+import { getTreasury, sendFromTreasury, mintTestUsdc } from '@/app/actions/treasury'
 import {
   getOnchainInfo,
   provisionSmartAccount,
@@ -115,6 +116,7 @@ const EVENT_META: Record<string, { label: string; Icon: typeof Play }> = {
   VERIFIED_TASK_COMPLETED: { label: 'Verified task passed', Icon: CheckCircle2 },
   VERIFIED_TASK_FAILED: { label: 'Verified task failed', Icon: XCircle },
   WALLET_TRANSFER: { label: 'Wallet transfer', Icon: Send },
+  WALLET_MINT: { label: 'Test USDC minted', Icon: Coins },
 }
 
 type Treasury = {
@@ -184,6 +186,24 @@ export default function ProfilePage() {
       setTreasuryMsg(error instanceof Error ? error.message : String(error))
     } finally {
       setTreasuryBusy(false)
+    }
+  }
+
+  const [mintAmount, setMintAmount] = useState('1000')
+  const [mintBusy, setMintBusy] = useState(false)
+
+  const handleMint = async () => {
+    if (!agentId || mintBusy) return
+    setMintBusy(true)
+    setTreasuryMsg(null)
+    try {
+      const { txHash } = await mintTestUsdc(agentId, parseFloat(mintAmount))
+      setTreasuryMsg(`Minted ${mintAmount} test USDC — tx ${txHash.slice(0, 14)}…`)
+      await refresh(agentId)
+    } catch (error) {
+      setTreasuryMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setMintBusy(false)
     }
   }
 
@@ -687,6 +707,34 @@ export default function ProfilePage() {
             </button>
           </div>
 
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              Get test USDC (Sepolia testnet — free, not real money)
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                max="5000"
+                value={mintAmount}
+                onChange={(e) => setMintAmount(e.target.value)}
+                className="h-9 w-32 rounded-md border border-border bg-background px-3 text-sm"
+                disabled={mintBusy}
+              />
+              <button
+                onClick={handleMint}
+                disabled={mintBusy || !mintAmount || parseFloat(mintAmount) <= 0}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+              >
+                {mintBusy ? <Loader2 className="size-4 animate-spin" /> : <Coins className="size-4" />}
+                Mint test USDC
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Send USDC
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <input
               value={sendTo}

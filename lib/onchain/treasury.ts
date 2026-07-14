@@ -18,6 +18,19 @@ const TRANSFER_ABI = [
   },
 ] as const
 
+// MockUSDC.mint is permissionless on testnet — anyone (including the agent's
+// own smart account) may mint to any address. This lets users self-fund test
+// USDC entirely in-app, no CLI or deployer key required.
+const MINT_ABI = [
+  {
+    type: 'function',
+    name: 'mint',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+] as const
+
 export async function usdcBalanceOf(address: Address): Promise<number> {
   const value = (await publicClient().readContract({
     address: onchainEnv.usdcAddress as Address,
@@ -34,6 +47,16 @@ export async function transferUsdc(agentId: string, to: Address, amountUsd: numb
     abi: TRANSFER_ABI,
     functionName: 'transfer',
     args: [to, parseUnits(amountUsd.toFixed(USDC_DECIMALS), USDC_DECIMALS)],
+  })
+  return sendAgentCall(agentId, { to: onchainEnv.usdcAddress as Address, data })
+}
+
+/** Self-mint test USDC into the agent's own smart account (testnet only). */
+export async function mintTestUsdc(agentId: string, amountUsd: number, toAddress: Address): Promise<Hex> {
+  const data = encodeFunctionData({
+    abi: MINT_ABI,
+    functionName: 'mint',
+    args: [toAddress, parseUnits(amountUsd.toFixed(USDC_DECIMALS), USDC_DECIMALS)],
   })
   return sendAgentCall(agentId, { to: onchainEnv.usdcAddress as Address, data })
 }
