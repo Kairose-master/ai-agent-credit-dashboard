@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare, Bot, Flag, Workflow, ChevronDown } from 'lucide-react'
+import { Loader2, Briefcase, Plus, Store, Sparkles, ShieldCheck, MessageSquare, Bot, Flag, Workflow, ChevronDown, Paperclip, X } from 'lucide-react'
 import {
   getJobs,
   postJobAction,
@@ -30,6 +30,8 @@ type Job = {
   workerRunStatus: 'running' | 'processing' | 'completed' | 'failed' | null
   output: string | null
   disputeNote: string | null
+  attachmentUrl: string | null
+  attachmentName: string | null
 }
 
 type MyAgent = { id: string; name: string; provisioned: boolean }
@@ -77,6 +79,9 @@ export default function JobsPage() {
   const [bounty, setBounty] = useState('')
   const [minScore, setMinScore] = useState('600')
   const [requesterId, setRequesterId] = useState('')
+  const [attachment, setAttachment] = useState<{ url: string; name: string } | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -120,6 +125,23 @@ export default function JobsPage() {
     }
   }
 
+  const uploadAttachment = async (file: File) => {
+    setUploading(true)
+    setUploadError(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: form })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error ?? 'Upload failed')
+      setAttachment({ url: body.url, name: body.name })
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const post = () =>
     run('post', () =>
       postJobAction({
@@ -129,11 +151,15 @@ export default function JobsPage() {
         acceptanceCriteria,
         bountyUsd: parseFloat(bounty),
         minScore: parseInt(minScore || '0', 10),
+        attachmentUrl: attachment?.url,
+        attachmentName: attachment?.name,
       }).then(() => {
         setTitle('')
         setDescription('')
         setAcceptanceCriteria('')
         setBounty('')
+        setAttachment(null)
+        setUploadError(null)
       }),
     )
 
@@ -252,6 +278,42 @@ export default function JobsPage() {
                     rows={3}
                     className="md:col-span-2 rounded-md border border-border bg-background p-3 text-sm font-mono"
                   />
+                  <div className="md:col-span-2">
+                    {attachment ? (
+                      <div className="flex items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm">
+                        <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAttachment(null)}
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          aria-label="Remove attachment"
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground hover:bg-secondary/40 cursor-pointer">
+                        {uploading ? (
+                          <Loader2 className="size-4 shrink-0 animate-spin" />
+                        ) : (
+                          <Paperclip className="size-4 shrink-0" />
+                        )}
+                        {uploading ? 'Uploading…' : 'Attach source material (PDF, CSV, text — what the worker should act on)'}
+                        <input
+                          type="file"
+                          className="hidden"
+                          disabled={uploading}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            e.target.value = ''
+                            if (file) uploadAttachment(file)
+                          }}
+                        />
+                      </label>
+                    )}
+                    {uploadError && <p className="mt-1 text-xs text-destructive">{uploadError}</p>}
+                  </div>
                   <input
                     value={bounty}
                     onChange={(e) => setBounty(e.target.value)}
@@ -299,6 +361,16 @@ export default function JobsPage() {
                         <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">
                           <span className="font-medium">Acceptance criteria:</span> {job.acceptanceCriteria}
                         </p>
+                      )}
+                      {job.attachmentUrl && (
+                        <a
+                          href={job.attachmentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                        >
+                          <Paperclip className="size-3" /> {job.attachmentName ?? 'Source attachment'}
+                        </a>
                       )}
                       <p className="text-xs text-muted-foreground mt-2 font-mono">
                         #{job.id} · bounty ${job.bounty.toLocaleString()} · min score {job.minScore} ·

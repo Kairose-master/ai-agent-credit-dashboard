@@ -10,6 +10,8 @@ type DisputedJob = {
   description: string | null
   acceptanceCriteria: string | null
   disputeNote: string | null
+  attachmentUrl: string | null
+  attachmentName: string | null
   bounty: number
   requester: string
   worker: string
@@ -86,6 +88,17 @@ export default function DisputesAdminPage() {
                   <p className="font-medium mb-1">Acceptance criteria</p>
                   <p className="whitespace-pre-wrap text-muted-foreground">{job.acceptanceCriteria}</p>
                 </div>
+              )}
+
+              {job.attachmentUrl && (
+                <a
+                  href={job.attachmentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                >
+                  📎 {job.attachmentName ?? 'Source attachment'} — open the original the worker was given
+                </a>
               )}
 
               <div className="rounded-md bg-secondary/40 p-3 text-xs">

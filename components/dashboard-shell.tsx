@@ -23,8 +23,48 @@ import {
   Command,
   ChevronsUpDown,
   LogOut,
+  Heart,
+  Copy,
+  Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+
+const DONATION_ADDRESS = "0xe274231b7d91dDa77cdbD150B7b5E4fA6F5140ae"
+
+function SupportCard() {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(DONATION_ADDRESS)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        <Heart className="size-3.5 text-primary" />
+        Support this project
+      </div>
+      <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+        Ledgermind is a solo, open-source build. If it's been useful to you and you'd like to
+        help keep it going, donations are welcome at:
+      </p>
+      <button
+        onClick={handleCopy}
+        className="mt-2 flex w-full items-center gap-1.5 rounded-md border border-sidebar-border bg-background px-2 py-1.5 text-left font-mono text-[10px] text-sidebar-foreground hover:bg-sidebar-accent/50"
+        title="Copy address"
+      >
+        <span className="min-w-0 flex-1 truncate">{DONATION_ADDRESS}</span>
+        {copied ? (
+          <Check className="size-3 shrink-0 text-success" />
+        ) : (
+          <Copy className="size-3 shrink-0 text-muted-foreground" />
+        )}
+      </button>
+    </div>
+  )
+}
 
 const nav = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -89,6 +129,9 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
             </span>
           </div>
           <p className="mt-2 font-mono text-xs text-sidebar-foreground">Base L2 · Block 21,884,201</p>
+        </div>
+        <div className="mt-3">
+          <SupportCard />
         </div>
         <button className="mt-3 flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left hover:bg-sidebar-accent/50">
           <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">

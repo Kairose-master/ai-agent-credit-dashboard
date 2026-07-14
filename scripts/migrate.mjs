@@ -1,8 +1,12 @@
 // Idempotent schema migration for the Neon PostgreSQL database.
 // Usage: DATABASE_URL=postgres://... node scripts/migrate.mjs  (or `pnpm db:migrate`)
+//
+// `sql` is exported so app/api/admin/migrate/route.ts can run the exact same
+// statements against the app's own DB connection — eliminates any ambiguity
+// about which DATABASE_URL a locally-run migration actually targeted.
 import pg from 'pg'
 
-const sql = /* sql */ `
+export const sql = /* sql */ `
 -- ── Better Auth tables ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "user" (
   id            text PRIMARY KEY,
@@ -239,6 +243,8 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS worker_agent_id text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS onchain_job_id integer;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS agent_task_id text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS dispute_note text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS attachment_url text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS attachment_name text;
 
 -- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
 CREATE TABLE IF NOT EXISTS verifiable_tasks (
@@ -363,7 +369,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Migration failed:', err)
-  process.exit(1)
-})
+// Only auto-run when executed directly (`node scripts/migrate.mjs`), not
+// when imported as a module (e.g. by the admin migrate API route).
+const isDirectRun = process.argv[1] && process.argv[1].endsWith('migrate.mjs')
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error('Migration failed:', err)
+    process.exit(1)
+  })
+}

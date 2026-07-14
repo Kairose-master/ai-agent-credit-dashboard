@@ -235,6 +235,8 @@ export const jobSpec = pgTable('job_specs', {
   onchainJobId: integer('onchain_job_id'), // the LaborMarket jobId, once known
   agentTaskId: text('agent_task_id'), // links to agent_tasks — the real run that produced the deliverable
   disputeNote: text('dispute_note'), // requester's reason, if disputed
+  attachmentUrl: text('attachment_url'), // source material the worker agent should act on (Vercel Blob)
+  attachmentName: text('attachment_name'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

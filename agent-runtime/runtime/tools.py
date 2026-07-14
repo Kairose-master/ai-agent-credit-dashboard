@@ -16,7 +16,12 @@ import httpx
 TOOL_SCHEMAS = [
     {
         "name": "fetch_url",
-        "description": "Fetch a public web page and return its readable text content (truncated). Use for research on live sources.",
+        "description": (
+            "Fetch a URL and return its readable text content (truncated). Works for web "
+            "pages (HTML), plain text/CSV/JSON/Markdown files, and PDFs — including a Labor "
+            "Market job's source attachment, if one was given to you. Other binary formats "
+            "(images, docx, xlsx, ...) are not supported and return an explicit error."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -97,18 +102,58 @@ def calculator(expression: str) -> str:
         return f"error: {exc}"
 
 
+_MAX_FETCH_CHARS = 15000
+
+
+def _truncate(text: str) -> str:
+    if len(text) > _MAX_FETCH_CHARS:
+        omitted = len(text) - _MAX_FETCH_CHARS
+        return text[:_MAX_FETCH_CHARS] + f"\n\n[truncated — {omitted} more characters omitted]"
+    return text
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    try:
+        import io
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n\n".join(p for p in pages if p).strip()
+        return _truncate(text) if text else "error: PDF contained no extractable text (it may be scanned/image-only)"
+    except Exception as exc:
+        return f"error: failed to parse PDF: {exc}"
+
+
 def fetch_url(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         return "error: only http(s) URLs are supported"
     try:
-        response = httpx.get(url, timeout=15, follow_redirects=True)
+        response = httpx.get(url, timeout=20, follow_redirects=True)
         response.raise_for_status()
-        text = response.text
-        # Crude readability pass: drop scripts/styles/tags, collapse whitespace.
-        text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
-        text = re.sub(r"(?s)<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text[:5000] or "error: page contained no readable text"
+        content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
+
+        if content_type == "application/pdf" or url.lower().endswith(".pdf"):
+            return _extract_pdf_text(response.content)
+
+        if content_type in ("", "text/html", "application/xhtml+xml"):
+            # Crude readability pass: drop scripts/styles/tags, collapse whitespace.
+            text = response.text
+            text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
+            text = re.sub(r"(?s)<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            return _truncate(text) if text else "error: page contained no readable text"
+
+        if content_type.startswith("text/") or content_type == "application/json":
+            text = response.text.strip()
+            return _truncate(text) if text else "error: file was empty"
+
+        return (
+            f"error: this URL is {content_type or 'an unrecognized binary type'}, which this tool "
+            "cannot read. Only HTML, plain text, CSV, JSON, Markdown, and PDF are supported — say so "
+            "in your output rather than guessing at the content."
+        )
     except Exception as exc:
         return f"error: {exc}"
 
