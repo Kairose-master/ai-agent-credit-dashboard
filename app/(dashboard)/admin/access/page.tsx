@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Plus, Trash2, Loader2 } from 'lucide-react'
+import { KeyRound, Plus, Trash2, Loader2, DatabaseZap } from 'lucide-react'
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 
 type Grant = { userId: string; email: string; permission: string; grantedAt: string | Date }
@@ -59,6 +59,23 @@ export default function AccessControlPage() {
     }
   }
 
+  const [migrating, setMigrating] = useState(false)
+  const [migrateResult, setMigrateResult] = useState<string | null>(null)
+
+  const runMigration = async () => {
+    setMigrating(true)
+    setMigrateResult(null)
+    try {
+      const res = await fetch('/api/admin/migrate', { method: 'POST' })
+      const body = await res.json()
+      setMigrateResult(res.ok ? 'Migration complete.' : `Failed: ${body.error}`)
+    } catch (e) {
+      setMigrateResult(`Failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setMigrating(false)
+    }
+  }
+
   if (loading) return <div className="p-8">Loading…</div>
 
   return (
@@ -78,6 +95,29 @@ export default function AccessControlPage() {
           {error}
         </div>
       )}
+
+      <div className="rounded-lg border border-border p-6">
+        <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+          <DatabaseZap className="size-5" /> Database migration
+        </h3>
+        <p className="text-sm text-muted-foreground mb-3">
+          Runs the same idempotent schema migration as <code>pnpm db:migrate</code>, but against
+          this server&apos;s own DB connection — no ambiguity about which database gets it.
+        </p>
+        <button
+          onClick={runMigration}
+          disabled={migrating}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {migrating ? <Loader2 className="size-4 animate-spin" /> : <DatabaseZap className="size-4" />}
+          Run migration
+        </button>
+        {migrateResult && (
+          <p className={`mt-2 text-sm ${migrateResult.startsWith('Failed') ? 'text-destructive' : 'text-success'}`}>
+            {migrateResult}
+          </p>
+        )}
+      </div>
 
       <div className="rounded-lg border border-border p-6">
         <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
