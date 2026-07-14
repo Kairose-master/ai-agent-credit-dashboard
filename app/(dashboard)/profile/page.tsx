@@ -21,10 +21,13 @@ import {
   Copy,
   Coins,
   ChevronsUpDown,
+  Webhook,
+  RefreshCw,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
 import { getTreasury, sendFromTreasury, mintTestUsdc } from '@/app/actions/treasury'
+import { getWebhookConfig, setWebhookUrl, switchToPlatformRuntime, generateAgentWebhookSecret } from '@/app/actions/webhook'
 import {
   getOnchainInfo,
   provisionSmartAccount,
@@ -461,6 +464,9 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {/* Runtime — platform Claude runtime, or bring your own agent */}
+      {agentId && <RuntimeCard agentId={agentId} />}
+
       {/* Task runner — the entry point of the vertical slice */}
       <div className="border border-border rounded-lg p-6">
         <h3 className="font-bold text-lg mb-1">Run a Task</h3>
@@ -873,6 +879,167 @@ export default function ProfilePage() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Bring-your-own-agent: run this agent on the owner's own HTTP endpoint
+ * instead of the platform's Python runtime. No third-party code executes on
+ * our servers — we only POST the task and wait for a callback in the same
+ * format our own runtime uses. See the Guide for the exact contract.
+ */
+function RuntimeCard({ agentId }: { agentId: string }) {
+  const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook'>('platform')
+  const [webhookUrl, setWebhookUrlState] = useState('')
+  const [hasSecret, setHasSecret] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [urlInput, setUrlInput] = useState('')
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const cfg = await getWebhookConfig(agentId)
+    setRuntimeType((cfg.runtimeType as 'platform' | 'webhook') ?? 'platform')
+    setWebhookUrlState(cfg.webhookUrl ?? '')
+    setUrlInput(cfg.webhookUrl ?? '')
+    setHasSecret(cfg.hasSecret)
+  }, [agentId])
+
+  useEffect(() => {
+    load()
+    setRevealedSecret(null)
+    setEditing(false)
+  }, [load])
+
+  const saveUrl = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await setWebhookUrl(agentId, urlInput)
+      await load()
+      setEditing(false)
+      setMsg('Saved.')
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const switchToPlatform = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await switchToPlatformRuntime(agentId)
+      await load()
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const rotateSecret = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const { secret } = await generateAgentWebhookSecret(agentId)
+      setRevealedSecret(secret)
+      setHasSecret(true)
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border border-border rounded-lg p-6">
+      <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
+        <Webhook className="size-5" /> Runtime
+      </h3>
+      <p className="text-sm text-muted-foreground mb-4">
+        By default this agent runs on the platform&apos;s Claude runtime. You can instead point it at
+        your own HTTP endpoint (e.g. a LangChain agent you host yourself) — we send the task, your
+        server sends back the result in our callback format. No code of yours ever runs on our
+        servers.
+      </p>
+
+      <div className="flex items-center gap-2 mb-3 text-sm">
+        <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${runtimeType === 'webhook' ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>
+          {runtimeType === 'webhook' ? 'Bring-your-own webhook' : 'Platform runtime'}
+        </span>
+        {runtimeType === 'webhook' && webhookUrl && (
+          <code className="text-xs text-muted-foreground truncate max-w-xs">{webhookUrl}</code>
+        )}
+      </div>
+
+      {runtimeType === 'webhook' && !editing ? (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setEditing(true)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
+            Edit URL
+          </button>
+          <button onClick={switchToPlatform} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
+            Switch back to platform runtime
+          </button>
+        </div>
+      ) : (
+        (editing || runtimeType !== 'webhook') && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              placeholder="https://your-server.example.com/agent"
+              className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
+              disabled={busy}
+            />
+            <button
+              onClick={saveUrl}
+              disabled={busy || !urlInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
+              Use this webhook
+            </button>
+            {editing && (
+              <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
+                Cancel
+              </button>
+            )}
+          </div>
+        )
+      )}
+
+      {runtimeType === 'webhook' && (
+        <div className="mt-4 pt-4 border-t border-border">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">Callback secret</span>
+            <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${hasSecret ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
+              {hasSecret ? 'configured' : 'not set — callbacks will be rejected'}
+            </span>
+            <button
+              onClick={rotateSecret}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50"
+            >
+              <RefreshCw className="size-3.5" /> {hasSecret ? 'Rotate' : 'Generate'}
+            </button>
+          </div>
+          {revealedSecret && (
+            <div className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+              <p className="font-medium mb-1">
+                Shown once — copy it now. Set it as the <code>X-Runtime-Secret</code> header your
+                server sends when calling back <code>/api/runtime/callback</code>.
+              </p>
+              <code className="block break-all font-mono">{revealedSecret}</code>
+            </div>
+          )}
+        </div>
+      )}
+
+      {msg && <p className="mt-3 text-sm text-muted-foreground">{msg}</p>}
     </div>
   )
 }

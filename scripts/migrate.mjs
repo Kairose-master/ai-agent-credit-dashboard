@@ -111,6 +111,9 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "creditRating" text DEFAULT 'unrate
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "riskLevel" text DEFAULT 'UNKNOWN';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "smartAccountAddress" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "customInstructions" text;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "runtimeType" text DEFAULT 'platform';
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookUrl" text;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookSecretEnc" text;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns

@@ -4,29 +4,37 @@ import { recalculateCredit } from '@/lib/credit-engine'
 import { eq, and } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { extractAnswer } from '@/lib/verifiable/problems'
+import { resolveCallbackAuth } from '@/lib/webhook'
 
 // Verified-task settlement runs two UserOps; allow time for bundler inclusion.
 export const maxDuration = 300
 
 /**
  * POST /api/runtime/callback
- * Called by the Python runtime when a task finishes. Authenticated with the
- * shared secret (not a user session). Persists the behavioral events and
- * recalculates the agent's credit, then records the result on the task row
- * for the dashboard to poll.
+ * Called by the Python runtime OR a user's own BYO-agent webhook when a task
+ * finishes. Persists the behavioral events and recalculates the agent's
+ * credit, then records the result on the task row for the dashboard to poll.
+ *
+ * Auth is resolved PER-TASK'S OWNING AGENT (not one global secret): a
+ * platform-runtime task requires RUNTIME_SHARED_SECRET; a webhook-runtime
+ * task requires that agent's own secret — so one agent's webhook can never
+ * forge a callback for another agent's task.
  *
  * Processing is claimed atomically (running → processing) so a retried
  * callback can't double-insert events.
  */
 export async function POST(request: Request) {
-  const expected = process.env.RUNTIME_SHARED_SECRET ?? ''
-  if (expected && request.headers.get('x-runtime-secret') !== expected) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   const body = await request.json().catch(() => null)
   const taskId = body?.task_id as string | undefined
   if (!taskId) return Response.json({ error: 'Missing task_id' }, { status: 400 })
+
+  const [taskRow] = await db.select().from(agentTask).where(eq(agentTask.id, taskId))
+  if (!taskRow) return Response.json({ status: 'ignored' }) // unknown task — idempotent no-op
+
+  const auth = await resolveCallbackAuth(taskRow.agentId)
+  if (auth.required && request.headers.get('x-runtime-secret') !== auth.secret) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
   // Atomically claim the task so concurrent/retried callbacks process once.
   const claimed = await db
@@ -36,7 +44,7 @@ export async function POST(request: Request) {
     .returning()
 
   if (claimed.length === 0) {
-    // Already processed (or unknown task) — acknowledge idempotently.
+    // Already processed — acknowledge idempotently.
     return Response.json({ status: 'ignored' })
   }
 
