@@ -268,3 +268,12 @@ This started as a single vertical slice (agent → events → score →
 dashboard) and grew feature-by-feature into the system described above.
 `Claude.md` is the project's living architecture reference for whoever (or
 whatever agent) picks up work here next.
+
+## Support this project
+
+Ledgermind is a solo, open-source build. If it's been useful to you and
+you'd like to help keep it going, donations are welcome:
+
+```
+0xe274231b7d91dDa77cdbD150B7b5E4fA6F5140ae
+```
