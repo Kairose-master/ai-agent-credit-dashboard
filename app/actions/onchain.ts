@@ -1,0 +1,125 @@
+'use server'
+
+import { getSession } from '@/lib/get-session'
+import { db } from '@/lib/db'
+import { agent, agentEvent, creditTransaction } from '@/lib/db/schema'
+import { recalculateCredit } from '@/lib/credit-engine'
+import { eq } from 'drizzle-orm'
+import { revalidatePath } from 'next/cache'
+import { nanoid } from 'nanoid'
+
+async function requireOwnedAgent(agentId: string) {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+  const [found] = await db.select().from(agent).where(eq(agent.id, agentId))
+  if (!found || found.userId !== session.user.id) throw new Error('Agent not found')
+  return { agent: found, userId: session.user.id }
+}
+
+const SEPOLIA_EXPLORER = 'https://sepolia.etherscan.io'
+
+/** Read-only on-chain status for the UI. Safe to call when nothing is configured. */
+export async function getOnchainInfo(agentId: string) {
+  const { agent: ag } = await requireOwnedAgent(agentId)
+  const { isOnchainConfigured, isAgentAccountConfigured } = await import('@/lib/onchain/config')
+
+  const info = {
+    configured: isOnchainConfigured(),
+    agentConfigured: isAgentAccountConfigured(),
+    smartAccountAddress: ag.smartAccountAddress,
+    available: null as number | null,
+    outstanding: null as number | null,
+    explorer: SEPOLIA_EXPLORER,
+  }
+
+  if (info.configured && ag.smartAccountAddress) {
+    try {
+      const { readAvailable, readOutstanding } = await import('@/lib/onchain/credit')
+      info.available = await readAvailable(ag.smartAccountAddress as `0x${string}`)
+      info.outstanding = await readOutstanding(ag.smartAccountAddress as `0x${string}`)
+    } catch (error) {
+      console.error('[onchain] read failed:', error)
+    }
+  }
+  return info
+}
+
+/** Derive and persist the agent's ERC-4337 smart account, then publish its
+ *  current credit limit on-chain (via recalculation's mirror step). */
+export async function provisionSmartAccount(agentId: string) {
+  await requireOwnedAgent(agentId)
+  const { isAgentAccountConfigured } = await import('@/lib/onchain/config')
+  if (!isAgentAccountConfigured()) {
+    throw new Error('On-chain not configured (set ZERODEV_RPC, AGENT_OWNER_PRIVATE_KEY, etc.)')
+  }
+
+  const { getAgentAccountAddress } = await import('@/lib/onchain/account')
+  const address = await getAgentAccountAddress(agentId)
+
+  await db.update(agent).set({ smartAccountAddress: address }).where(eq(agent.id, agentId))
+  await recalculateCredit(agentId) // publishes the limit to the registry now that we have an address
+
+  revalidatePath('/profile')
+  return { address }
+}
+
+/** Draw credit on-chain (real USDC via UserOp) and mirror to off-chain books. */
+export async function drawOnchain(agentId: string, amount: number, description?: string) {
+  const { agent: ag, userId } = await requireOwnedAgent(agentId)
+  if (!ag.smartAccountAddress) throw new Error('Provision the smart account first')
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be positive')
+
+  const { drawOnchain: draw } = await import('@/lib/onchain/credit')
+  const txHash = await draw(agentId, amount)
+
+  await db.insert(creditTransaction).values({
+    id: nanoid(),
+    userId,
+    fromAgentId: agentId,
+    status: 'active',
+    amount: amount.toString(),
+    type: 'credit_draw',
+    description: description || `On-chain draw (${txHash.slice(0, 10)}…)`,
+  })
+
+  const credit = await recalculateCredit(agentId)
+  revalidatePath('/profile')
+  return { txHash, credit }
+}
+
+/** Repay an active draw on-chain, then settle the off-chain record and emit a
+ *  repayment event so the score reflects the proven repayment. */
+export async function repayOnchain(txId: string) {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+
+  const [tx] = await db.select().from(creditTransaction).where(eq(creditTransaction.id, txId))
+  if (!tx || tx.userId !== session.user.id) throw new Error('Transaction not found')
+  if (tx.status !== 'active' || tx.type !== 'credit_draw') {
+    throw new Error('Transaction is not an active credit draw')
+  }
+
+  const { repayOnchain: repay } = await import('@/lib/onchain/credit')
+  const txHash = await repay(tx.fromAgentId, parseFloat(tx.amount))
+
+  await db
+    .update(creditTransaction)
+    .set({ status: 'settled', settledAt: new Date(), updatedAt: new Date() })
+    .where(eq(creditTransaction.id, txId))
+
+  await db.insert(agentEvent).values({
+    id: nanoid(),
+    agentId: tx.fromAgentId,
+    taskId: `repay-${txId}`,
+    eventType: 'REPAYMENT_COMPLETED',
+    success: true,
+    executionTime: 0,
+    tokenCost: 0,
+    qualityScore: '1.000',
+    detail: { amount: tx.amount, transactionId: txId, txHash, onchain: true },
+  })
+
+  const credit = await recalculateCredit(tx.fromAgentId)
+  revalidatePath('/profile')
+  return { txHash, credit }
+}

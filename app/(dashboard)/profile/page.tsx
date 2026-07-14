@@ -14,10 +14,27 @@ import {
   Sparkles,
   Banknote,
   HandCoins,
+  Link2,
+  ExternalLink,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
+import {
+  getOnchainInfo,
+  provisionSmartAccount,
+  drawOnchain,
+  repayOnchain,
+} from '@/app/actions/onchain'
 import { CreditEvolutionChart } from '@/components/charts'
+
+type OnchainInfo = {
+  configured: boolean
+  agentConfigured: boolean
+  smartAccountAddress: string | null
+  available: number | null
+  outstanding: number | null
+  explorer: string
+}
 
 type CreditState = {
   score: number
@@ -111,20 +128,27 @@ export default function ProfilePage() {
   const [creditBusy, setCreditBusy] = useState(false)
   const [creditError, setCreditError] = useState<string | null>(null)
 
+  const [onchain, setOnchain] = useState<OnchainInfo | null>(null)
+  const [lastTxHash, setLastTxHash] = useState<string | null>(null)
+
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async (id: string) => {
-    const [profileRes, eventsRes, historyRes, drawsData] = await Promise.all([
+    const [profileRes, eventsRes, historyRes, drawsData, onchainData] = await Promise.all([
       fetch(`/api/agents/${id}`),
       fetch(`/api/agents/${id}/events?limit=30`),
       fetch(`/api/agents/${id}/credit-history`),
       getCreditDraws(id).catch(() => []),
+      getOnchainInfo(id).catch(() => null),
     ])
     if (profileRes.ok) setProfile(await profileRes.json())
     if (eventsRes.ok) setEvents((await eventsRes.json()).events)
     if (historyRes.ok) setHistory((await historyRes.json()).history)
     setDraws(drawsData as Draw[])
+    setOnchain(onchainData as OnchainInfo | null)
   }, [])
+
+  const onchainReady = Boolean(onchain?.agentConfigured && onchain?.smartAccountAddress)
 
   useEffect(() => {
     const init = async () => {
@@ -191,13 +215,33 @@ export default function ProfilePage() {
     }
   }
 
+  const handleProvision = async () => {
+    if (!agentId || creditBusy) return
+    setCreditBusy(true)
+    setCreditError(null)
+    try {
+      await provisionSmartAccount(agentId)
+      await refresh(agentId)
+    } catch (error) {
+      setCreditError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCreditBusy(false)
+    }
+  }
+
   const handleDraw = async () => {
     if (!agentId || creditBusy) return
     const amount = parseFloat(drawAmount)
     setCreditBusy(true)
     setCreditError(null)
+    setLastTxHash(null)
     try {
-      await drawCredit(agentId, amount, 'Manual credit draw')
+      if (onchainReady) {
+        const { txHash } = await drawOnchain(agentId, amount, 'On-chain credit draw')
+        setLastTxHash(txHash)
+      } else {
+        await drawCredit(agentId, amount, 'Manual credit draw')
+      }
       setDrawAmount('')
       await refresh(agentId)
     } catch (error) {
@@ -211,8 +255,14 @@ export default function ProfilePage() {
     if (!agentId || creditBusy) return
     setCreditBusy(true)
     setCreditError(null)
+    setLastTxHash(null)
     try {
-      await repayCredit(txId)
+      if (onchainReady) {
+        const { txHash } = await repayOnchain(txId)
+        setLastTxHash(txHash)
+      } else {
+        await repayCredit(txId)
+      }
       await refresh(agentId)
     } catch (error) {
       setCreditError(error instanceof Error ? error.message : String(error))
@@ -381,10 +431,93 @@ export default function ProfilePage() {
         )}
       </div>
 
+      {/* On-chain layer (ERC-4337 · EAS · Sepolia) */}
+      {onchain?.configured && (
+        <div className="border border-border rounded-lg p-6">
+          <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
+            <Link2 className="size-5" /> On-Chain (Sepolia)
+          </h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            The credit limit is published to the on-chain registry and attested via EAS; draws and
+            repayments settle as real USDC through the agent&apos;s ERC-4337 smart account.
+          </p>
+
+          {onchain.smartAccountAddress ? (
+            <div className="space-y-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground">Smart account</span>
+                <a
+                  href={`${onchain.explorer}/address/${onchain.smartAccountAddress}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline"
+                >
+                  {onchain.smartAccountAddress.slice(0, 12)}…{onchain.smartAccountAddress.slice(-8)}
+                  <ExternalLink className="size-3" />
+                </a>
+                {!onchain.agentConfigured && (
+                  <span className="text-xs text-warning">(read-only — bundler not configured)</span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-muted-foreground">On-chain available</span>{' '}
+                  <span className="font-mono font-semibold text-success">
+                    {onchain.available === null ? '—' : `$${Math.round(onchain.available).toLocaleString()}`}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">On-chain outstanding</span>{' '}
+                  <span className="font-mono font-semibold">
+                    {onchain.outstanding === null ? '—' : `$${Math.round(onchain.outstanding).toLocaleString()}`}
+                  </span>
+                </div>
+              </div>
+              {onchainReady && (
+                <p className="text-xs text-success">
+                  Draws & repayments below execute on-chain as USDC UserOps.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                This agent has no smart account yet.
+              </p>
+              <button
+                onClick={handleProvision}
+                disabled={creditBusy || !onchain.agentConfigured}
+                className="inline-flex w-fit items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {creditBusy ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
+                Provision smart account
+              </button>
+              {!onchain.agentConfigured && (
+                <p className="text-xs text-warning">
+                  Set ZERODEV_RPC and AGENT_OWNER_PRIVATE_KEY to enable provisioning.
+                </p>
+              )}
+            </div>
+          )}
+
+          {lastTxHash && (
+            <a
+              href={`${onchain.explorer}/tx/${lastTxHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Latest tx: {lastTxHash.slice(0, 14)}… <ExternalLink className="size-3" />
+            </a>
+          )}
+        </div>
+      )}
+
       {/* Credit line — borrow and repay against the earned limit */}
       <div className="border border-border rounded-lg p-6">
         <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
           <Banknote className="size-5" /> Credit Line
+          {onchainReady && <span className="text-xs font-normal text-success">· on-chain</span>}
         </h3>
         <p className="text-sm text-muted-foreground mb-4">
           Draw against the credit the agent has earned, then repay it — on-time repayment raises the

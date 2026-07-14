@@ -55,8 +55,11 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
   const previousScore = previous ? previous.score : null
   const calculationReason = buildCalculationReason(assessment, previousScore)
 
+  const [agentRow] = await db.select().from(agent).where(eq(agent.id, agentId))
+
+  const scoreEntryId = nanoid()
   await db.insert(creditScoreEntry).values({
-    id: nanoid(),
+    id: scoreEntryId,
     agentId,
     score: assessment.score,
     rating: assessment.rating,
@@ -83,7 +86,50 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     })
     .where(eq(agent.id, agentId))
 
+  // Best-effort on-chain mirror: publish the limit to the registry and attest
+  // the score via EAS. Never blocks or fails the off-chain recalculation.
+  await mirrorOnchain(scoreEntryId, agentId, agentRow?.smartAccountAddress ?? null, assessment)
+
   return { ...assessment, previousScore, calculationReason }
+}
+
+async function mirrorOnchain(
+  scoreEntryId: string,
+  agentId: string,
+  smartAccountAddress: string | null,
+  assessment: CreditAssessment,
+): Promise<void> {
+  if (!smartAccountAddress) return
+  try {
+    const { isOnchainConfigured, onchainEnv } = await import('@/lib/onchain/config')
+    if (!isOnchainConfigured()) return
+    const { publishLimit, attestCredit } = await import('@/lib/onchain/credit')
+
+    const registryTxHash = await publishLimit(
+      smartAccountAddress as `0x${string}`,
+      assessment.creditLimit,
+      assessment.score,
+    )
+
+    let attestationTxHash: string | null = null
+    if (onchainEnv.easSchemaUid) {
+      attestationTxHash = await attestCredit({
+        agentId,
+        agentAddress: smartAccountAddress as `0x${string}`,
+        score: assessment.score,
+        rating: assessment.rating,
+        creditLimitUsd: assessment.creditLimit,
+        riskLevel: assessment.riskLevel,
+      })
+    }
+
+    await db
+      .update(creditScoreEntry)
+      .set({ registryTxHash, attestationTxHash })
+      .where(eq(creditScoreEntry.id, scoreEntryId))
+  } catch (error) {
+    console.error('[credit-engine] on-chain mirror failed (non-fatal):', error)
+  }
 }
 
 export * from './scoring'

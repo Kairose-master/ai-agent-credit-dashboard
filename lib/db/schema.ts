@@ -52,6 +52,7 @@ export const agent = pgTable('agent', {
   name: text('name').notNull(),
   description: text('description'),
   walletAddress: text('walletAddress').notNull().unique(),
+  smartAccountAddress: text('smartAccountAddress'), // ERC-4337 Kernel account (Sepolia)
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
   creditScore: decimal('creditScore', { precision: 6, scale: 2 }).notNull().default('0'),
   creditRating: text('creditRating').default('unrated'),
@@ -119,6 +120,8 @@ export const creditScoreEntry = pgTable('credit_scores', {
   riskLevel: text('risk_level').notNull(), // LOW | MODERATE | ELEVATED | HIGH
   calculationReason: text('calculation_reason').notNull(),
   breakdown: jsonb('breakdown').default({}), // per-factor component scores
+  registryTxHash: text('registry_tx_hash'), // on-chain limit publish (optional)
+  attestationTxHash: text('attestation_tx_hash'), // EAS attestation (optional)
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

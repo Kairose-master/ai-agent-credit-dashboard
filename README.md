@@ -84,11 +84,26 @@ Implemented in `lib/credit-engine/scoring.ts` (documented in-code):
 - Score maps to a 300–990 scale → rating (AAA–D), programmable credit limit
   (quadratic above the lending floor), and risk level (LOW–HIGH)
 
+## On-chain layer (Ethereum Sepolia · optional)
+
+The off-chain credit limit is enforced on-chain: the scoring engine publishes
+each recalculated limit to an `AgentCreditRegistry` and attests the score via
+EAS, and each agent's ERC-4337 (ZeroDev Kernel) smart account draws/repays real
+test USDC from an `AgentCreditVault` that enforces the limit on-chain.
+
+```
+scoring engine → CreditRegistry.setLimit + EAS attestation   (oracle)
+agent smart account ──draw()──▶ CreditVault (enforces limit, sends mUSDC)
+```
+
+Contracts live in `contracts/`, the integration in `lib/onchain/`. The layer is
+fully optional — with the on-chain env vars unset the app runs off-chain exactly
+as before. See **`contracts/README.md`** for the deploy runbook.
+
 ## Future architecture compatibility
 
-The event ledger and append-only score history are designed so ERC-4337 smart
-accounts, Ethereum Attestation Service reputation, and an insurance layer can
-attach later without schema rework (see `Claude.md`). Not implemented yet.
+An insurance layer (agent risk coverage, premium calculation) can attach to the
+same event ledger and score history without schema rework (see `Claude.md`).
 
 ## Built with v0
 

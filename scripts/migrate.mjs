@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS "agent" (
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "modelVersion" text DEFAULT 'claude-sonnet-5';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "creditRating" text DEFAULT 'unrated';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "riskLevel" text DEFAULT 'UNKNOWN';
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "smartAccountAddress" text;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -133,9 +134,13 @@ CREATE TABLE IF NOT EXISTS credit_scores (
   risk_level         text NOT NULL,
   calculation_reason text NOT NULL,
   breakdown          jsonb DEFAULT '{}',
+  registry_tx_hash    text,
+  attestation_tx_hash text,
   created_at         timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS credit_scores_agent_id_idx ON credit_scores (agent_id, created_at DESC);
+ALTER TABLE credit_scores ADD COLUMN IF NOT EXISTS registry_tx_hash text;
+ALTER TABLE credit_scores ADD COLUMN IF NOT EXISTS attestation_tx_hash text;
 
 -- ── Async task lifecycle ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_tasks (
