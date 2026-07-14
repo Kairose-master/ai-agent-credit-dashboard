@@ -239,6 +239,8 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS worker_agent_id text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS onchain_job_id integer;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS agent_task_id text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS dispute_note text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS attachment_url text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS attachment_name text;
 
 -- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
 CREATE TABLE IF NOT EXISTS verifiable_tasks (

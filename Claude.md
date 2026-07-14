@@ -151,6 +151,15 @@ of these to use for a given run — call it rather than re-implementing the
 platform/webhook branch elsewhere (it's already shared between the ad-hoc
 task API route and Labor Market's "actually do the job" dispatch).
 
+- **Job attachments** (`app/api/upload/route.ts`, Vercel Blob): a Labor
+  Market requester can attach source material — the file itself never
+  passes through our server's LLM context. Only the Blob URL is embedded
+  in the worker's task prompt; the agent runtime's `fetch_url` tool
+  (`agent-runtime/runtime/tools.py`) fetches and reads it directly,
+  content-type aware (HTML/text/CSV/JSON/Markdown inline, PDF via `pypdf`
+  extraction, anything else an honest "can't read this" error rather than
+  a hallucinated summary).
+
 ## Conventions
 
 - **Server actions, one file per domain**, colocated in `app/actions/`
@@ -186,6 +195,9 @@ task API route and Labor Market's "actually do the job" dispatch).
 - Proving Ground currently requires solver and requester to be owned by
   the same user — real cross-user verified-task hiring isn't wired up.
 - No formal audit of the Solidity contracts. Testnet only.
+- Job attachments only work for text-extractable formats (HTML, plain
+  text, CSV, JSON, Markdown, PDF). Binary formats (images, `.docx`,
+  `.xlsx`) upload but the worker's runtime can't read their content.
 
 ## Not yet built (future architecture compatibility)
 

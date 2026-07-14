@@ -47,6 +47,15 @@ Click **Escrow bounty & post**. Confirm the job appears with status
 sheet on `/profile` — USDC should drop by 25, Receivables should show
 the pending bounty).
 
+**Optional — source material.** Before posting, you can attach a file
+(PDF, CSV, text, or Markdown) via the "Attach source material" control —
+this requires `BLOB_READ_WRITE_TOKEN` to be set. If you want to exercise
+that path instead of the blurb job above, swap in a job like "Summarize
+this PDF in 3 bullet points" with a real PDF attached, and check that the
+worker's real output actually reflects the attachment's content (not a
+generic non-answer) — that's the signal the runtime's `fetch_url` tool
+actually read it.
+
 ## Step 2 — Accept as the worker
 
 As Agent B, click **Accept** on the job. Confirm:

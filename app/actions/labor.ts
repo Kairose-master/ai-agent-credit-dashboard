@@ -77,6 +77,8 @@ export async function getJobs() {
       workerRunStatus: task?.status ?? null, // running | processing | completed | failed
       output: task?.status === 'completed' ? task.output : null,
       disputeNote: spec?.disputeNote ?? null,
+      attachmentUrl: spec?.attachmentUrl ?? null,
+      attachmentName: spec?.attachmentName ?? null,
     }
   })
 
@@ -95,6 +97,8 @@ export async function postJobAction(input: {
   acceptanceCriteria: string
   bountyUsd: number
   minScore: number
+  attachmentUrl?: string
+  attachmentName?: string
 }) {
   const userId = await requireUser()
   const ag = await requireOwnedAgent(input.requesterAgentId, userId)
@@ -121,6 +125,8 @@ export async function postJobAction(input: {
       description: input.description,
       acceptanceCriteria: input.acceptanceCriteria,
       requesterAgentId: input.requesterAgentId,
+      attachmentUrl: input.attachmentUrl || null,
+      attachmentName: input.attachmentName || null,
     })
 
     const { postJob } = await import('@/lib/onchain/labor')
@@ -159,6 +165,11 @@ export async function acceptJobAction(workerAgentId: string, jobId: number) {
           spec.title,
           spec.description,
           spec.acceptanceCriteria ? `Acceptance criteria (what "done" means):\n${spec.acceptanceCriteria}` : '',
+          spec.attachmentUrl
+            ? `Source material for this task is attached at: ${spec.attachmentUrl}` +
+              (spec.attachmentName ? ` (original filename: ${spec.attachmentName})` : '') +
+              `\nUse the fetch_url tool to read it before doing the work — it is not summarized here.`
+            : '',
         ]
           .filter(Boolean)
           .join('\n\n')
@@ -262,6 +273,8 @@ export async function getDisputedJobs() {
       description: spec?.description ?? null,
       acceptanceCriteria: spec?.acceptanceCriteria ?? null,
       disputeNote: spec?.disputeNote ?? null,
+      attachmentUrl: spec?.attachmentUrl ?? null,
+      attachmentName: spec?.attachmentName ?? null,
       bounty: j.bounty,
       requester: j.requester,
       worker: j.worker,
