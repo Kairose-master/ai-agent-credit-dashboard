@@ -16,9 +16,12 @@ import {
   HandCoins,
   Link2,
   ExternalLink,
+  Send,
+  Copy,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
+import { getTreasury, sendFromTreasury } from '@/app/actions/treasury'
 import {
   getOnchainInfo,
   provisionSmartAccount,
@@ -109,6 +112,18 @@ const EVENT_META: Record<string, { label: string; Icon: typeof Play }> = {
   TASK_FAILED: { label: 'Task failed', Icon: XCircle },
   ACHIEVEMENT_VERIFIED: { label: 'Achievement verified', Icon: Sparkles },
   REPAYMENT_COMPLETED: { label: 'Credit repaid', Icon: HandCoins },
+  VERIFIED_TASK_COMPLETED: { label: 'Verified task passed', Icon: CheckCircle2 },
+  VERIFIED_TASK_FAILED: { label: 'Verified task failed', Icon: XCircle },
+  WALLET_TRANSFER: { label: 'Wallet transfer', Icon: Send },
+}
+
+type Treasury = {
+  configured: boolean
+  address: string | null
+  usdc: number | null
+  spent24h: number
+  maxPerTx: number
+  dailyCap: number
 }
 
 export default function ProfilePage() {
@@ -131,6 +146,12 @@ export default function ProfilePage() {
   const [onchain, setOnchain] = useState<OnchainInfo | null>(null)
   const [lastTxHash, setLastTxHash] = useState<string | null>(null)
 
+  const [treasury, setTreasury] = useState<Treasury | null>(null)
+  const [sendTo, setSendTo] = useState('')
+  const [sendAmount, setSendAmount] = useState('')
+  const [treasuryBusy, setTreasuryBusy] = useState(false)
+  const [treasuryMsg, setTreasuryMsg] = useState<string | null>(null)
+
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async (id: string) => {
@@ -146,7 +167,25 @@ export default function ProfilePage() {
     if (historyRes.ok) setHistory((await historyRes.json()).history)
     setDraws(drawsData as Draw[])
     setOnchain(onchainData as OnchainInfo | null)
+    setTreasury(await getTreasury(id).catch(() => null))
   }, [])
+
+  const handleSend = async () => {
+    if (!agentId || treasuryBusy) return
+    setTreasuryBusy(true)
+    setTreasuryMsg(null)
+    try {
+      const { txHash } = await sendFromTreasury(agentId, sendTo.trim(), parseFloat(sendAmount))
+      setTreasuryMsg(`Sent — tx ${txHash.slice(0, 14)}…`)
+      setSendTo('')
+      setSendAmount('')
+      await refresh(agentId)
+    } catch (error) {
+      setTreasuryMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setTreasuryBusy(false)
+    }
+  }
 
   const onchainReady = Boolean(onchain?.agentConfigured && onchain?.smartAccountAddress)
 
@@ -596,6 +635,78 @@ export default function ProfilePage() {
           </div>
         )}
       </div>
+
+      {/* Treasury — the agent's external-facing wallet */}
+      {treasury?.configured && (
+        <div className="border border-border rounded-lg p-6">
+          <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
+            <Send className="size-5" /> Treasury
+          </h3>
+          <p className="text-sm text-muted-foreground mb-4">
+            The agent&apos;s on-chain wallet. Deposit by sending USDC to the address below; the agent
+            can also pay external addresses itself mid-task (send_usdc tool), within spending caps.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-4">
+            <div>
+              <span className="text-muted-foreground">USDC balance</span>{' '}
+              <span className="font-mono font-semibold">
+                {treasury.usdc === null ? '—' : `$${treasury.usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Spent (24h)</span>{' '}
+              <span className="font-mono font-semibold">${treasury.spent24h.toFixed(2)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Caps</span>{' '}
+              <span className="font-mono font-semibold">
+                ${treasury.maxPerTx}/tx · ${treasury.dailyCap}/day
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 mb-4 text-xs">
+            <span className="text-muted-foreground">Deposit address</span>
+            <code className="rounded bg-secondary px-2 py-1 font-mono">{treasury.address}</code>
+            <button
+              onClick={() => navigator.clipboard?.writeText(treasury.address ?? '')}
+              className="rounded border border-border p-1 hover:bg-secondary"
+              aria-label="Copy address"
+            >
+              <Copy className="size-3.5" />
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={sendTo}
+              onChange={(e) => setSendTo(e.target.value)}
+              placeholder="Recipient 0x…"
+              className="h-9 w-72 rounded-md border border-border bg-background px-3 font-mono text-sm"
+              disabled={treasuryBusy}
+            />
+            <input
+              type="number"
+              min="0"
+              value={sendAmount}
+              onChange={(e) => setSendAmount(e.target.value)}
+              placeholder="USDC"
+              className="h-9 w-28 rounded-md border border-border bg-background px-3 text-sm"
+              disabled={treasuryBusy}
+            />
+            <button
+              onClick={handleSend}
+              disabled={treasuryBusy || !sendTo.trim() || !sendAmount}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+            >
+              {treasuryBusy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+              Send USDC
+            </button>
+          </div>
+          {treasuryMsg && <p className="mt-3 text-sm text-muted-foreground">{treasuryMsg}</p>}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Credit evolution */}

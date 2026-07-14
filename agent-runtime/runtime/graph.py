@@ -40,6 +40,7 @@ class AgentState(TypedDict, total=False):
     task_id: str
     task: str
     api_key: str  # BYOK — the user's own Anthropic key for this run
+    wallet_api: str  # app endpoint for the agent's wallet tools
     plan: str
     output: str
     success: bool
@@ -77,7 +78,8 @@ def planner_node(state: AgentState) -> AgentState:
         system=(
             "You are the planning module of an autonomous research agent. "
             "Produce a concise numbered plan (max 5 steps) to accomplish the task. "
-            "Available tools: fetch_url, calculator, current_date. Plan only — do not execute."
+            "Available tools: fetch_url, calculator, current_date, wallet_balance, send_usdc "
+            "(payments only when the task explicitly requires one). Plan only — do not execute."
         ),
         messages=[{"role": "user", "content": state["task"]}],
     )
@@ -123,9 +125,14 @@ def executor_node(state: AgentState) -> AgentState:
             break
 
         messages.append({"role": "assistant", "content": message.content})
+        tool_ctx = {
+            "agent_id": state["agent_id"],
+            "wallet_api": state.get("wallet_api", ""),
+            "secret": config.RUNTIME_SHARED_SECRET,
+        }
         results = []
         for tool_use in tool_uses:
-            result = run_tool(tool_use.name, tool_use.input)
+            result = run_tool(tool_use.name, tool_use.input, ctx=tool_ctx)
             state["events"].append(
                 _event(
                     state,
@@ -207,7 +214,13 @@ def build_graph():
 AGENT_GRAPH = build_graph()
 
 
-def run_task(agent_id: str, task_id: str, task: str, api_key: str | None = None) -> dict[str, Any]:
+def run_task(
+    agent_id: str,
+    task_id: str,
+    task: str,
+    api_key: str | None = None,
+    wallet_api: str | None = None,
+) -> dict[str, Any]:
     """Execute one task end-to-end and return the structured run record."""
     state: AgentState = {
         "agent_id": agent_id,
@@ -219,6 +232,8 @@ def run_task(agent_id: str, task_id: str, task: str, api_key: str | None = None)
     }
     if api_key:
         state["api_key"] = api_key
+    if wallet_api:
+        state["wallet_api"] = wallet_api
     state["events"].append(_event(state, "TASK_STARTED", detail={"task": task}))
 
     try:

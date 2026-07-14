@@ -41,6 +41,28 @@ TOOL_SCHEMAS = [
         "description": "Return today's date in ISO format.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "wallet_balance",
+        "description": "Check this agent's own on-chain USDC wallet balance and spending limits.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "send_usdc",
+        "description": (
+            "Send USDC from this agent's own on-chain wallet to an external address. "
+            "Use ONLY when the task explicitly requires making a payment. "
+            "Subject to per-transfer and daily spending caps enforced by the platform."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient address (0x…, 40 hex chars)"},
+                "amount": {"type": "number", "description": "Amount in USDC"},
+                "memo": {"type": "string", "description": "Short reason for the payment"},
+            },
+            "required": ["to", "amount"],
+        },
+    },
 ]
 
 _OPS = {
@@ -95,11 +117,40 @@ def current_date() -> str:
     return datetime.date.today().isoformat()
 
 
-def run_tool(name: str, tool_input: dict) -> str:
+def _wallet_call(ctx: dict | None, action: str, extra: dict | None = None) -> str:
+    """Proxy wallet actions to the app's secret-authed wallet API. The runtime
+    never holds keys; the app enforces the spending policy and signs."""
+    if not ctx or not ctx.get("wallet_api"):
+        return "error: wallet not available in this environment"
+    try:
+        headers = {"Content-Type": "application/json"}
+        if ctx.get("secret"):
+            headers["X-Runtime-Secret"] = ctx["secret"]
+        response = httpx.post(
+            ctx["wallet_api"],
+            json={"action": action, "agent_id": ctx["agent_id"], **(extra or {})},
+            headers=headers,
+            timeout=90,
+        )
+        body = response.text[:500]
+        return body if response.status_code == 200 else f"error: {body}"
+    except Exception as exc:
+        return f"error: {exc}"
+
+
+def run_tool(name: str, tool_input: dict, ctx: dict | None = None) -> str:
     if name == "fetch_url":
         return fetch_url(tool_input.get("url", ""))
     if name == "calculator":
         return calculator(tool_input.get("expression", ""))
     if name == "current_date":
         return current_date()
+    if name == "wallet_balance":
+        return _wallet_call(ctx, "balance")
+    if name == "send_usdc":
+        return _wallet_call(ctx, "transfer", {
+            "to": tool_input.get("to", ""),
+            "amount": tool_input.get("amount", 0),
+            "memo": tool_input.get("memo", ""),
+        })
     return f"error: unknown tool {name}"
