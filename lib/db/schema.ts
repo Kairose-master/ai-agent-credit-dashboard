@@ -121,6 +121,34 @@ export const jobSpec = pgTable('job_specs', {
 })
 
 /**
+ * verifiable_tasks — verified-task lifecycle (the trustworthy quality signal).
+ * The server generates problem + answer (grader ≠ solver), escrows the bounty
+ * on-chain, sends only the problem to the solving agent, and on callback
+ * grades the output against the hidden answer; correct answers settle the
+ * escrow via commit-reveal. The answer/salt stay server-side until reveal.
+ */
+export const verifiableTask = pgTable('verifiable_tasks', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  solverAgentId: text('solver_agent_id').notNull(),
+  requesterAgentId: text('requester_agent_id').notNull(),
+  difficulty: integer('difficulty').notNull(),
+  problem: text('problem').notNull(),
+  answer: text('answer').notNull(), // hidden ground truth
+  salt: text('salt').notNull(), // commit-reveal salt
+  bountyUsd: decimal('bounty_usd', { precision: 18, scale: 2 }).notNull(),
+  onchainId: integer('onchain_id'),
+  agentTaskId: text('agent_task_id'), // links to agent_tasks (the solve run)
+  status: text('status').notNull().default('posting'), // posting | solving | settling | completed | failed | error
+  submittedAnswer: text('submitted_answer'),
+  postTxHash: text('post_tx_hash'),
+  settleTxHash: text('settle_tx_hash'),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * credit_scores — append-only score history.
  * One row per recalculation, so the dashboard can show credit evolution
  * (before → after) together with the reason for each change.

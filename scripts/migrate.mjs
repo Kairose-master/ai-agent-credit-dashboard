@@ -151,6 +151,29 @@ CREATE TABLE IF NOT EXISTS job_specs (
   created_at         timestamptz NOT NULL DEFAULT now()
 );
 
+-- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
+CREATE TABLE IF NOT EXISTS verifiable_tasks (
+  id                 text PRIMARY KEY,
+  user_id            text NOT NULL,
+  solver_agent_id    text NOT NULL,
+  requester_agent_id text NOT NULL,
+  difficulty         integer NOT NULL,
+  problem            text NOT NULL,
+  answer             text NOT NULL,
+  salt               text NOT NULL,
+  bounty_usd         numeric(18,2) NOT NULL,
+  onchain_id         integer,
+  agent_task_id      text,
+  status             text NOT NULL DEFAULT 'posting',
+  submitted_answer   text,
+  post_tx_hash       text,
+  settle_tx_hash     text,
+  error              text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS verifiable_tasks_user_idx ON verifiable_tasks (user_id, created_at DESC);
+
 -- ── Async task lifecycle ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS agent_tasks (
   id         text PRIMARY KEY,

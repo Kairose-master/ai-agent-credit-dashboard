@@ -20,6 +20,7 @@ export const onchainEnv = {
   registryAddress: (process.env.CREDIT_REGISTRY_ADDRESS ?? '') as `0x${string}` | '',
   vaultAddress: (process.env.CREDIT_VAULT_ADDRESS ?? '') as `0x${string}` | '',
   laborMarketAddress: (process.env.LABOR_MARKET_ADDRESS ?? '') as `0x${string}` | '',
+  verifiedEscrowAddress: (process.env.VERIFIED_TASK_ESCROW_ADDRESS ?? '') as `0x${string}` | '',
   usdcAddress: (process.env.MOCK_USDC_ADDRESS ?? '') as `0x${string}` | '',
   easAddress: (process.env.EAS_ADDRESS ??
     '0xC2679fBD37d54388Ce493F1DB75320D236e1815e') as `0x${string}`, // EAS on Sepolia
@@ -44,6 +45,11 @@ export function isAgentAccountConfigured(): boolean {
 /** True when the on-chain labor market is available. */
 export function isLaborMarketConfigured(): boolean {
   return Boolean(onchainEnv.laborMarketAddress && isAgentAccountConfigured())
+}
+
+/** True when the verified-task escrow is available. */
+export function isVerifiedEscrowConfigured(): boolean {
+  return Boolean(onchainEnv.verifiedEscrowAddress && isAgentAccountConfigured())
 }
 
 export const REGISTRY_ABI = [
@@ -105,6 +111,31 @@ export const LABOR_MARKET_ABI = [
 
 export const JOB_STATUS = ['Open', 'Accepted', 'Submitted', 'Completed', 'Cancelled'] as const
 export type JobStatus = (typeof JOB_STATUS)[number]
+
+export const VERIFIED_ESCROW_ABI = [
+  { type: 'function', name: 'postTask', stateMutability: 'nonpayable', inputs: [{ name: 'bounty', type: 'uint256' }, { name: 'minScore', type: 'uint256' }, { name: 'specHash', type: 'bytes32' }, { name: 'answerHash', type: 'bytes32' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'commitAnswer', stateMutability: 'nonpayable', inputs: [{ name: 'taskId', type: 'uint256' }, { name: 'commitment', type: 'bytes32' }], outputs: [] },
+  { type: 'function', name: 'revealAnswer', stateMutability: 'nonpayable', inputs: [{ name: 'taskId', type: 'uint256' }, { name: 'answer', type: 'string' }, { name: 'salt', type: 'bytes32' }], outputs: [] },
+  { type: 'function', name: 'cancelTask', stateMutability: 'nonpayable', inputs: [{ name: 'taskId', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'taskCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  {
+    type: 'function',
+    name: 'tasks',
+    stateMutability: 'view',
+    inputs: [{ name: 'taskId', type: 'uint256' }],
+    outputs: [
+      { name: 'requester', type: 'address' },
+      { name: 'solver', type: 'address' },
+      { name: 'bounty', type: 'uint256' },
+      { name: 'minScore', type: 'uint256' },
+      { name: 'specHash', type: 'bytes32' },
+      { name: 'answerHash', type: 'bytes32' },
+      { name: 'commitment', type: 'bytes32' },
+      { name: 'revealDeadline', type: 'uint256' },
+      { name: 'status', type: 'uint8' },
+    ],
+  },
+] as const
 
 // EAS.attest((bytes32 schema, (address,uint64,bool,bytes32,bytes,uint256)))
 export const EAS_ABI = [

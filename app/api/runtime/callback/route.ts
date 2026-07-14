@@ -1,10 +1,12 @@
 import { db } from '@/lib/db'
-import { agentEvent, agentTask } from '@/lib/db/schema'
+import { agentEvent, agentTask, verifiableTask } from '@/lib/db/schema'
 import { recalculateCredit } from '@/lib/credit-engine'
 import { eq, and } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
+import { extractAnswer } from '@/lib/verifiable/problems'
 
-export const maxDuration = 60
+// Verified-task settlement runs two UserOps; allow time for bundler inclusion.
+export const maxDuration = 300
 
 /**
  * POST /api/runtime/callback
@@ -61,6 +63,9 @@ export async function POST(request: Request) {
       )
     }
 
+    // Verified task? Grade against the hidden answer and settle the escrow.
+    await settleVerifiedTask(taskId, agentId, String(body?.output ?? ''))
+
     const credit = await recalculateCredit(agentId)
 
     await db
@@ -101,5 +106,94 @@ export async function POST(request: Request) {
       .where(eq(agentTask.id, taskId))
     console.error('[runtime/callback] Failed to process task', taskId, error)
     return Response.json({ error: 'Failed to process callback' }, { status: 500 })
+  }
+}
+
+/**
+ * If this agent run was the solve of a verified task: grade the output
+ * against the hidden ground-truth answer (grader ≠ solver), and on a correct
+ * answer settle the on-chain escrow via commit-reveal from the solver's
+ * smart account. Both outcomes are recorded as VERIFIED_TASK_* events — the
+ * factual quality signal the credit engine weighs above self-evaluation.
+ */
+async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, output: string) {
+  const [row] = await db
+    .select()
+    .from(verifiableTask)
+    .where(eq(verifiableTask.agentTaskId, agentTaskId))
+  if (!row || row.status !== 'solving') return
+
+  const submitted = extractAnswer(output)
+  const correct = submitted !== null && submitted === row.answer
+
+  try {
+    if (correct && row.onchainId) {
+      await db
+        .update(verifiableTask)
+        .set({ status: 'settling', submittedAnswer: submitted, updatedAt: new Date() })
+        .where(eq(verifiableTask.id, row.id))
+
+      const { commitAndReveal } = await import('@/lib/onchain/verified')
+      const { revealTx } = await commitAndReveal(
+        row.solverAgentId,
+        row.onchainId,
+        row.answer,
+        row.salt as `0x${string}`,
+      )
+
+      await db
+        .update(verifiableTask)
+        .set({ status: 'completed', settleTxHash: revealTx, updatedAt: new Date() })
+        .where(eq(verifiableTask.id, row.id))
+
+      await db.insert(agentEvent).values({
+        id: nanoid(),
+        agentId: solverAgentId,
+        taskId: `verified-${row.id}`,
+        eventType: 'VERIFIED_TASK_COMPLETED',
+        success: true,
+        executionTime: 0,
+        tokenCost: 0,
+        qualityScore: '1.000', // graded fact, not self-opinion
+        detail: {
+          difficulty: row.difficulty,
+          bounty: row.bountyUsd,
+          problem: row.problem,
+          txHash: revealTx,
+          onchain: true,
+        },
+      })
+    } else {
+      await db
+        .update(verifiableTask)
+        .set({ status: 'failed', submittedAnswer: submitted, updatedAt: new Date() })
+        .where(eq(verifiableTask.id, row.id))
+
+      await db.insert(agentEvent).values({
+        id: nanoid(),
+        agentId: solverAgentId,
+        taskId: `verified-${row.id}`,
+        eventType: 'VERIFIED_TASK_FAILED',
+        success: false,
+        executionTime: 0,
+        tokenCost: 0,
+        qualityScore: '0.000',
+        detail: {
+          difficulty: row.difficulty,
+          problem: row.problem,
+          submitted: submitted ?? '(no FINAL_ANSWER found)',
+        },
+      })
+    }
+  } catch (error) {
+    console.error('[runtime/callback] verified settlement failed:', error)
+    await db
+      .update(verifiableTask)
+      .set({
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+        updatedAt: new Date(),
+      })
+      .where(eq(verifiableTask.id, row.id))
   }
 }

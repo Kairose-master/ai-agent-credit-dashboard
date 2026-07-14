@@ -63,13 +63,21 @@ function dampen(raw: number, sampleSize: number): number {
 }
 
 export function assessCredit(events: AgentEventInput[]): CreditAssessment {
-  // Terminal task events are the unit of behavioral history.
+  // Terminal task events are the unit of behavioral history. Two grades of
+  // signal: self-evaluated (TASK_*, the runtime grading its own output) and
+  // ground-truth verified (VERIFIED_TASK_*, graded server-side against a
+  // hidden answer and settled by escrow). Verified events are facts; the
+  // self-evaluated ones are opinions and carry less reputational weight.
+  const TERMINAL_SUCCESS = new Set(['TASK_COMPLETED', 'VERIFIED_TASK_COMPLETED'])
+  const TERMINAL = new Set([...TERMINAL_SUCCESS, 'TASK_FAILED', 'VERIFIED_TASK_FAILED'])
+  const isSuccess = (t: AgentEventInput) => TERMINAL_SUCCESS.has(t.eventType) && t.success
+
   const tasks = events
-    .filter((e) => e.eventType === 'TASK_COMPLETED' || e.eventType === 'TASK_FAILED')
+    .filter((e) => TERMINAL.has(e.eventType))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
 
-  const completed = tasks.filter((t) => t.eventType === 'TASK_COMPLETED' && t.success)
-  const failed = tasks.filter((t) => !(t.eventType === 'TASK_COMPLETED' && t.success))
+  const completed = tasks.filter(isSuccess)
+  const failed = tasks.filter((t) => !isSuccess(t))
   const n = tasks.length
 
   // Cold start: no behavioral history means no credit. Dampening pulls
@@ -120,7 +128,7 @@ export function assessCredit(events: AgentEventInput[]): CreditAssessment {
 
   // Failure frequency over the recent window (recency matters for trust).
   const recent = tasks.slice(-RECENT_WINDOW)
-  const recentFailures = recent.filter((t) => !(t.eventType === 'TASK_COMPLETED' && t.success)).length
+  const recentFailures = recent.filter((t) => !isSuccess(t)).length
   const failureFrequency = recent.length > 0 ? clamp(100 * (1 - recentFailures / recent.length)) : 0
 
   // SLA compliance: share of tasks finishing within the SLA budget.
@@ -155,12 +163,14 @@ export function assessCredit(events: AgentEventInput[]): CreditAssessment {
   // accrues from the volume of successful interactions — repaid credit and,
   // most of all, delivered paid work.
   const achievements = events.filter((e) => e.eventType === 'ACHIEVEMENT_VERIFIED').length
+  const verifiedCompleted = events.filter((e) => e.eventType === 'VERIFIED_TASK_COMPLETED').length
   const reputation = dampen(
     clamp(
       Math.log10(completed.length + 1) * 35 +
         achievements * 10 +
         repayments * 8 +
-        jobsCompleted * 12,
+        jobsCompleted * 12 +
+        verifiedCompleted * 10, // ground-truth-verified capability
     ),
     n + achievements + repayments + jobsCompleted,
   )
