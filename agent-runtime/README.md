@@ -11,6 +11,18 @@ Every run emits structured behavioral events (`TASK_STARTED`, `PLAN_CREATED`,
 those events in Neon PostgreSQL and feeds them to the credit scoring engine —
 this runtime itself is stateless.
 
+## Execution model (asynchronous)
+
+`POST /run` returns `202 Accepted` immediately and runs the agent in a
+background thread. When the run finishes it POSTs the events + result to the
+`callback_url` supplied in the request. This keeps the caller's request short
+(no serverless timeout) and lets the dashboard poll for the result.
+
+Both `/run` (inbound) and the callback (outbound) are authenticated with a
+shared secret via the `X-Runtime-Secret` header. Set `RUNTIME_SHARED_SECRET`
+to the SAME value here and on the Next.js side. If unset, the runtime runs
+open (local dev only).
+
 ## Setup
 
 ```bash
@@ -39,7 +51,8 @@ python run_task.py "Summarize the key risks of algorithmic stablecoins"
 
 | Env var               | Default            | Purpose                       |
 | --------------------- | ------------------ | ----------------------------- |
-| `ANTHROPIC_API_KEY`   | —                  | Claude API access (required)  |
-| `ANTHROPIC_MODEL`     | `claude-sonnet-5`  | Reasoning model               |
-| `MAX_TOOL_ITERATIONS` | `6`                | Tool-use loop budget          |
-| `MAX_OUTPUT_TOKENS`   | `2048`             | Per-call output token budget  |
+| `ANTHROPIC_API_KEY`     | —                  | Claude API access (required)  |
+| `ANTHROPIC_MODEL`       | `claude-sonnet-5`  | Reasoning model               |
+| `RUNTIME_SHARED_SECRET` | —                  | Auth secret (match Next.js)   |
+| `MAX_TOOL_ITERATIONS`   | `6`                | Tool-use loop budget          |
+| `MAX_OUTPUT_TOKENS`     | `2048`             | Per-call output token budget  |

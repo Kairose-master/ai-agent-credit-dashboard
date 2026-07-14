@@ -7,10 +7,21 @@
  * the agent's live credit state.
  */
 import { db } from '@/lib/db'
-import { agent, agentEvent, creditScoreEntry } from '@/lib/db/schema'
-import { desc, eq } from 'drizzle-orm'
+import { agent, agentEvent, creditScoreEntry, creditTransaction } from '@/lib/db/schema'
+import { and, desc, eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { assessCredit, buildCalculationReason, type CreditAssessment } from './scoring'
+
+/** Sum of credit drawn but not yet repaid — reduces available credit. */
+async function outstandingBalance(agentId: string): Promise<number> {
+  const active = await db
+    .select()
+    .from(creditTransaction)
+    .where(and(eq(creditTransaction.fromAgentId, agentId), eq(creditTransaction.status, 'active')))
+  return active
+    .filter((t) => t.type === 'credit_draw')
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0)
+}
 
 export type CreditState = CreditAssessment & {
   previousScore: number | null
@@ -55,6 +66,10 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     breakdown: assessment.breakdown,
   })
 
+  // Available credit is the new limit minus whatever is still drawn.
+  const outstanding = await outstandingBalance(agentId)
+  const available = Math.max(0, assessment.creditLimit - outstanding)
+
   await db
     .update(agent)
     .set({
@@ -63,7 +78,7 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
       riskRating: assessment.rating,
       riskLevel: assessment.riskLevel,
       totalCreditLine: assessment.creditLimit.toString(),
-      availableCredit: assessment.creditLimit.toString(),
+      availableCredit: available.toString(),
       updatedAt: new Date(),
     })
     .where(eq(agent.id, agentId))

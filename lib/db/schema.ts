@@ -85,6 +85,27 @@ export const agentEvent = pgTable('agent_events', {
 })
 
 /**
+ * agent_tasks — async task lifecycle.
+ * POST /tasks creates a row (status running) and returns immediately, so
+ * the request never blocks on the multi-minute agent run and can't hit the
+ * serverless function timeout. The runtime calls back on completion; the
+ * dashboard polls this row for the result.
+ */
+export const agentTask = pgTable('agent_tasks', {
+  id: text('id').primaryKey(), // taskId
+  userId: text('user_id').notNull(),
+  agentId: text('agent_id').notNull(),
+  task: text('task').notNull(),
+  status: text('status').notNull().default('running'), // running | processing | completed | failed
+  output: text('output'),
+  result: jsonb('result'), // { plan, qualityScore, evaluation, executionTime, tokenCost }
+  credit: jsonb('credit'), // credit state after recalculation
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * credit_scores — append-only score history.
  * One row per recalculation, so the dashboard can show credit evolution
  * (before → after) together with the reason for each change.

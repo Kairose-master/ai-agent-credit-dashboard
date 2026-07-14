@@ -1,8 +1,10 @@
 /**
  * HTTP client for the Python agent runtime (agent-runtime/).
- * The runtime is a stateless execution service: it runs a task and
- * returns the output plus the structured behavioral events; persisting
- * those events and recalculating credit happens in the API layer.
+ *
+ * The runtime is asynchronous: startAgentTask() kicks off the run and returns
+ * as soon as the runtime has accepted it (HTTP 202). The runtime later POSTs
+ * the events + result to our callback endpoint, which persists them and
+ * recalculates credit. This keeps every serverless request short.
  */
 
 export type RuntimeEvent = {
@@ -17,6 +19,8 @@ export type RuntimeEvent = {
 }
 
 export type AgentRunResult = {
+  task_id: string
+  agent_id: string
   success: boolean
   output: string
   plan: string
@@ -28,10 +32,9 @@ export type AgentRunResult = {
 }
 
 /**
- * Normalize AGENT_RUNTIME_URL: a bare host like
- * "my-service.up.railway.app" (no scheme) makes fetch() throw
- * "Failed to parse URL", so default a missing scheme to https and
- * trim any trailing slash.
+ * Normalize AGENT_RUNTIME_URL: a bare host like "svc.up.railway.app" (no
+ * scheme) makes fetch() throw "Failed to parse URL", so default a missing
+ * scheme to https and trim any trailing slash.
  */
 function resolveRuntimeUrl(): string {
   const raw = (process.env.AGENT_RUNTIME_URL ?? 'http://localhost:8000').trim()
@@ -40,26 +43,31 @@ function resolveRuntimeUrl(): string {
 }
 
 const RUNTIME_URL = resolveRuntimeUrl()
+const RUNTIME_SECRET = process.env.RUNTIME_SHARED_SECRET ?? ''
 
-export async function runAgentTask(input: {
+/** Ask the runtime to start a task; resolves once it has been accepted. */
+export async function startAgentTask(input: {
   agentId: string
   taskId: string
   task: string
-}): Promise<AgentRunResult> {
+  callbackUrl: string
+}): Promise<void> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (RUNTIME_SECRET) headers['X-Runtime-Secret'] = RUNTIME_SECRET
+
   const response = await fetch(`${RUNTIME_URL}/run`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       agent_id: input.agentId,
       task_id: input.taskId,
       task: input.task,
+      callback_url: input.callbackUrl,
     }),
-    // Agent runs involve several model calls; allow a generous window.
-    signal: AbortSignal.timeout(180_000),
+    signal: AbortSignal.timeout(15_000),
   })
 
   if (!response.ok) {
     throw new Error(`Agent runtime responded ${response.status}: ${await response.text()}`)
   }
-  return (await response.json()) as AgentRunResult
 }

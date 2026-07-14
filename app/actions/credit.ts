@@ -1,0 +1,99 @@
+'use server'
+
+import { getSession } from '@/lib/get-session'
+import { db } from '@/lib/db'
+import { agent, agentEvent, creditTransaction } from '@/lib/db/schema'
+import { recalculateCredit } from '@/lib/credit-engine'
+import { and, desc, eq } from 'drizzle-orm'
+import { revalidatePath } from 'next/cache'
+import { nanoid } from 'nanoid'
+
+async function requireOwnedAgent(agentId: string) {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+  const [found] = await db.select().from(agent).where(eq(agent.id, agentId))
+  if (!found || found.userId !== session.user.id) throw new Error('Agent not found')
+  return { agent: found, userId: session.user.id }
+}
+
+/** Active (drawn, not-yet-repaid) credit for an agent. */
+export async function getCreditDraws(agentId: string) {
+  await requireOwnedAgent(agentId)
+  return db
+    .select()
+    .from(creditTransaction)
+    .where(
+      and(
+        eq(creditTransaction.fromAgentId, agentId),
+        eq(creditTransaction.type, 'credit_draw'),
+        eq(creditTransaction.status, 'active'),
+      ),
+    )
+    .orderBy(desc(creditTransaction.createdAt))
+}
+
+/**
+ * Draw against the agent's available credit line. Bounded by availableCredit,
+ * which the scoring engine derives from the credit limit minus outstanding draws.
+ */
+export async function drawCredit(agentId: string, amount: number, description?: string) {
+  const { agent: ag, userId } = await requireOwnedAgent(agentId)
+
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be positive')
+  const available = parseFloat(ag.availableCredit ?? '0')
+  if (amount > available) {
+    throw new Error(`Amount exceeds available credit ($${Math.round(available).toLocaleString()})`)
+  }
+
+  await db.insert(creditTransaction).values({
+    id: nanoid(),
+    userId,
+    fromAgentId: agentId,
+    status: 'active',
+    amount: amount.toString(),
+    type: 'credit_draw',
+    description: description || 'Credit draw',
+  })
+
+  // Recalculation folds the new outstanding balance into available credit.
+  const credit = await recalculateCredit(agentId)
+  revalidatePath('/profile')
+  return credit
+}
+
+/**
+ * Repay an active draw. This is a positive credit signal: it emits a
+ * REPAYMENT_COMPLETED behavioral event, so the recalculated score reflects a
+ * proven repayment — closing the borrow → repay → higher-limit loop.
+ */
+export async function repayCredit(txId: string) {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+
+  const [tx] = await db.select().from(creditTransaction).where(eq(creditTransaction.id, txId))
+  if (!tx || tx.userId !== session.user.id) throw new Error('Transaction not found')
+  if (tx.status !== 'active' || tx.type !== 'credit_draw') {
+    throw new Error('Transaction is not an active credit draw')
+  }
+
+  await db
+    .update(creditTransaction)
+    .set({ status: 'settled', settledAt: new Date(), updatedAt: new Date() })
+    .where(eq(creditTransaction.id, txId))
+
+  await db.insert(agentEvent).values({
+    id: nanoid(),
+    agentId: tx.fromAgentId,
+    taskId: `repay-${txId}`,
+    eventType: 'REPAYMENT_COMPLETED',
+    success: true,
+    executionTime: 0,
+    tokenCost: 0,
+    qualityScore: '1.000',
+    detail: { amount: tx.amount, transactionId: txId },
+  })
+
+  const credit = await recalculateCredit(tx.fromAgentId)
+  revalidatePath('/profile')
+  return credit
+}

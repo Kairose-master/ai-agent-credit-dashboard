@@ -127,23 +127,38 @@ export function assessCredit(events: AgentEventInput[]): CreditAssessment {
   const slaCompliance =
     n > 0 ? clamp((tasks.filter((t) => t.executionTime <= SLA_SECONDS).length / n) * 100) : 0
 
+  // Payment history: on-time repayments vs defaults. Neutral (50) until
+  // the agent has actually borrowed and repaid at least once.
+  const repaymentEvents = events.filter(
+    (e) => e.eventType === 'REPAYMENT_COMPLETED' || e.eventType === 'REPAYMENT_DEFAULTED',
+  ).length
+  const repaymentsCount = events.filter((e) => e.eventType === 'REPAYMENT_COMPLETED').length
+  const paymentHistory =
+    repaymentEvents > 0 ? clamp((repaymentsCount / repaymentEvents) * 100) : 50
+
   const reliability = dampen(
-    clamp(0.4 * consistency + 0.35 * failureFrequency + 0.25 * slaCompliance),
-    n,
+    clamp(0.3 * consistency + 0.3 * failureFrequency + 0.2 * slaCompliance + 0.2 * paymentHistory),
+    n + repaymentEvents,
   )
 
+  // Credit-repayment behavior — the other half of "scale": an agent that
+  // draws credit and repays on time proves creditworthiness directly.
+  const repayments = events.filter((e) => e.eventType === 'REPAYMENT_COMPLETED').length
+  const defaults = events.filter((e) => e.eventType === 'REPAYMENT_DEFAULTED').length
+
   // ── Reputation (20%) ─────────────────────────────────────────────
-  // Verified achievements are explicit third-party attestations; the
-  // rest accrues from the volume of successful interactions.
+  // Verified achievements are explicit third-party attestations; the rest
+  // accrues from the volume of successful interactions, including repaid credit.
   const achievements = events.filter((e) => e.eventType === 'ACHIEVEMENT_VERIFIED').length
   const reputation = dampen(
-    clamp(Math.log10(completed.length + 1) * 40 + achievements * 10),
-    n + achievements,
+    clamp(Math.log10(completed.length + 1) * 40 + achievements * 10 + repayments * 8),
+    n + achievements + repayments,
   )
 
   // ── Risk (10%) — higher is safer ─────────────────────────────────
+  // Defaults are the strongest negative credit signal, weighted above task failures.
   const anomalies = events.filter((e) => e.eventType.includes('ANOMALY')).length
-  const risk = dampen(clamp(100 - failed.length * 8 - anomalies * 15), n)
+  const risk = dampen(clamp(100 - failed.length * 8 - anomalies * 15 - defaults * 25), n + defaults)
 
   // ── Composite → score ────────────────────────────────────────────
   const composite = 0.4 * performance + 0.3 * reliability + 0.2 * reputation + 0.1 * risk

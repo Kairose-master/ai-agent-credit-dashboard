@@ -137,6 +137,22 @@ CREATE TABLE IF NOT EXISTS credit_scores (
 );
 CREATE INDEX IF NOT EXISTS credit_scores_agent_id_idx ON credit_scores (agent_id, created_at DESC);
 
+-- ── Async task lifecycle ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS agent_tasks (
+  id         text PRIMARY KEY,
+  user_id    text NOT NULL,
+  agent_id   text NOT NULL,
+  task       text NOT NULL,
+  status     text NOT NULL DEFAULT 'running',
+  output     text,
+  result     jsonb,
+  credit     jsonb,
+  error      text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_tasks_agent_id_idx ON agent_tasks (agent_id, created_at DESC);
+
 -- ── Existing dashboard tables ──────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "creditLine" (
   id             text PRIMARY KEY,

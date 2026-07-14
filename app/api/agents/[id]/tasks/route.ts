@@ -1,20 +1,16 @@
 import { db } from '@/lib/db'
-import { agentEvent } from '@/lib/db/schema'
-import { nanoid } from 'nanoid'
-import { runAgentTask } from '@/lib/agent-runtime/client'
-import { recalculateCredit } from '@/lib/credit-engine'
+import { agentTask } from '@/lib/db/schema'
+import { startAgentTask } from '@/lib/agent-runtime/client'
 import { requireAgent, errorResponse, ApiError } from '@/lib/api/agent-access'
-
-export const maxDuration = 300
+import { eq } from 'drizzle-orm'
+import { nanoid } from 'nanoid'
 
 /**
  * POST /api/agents/:id/tasks
- * The end-to-end vertical slice:
- *   1. receive user task
- *   2. execute it on the Claude-powered agent runtime
- *   3. persist the structured behavioral events
- *   4. recalculate the credit score from the full event ledger
- *   5. return the task result plus the updated credit state
+ * Starts a task on the Claude-powered runtime and returns immediately.
+ * The run happens asynchronously; the runtime calls /api/runtime/callback
+ * on completion, which persists events and recalculates credit. The client
+ * polls GET /api/agents/:id/tasks/:taskId for the result.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -28,55 +24,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const taskId = `task-${nanoid(10)}`
 
-    let run
+    await db.insert(agentTask).values({
+      id: taskId,
+      userId: agent.userId,
+      agentId: agent.id,
+      task,
+      status: 'running',
+    })
+
+    const callbackUrl = `${new URL(request.url).origin}/api/runtime/callback`
+
     try {
-      run = await runAgentTask({ agentId: agent.id, taskId, task })
+      await startAgentTask({ agentId: agent.id, taskId, task, callbackUrl })
     } catch (error) {
+      await db
+        .update(agentTask)
+        .set({
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date(),
+        })
+        .where(eq(agentTask.id, taskId))
       throw new ApiError(
         502,
         `Agent runtime unreachable — is it running? (${error instanceof Error ? error.message : String(error)})`,
       )
     }
 
-    if (run.events.length > 0) {
-      await db.insert(agentEvent).values(
-        run.events.map((event) => ({
-          id: nanoid(),
-          agentId: agent.id,
-          taskId,
-          eventType: event.event_type,
-          success: event.success,
-          executionTime: event.execution_time,
-          tokenCost: event.token_cost,
-          qualityScore: event.quality_score === null ? null : event.quality_score.toFixed(3),
-          detail: event.detail,
-        })),
-      )
-    }
-
-    const credit = await recalculateCredit(agent.id)
-
-    return Response.json({
-      taskId,
-      result: {
-        success: run.success,
-        output: run.output,
-        plan: run.plan,
-        qualityScore: run.quality_score,
-        evaluation: run.evaluation ?? null,
-        executionTime: run.execution_time,
-        tokenCost: run.token_cost,
-      },
-      credit: {
-        previousScore: credit.previousScore,
-        score: credit.score,
-        rating: credit.rating,
-        creditLimit: credit.creditLimit,
-        riskLevel: credit.riskLevel,
-        calculationReason: credit.calculationReason,
-        breakdown: credit.breakdown,
-      },
-    })
+    return Response.json({ taskId, status: 'running' })
   } catch (error) {
     return errorResponse(error)
   }
