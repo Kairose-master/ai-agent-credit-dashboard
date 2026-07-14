@@ -62,7 +62,10 @@ function dampen(raw: number, sampleSize: number): number {
   return 50 + (raw - 50) * confidence
 }
 
-export function assessCredit(events: AgentEventInput[]): CreditAssessment {
+export function assessCredit(
+  events: AgentEventInput[],
+  rules?: { rating?: ScoreRule<Rating>[]; risk?: ScoreRule<RiskLevel>[] },
+): CreditAssessment {
   // Terminal task events are the unit of behavioral history. Two grades of
   // signal: self-evaluated (TASK_*, the runtime grading its own output) and
   // ground-truth verified (VERIFIED_TASK_*, graded server-side against a
@@ -186,9 +189,9 @@ export function assessCredit(events: AgentEventInput[]): CreditAssessment {
 
   return {
     score,
-    rating: ratingForScore(score),
+    rating: ratingForScore(score, rules?.rating),
     creditLimit: creditLimitForScore(score),
-    riskLevel: riskLevelForScore(score),
+    riskLevel: riskLevelForScore(score, rules?.risk),
     breakdown: {
       performance: Math.round(performance * 10) / 10,
       reliability: Math.round(reliability * 10) / 10,
@@ -203,15 +206,34 @@ export function assessCredit(events: AgentEventInput[]): CreditAssessment {
   }
 }
 
-export function ratingForScore(score: number): Rating {
-  if (score >= 900) return 'AAA'
-  if (score >= 840) return 'AA'
-  if (score >= 760) return 'A'
-  if (score >= 680) return 'BBB'
-  if (score >= 600) return 'BB'
-  if (score >= 520) return 'B'
-  if (score >= 440) return 'C'
-  return 'D'
+/** A DMN-style decision-table row: "score >= minScore -> value". Rows are
+ *  evaluated highest minScore first; the first match wins. */
+export type ScoreRule<T extends string> = { minScore: number; value: T }
+
+export const RATINGS: Rating[] = ['AAA', 'AA', 'A', 'BBB', 'BB', 'B', 'C', 'D']
+export const RISK_LEVELS: RiskLevel[] = ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+
+/** The thresholds this file shipped with — used until an admin overrides
+ *  them via the credit rating policy editor (/admin/credit-rules). */
+export const DEFAULT_RATING_RULES: ScoreRule<Rating>[] = [
+  { minScore: 900, value: 'AAA' },
+  { minScore: 840, value: 'AA' },
+  { minScore: 760, value: 'A' },
+  { minScore: 680, value: 'BBB' },
+  { minScore: 600, value: 'BB' },
+  { minScore: 520, value: 'B' },
+  { minScore: 440, value: 'C' },
+]
+
+export const DEFAULT_RISK_RULES: ScoreRule<RiskLevel>[] = [
+  { minScore: 800, value: 'LOW' },
+  { minScore: 680, value: 'MODERATE' },
+  { minScore: 560, value: 'ELEVATED' },
+]
+
+export function ratingForScore(score: number, rules: ScoreRule<Rating>[] = DEFAULT_RATING_RULES): Rating {
+  const hit = [...rules].sort((a, b) => b.minScore - a.minScore).find((r) => score >= r.minScore)
+  return hit?.value ?? 'D' // fail to the safest (lowest) rating, never "no rating"
 }
 
 /**
@@ -224,11 +246,9 @@ export function creditLimitForScore(score: number): number {
   return Math.round((score - 500) ** 2 / 5.625 / 250) * 250
 }
 
-export function riskLevelForScore(score: number): RiskLevel {
-  if (score >= 800) return 'LOW'
-  if (score >= 680) return 'MODERATE'
-  if (score >= 560) return 'ELEVATED'
-  return 'HIGH'
+export function riskLevelForScore(score: number, rules: ScoreRule<RiskLevel>[] = DEFAULT_RISK_RULES): RiskLevel {
+  const hit = [...rules].sort((a, b) => b.minScore - a.minScore).find((r) => score >= r.minScore)
+  return hit?.value ?? 'HIGH' // fail to the safest (most conservative) risk level
 }
 
 /** Human-readable explanation of a score change, stored with each entry. */

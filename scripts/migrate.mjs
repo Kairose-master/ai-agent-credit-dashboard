@@ -114,6 +114,16 @@ CREATE TABLE IF NOT EXISTS admin_grants (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS admin_grants_unique ON admin_grants (user_id, permission);
 
+CREATE TABLE IF NOT EXISTS credit_rating_rules (
+  id         text PRIMARY KEY,
+  kind       text NOT NULL,
+  min_score  integer NOT NULL,
+  value      text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text
+);
+CREATE INDEX IF NOT EXISTS credit_rating_rules_kind_idx ON credit_rating_rules (kind, min_score DESC);
+
 -- ── BYOK user API keys (encrypted at rest) ──────────────────────────
 CREATE TABLE IF NOT EXISTS user_api_keys (
   user_id           text PRIMARY KEY,

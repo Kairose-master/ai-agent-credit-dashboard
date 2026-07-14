@@ -94,6 +94,23 @@ export const adminGrant = pgTable('admin_grants', {
 })
 
 /**
+ * credit_rating_rules — a DMN-style decision table overriding the
+ * score -> rating / risk-level thresholds hardcoded in credit-engine's
+ * scoring.ts. Empty table = use the shipped defaults (DEFAULT_RATING_RULES /
+ * DEFAULT_RISK_RULES). Edited from /admin/credit-rules (requires the
+ * 'credit_rules' permission) so a non-engineer can change lending policy
+ * without touching code.
+ */
+export const creditRatingRule = pgTable('credit_rating_rules', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(), // 'rating' | 'risk_level'
+  minScore: integer('min_score').notNull(),
+  value: text('value').notNull(), // e.g. 'AAA' (kind=rating) or 'LOW' (kind=risk_level)
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text('updated_by'), // userId of the admin who last wrote this table
+})
+
+/**
  * user_api_keys — BYOK (bring your own key).
  * Each user's Anthropic key, AES-256-GCM encrypted at rest; their agent runs
  * bill their own account. Never returned to the client, never logged.

@@ -11,6 +11,7 @@ import { agent, agentEvent, creditScoreEntry, creditTransaction } from '@/lib/db
 import { and, desc, eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { assessCredit, buildCalculationReason, type CreditAssessment } from './scoring'
+import { getEffectiveCreditRules } from '@/lib/credit-rules'
 
 /** Sum of credit drawn but not yet repaid — reduces available credit. */
 async function outstandingBalance(agentId: string): Promise<number> {
@@ -34,6 +35,7 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     .from(agentEvent)
     .where(eq(agentEvent.agentId, agentId))
 
+  const rules = await getEffectiveCreditRules()
   const assessment = assessCredit(
     events.map((e) => ({
       eventType: e.eventType,
@@ -43,6 +45,7 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
       qualityScore: e.qualityScore === null ? null : parseFloat(e.qualityScore),
       createdAt: e.createdAt,
     })),
+    { rating: rules.rating, risk: rules.risk },
   )
 
   const [previous] = await db
