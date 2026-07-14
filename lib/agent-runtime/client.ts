@@ -51,6 +51,8 @@ export async function startAgentTask(input: {
   taskId: string
   task: string
   callbackUrl: string
+  /** BYOK: bill this run to the user's own Anthropic key (never logged). */
+  apiKey?: string | null
 }): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (RUNTIME_SECRET) headers['X-Runtime-Secret'] = RUNTIME_SECRET
@@ -63,6 +65,7 @@ export async function startAgentTask(input: {
       task_id: input.taskId,
       task: input.task,
       callback_url: input.callbackUrl,
+      ...(input.apiKey ? { api_key: input.apiKey } : {}),
     }),
     signal: AbortSignal.timeout(15_000),
   })

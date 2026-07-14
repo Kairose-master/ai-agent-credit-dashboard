@@ -76,6 +76,15 @@ BEGIN
   END LOOP;
 END $$;
 
+-- ── BYOK user API keys (encrypted at rest) ──────────────────────────
+CREATE TABLE IF NOT EXISTS user_api_keys (
+  user_id           text PRIMARY KEY,
+  anthropic_key_enc text NOT NULL,
+  key_hint          text NOT NULL,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
 -- ── Agent identity ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "agent" (
   id                   text PRIMARY KEY,

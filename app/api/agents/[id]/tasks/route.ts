@@ -22,6 +22,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!task) throw new ApiError(400, 'Request body must include a non-empty "task" string')
     if (task.length > 4000) throw new ApiError(400, 'Task must be 4000 characters or fewer')
 
+    // BYOK: resolve the key this run bills BEFORE creating the task row, so a
+    // missing key fails fast with a clear message.
+    const { resolveUserAnthropicKey } = await import('@/lib/user-keys')
+    let apiKey: string | null
+    try {
+      apiKey = await resolveUserAnthropicKey(agent.userId)
+    } catch (error) {
+      throw new ApiError(402, error instanceof Error ? error.message : String(error))
+    }
+
     const taskId = `task-${nanoid(10)}`
 
     await db.insert(agentTask).values({
@@ -35,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const callbackUrl = `${new URL(request.url).origin}/api/runtime/callback`
 
     try {
-      await startAgentTask({ agentId: agent.id, taskId, task, callbackUrl })
+      await startAgentTask({ agentId: agent.id, taskId, task, callbackUrl, apiKey })
     } catch (error) {
       await db
         .update(agentTask)

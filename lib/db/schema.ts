@@ -45,6 +45,19 @@ export const verification = pgTable('verification', {
   updatedAt: timestamp('updatedat', { withTimezone: true }).defaultNow(),
 })
 
+/**
+ * user_api_keys — BYOK (bring your own key).
+ * Each user's Anthropic key, AES-256-GCM encrypted at rest; their agent runs
+ * bill their own account. Never returned to the client, never logged.
+ */
+export const userApiKey = pgTable('user_api_keys', {
+  userId: text('user_id').primaryKey(),
+  anthropicKeyEnc: text('anthropic_key_enc').notNull(),
+  keyHint: text('key_hint').notNull(), // last 4 chars, for display only
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 // App Tables
 export const agent = pgTable('agent', {
   id: text('id').primaryKey(),

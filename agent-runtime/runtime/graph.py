@@ -19,22 +19,27 @@ from langgraph.graph import END, StateGraph
 from . import config
 from .tools import TOOL_SCHEMAS, run_tool
 
-_client: anthropic.Anthropic | None = None
+_default_client: anthropic.Anthropic | None = None
 
 
-def _get_client() -> anthropic.Anthropic:
-    """Lazy singleton so the service can boot (and /health respond) before
-    ANTHROPIC_API_KEY is configured; the key is required only to run tasks."""
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic()
-    return _client
+def _get_client(state: "AgentState | None" = None) -> anthropic.Anthropic:
+    """Per-run client. BYOK: when the request carries the user's own API key
+    (state["api_key"]), the run bills that key; otherwise fall back to a lazy
+    singleton on the runtime's ANTHROPIC_API_KEY. Lazy so the service can boot
+    (and /health respond) before any key is configured. Keys are never logged."""
+    if state is not None and state.get("api_key"):
+        return anthropic.Anthropic(api_key=state["api_key"])
+    global _default_client
+    if _default_client is None:
+        _default_client = anthropic.Anthropic()
+    return _default_client
 
 
 class AgentState(TypedDict, total=False):
     agent_id: str
     task_id: str
     task: str
+    api_key: str  # BYOK — the user's own Anthropic key for this run
     plan: str
     output: str
     success: bool
@@ -66,7 +71,7 @@ def _usage(message: anthropic.types.Message) -> int:
 
 def planner_node(state: AgentState) -> AgentState:
     """Ask Claude for a short execution plan before touching any tools."""
-    message = _get_client().messages.create(
+    message = _get_client(state).messages.create(
         model=config.ANTHROPIC_MODEL,
         max_tokens=512,
         system=(
@@ -99,7 +104,7 @@ def executor_node(state: AgentState) -> AgentState:
     ]
     output = ""
     for _ in range(config.MAX_TOOL_ITERATIONS):
-        message = _get_client().messages.create(
+        message = _get_client(state).messages.create(
             model=config.ANTHROPIC_MODEL,
             max_tokens=config.MAX_OUTPUT_TOKENS,
             system=(
@@ -144,7 +149,7 @@ def executor_node(state: AgentState) -> AgentState:
 
 def evaluator_node(state: AgentState) -> AgentState:
     """Claude grades the run; the grade feeds the credit scoring engine."""
-    message = _get_client().messages.create(
+    message = _get_client(state).messages.create(
         model=config.ANTHROPIC_MODEL,
         max_tokens=512,
         system=(
@@ -202,7 +207,7 @@ def build_graph():
 AGENT_GRAPH = build_graph()
 
 
-def run_task(agent_id: str, task_id: str, task: str) -> dict[str, Any]:
+def run_task(agent_id: str, task_id: str, task: str, api_key: str | None = None) -> dict[str, Any]:
     """Execute one task end-to-end and return the structured run record."""
     state: AgentState = {
         "agent_id": agent_id,
@@ -212,6 +217,8 @@ def run_task(agent_id: str, task_id: str, task: str) -> dict[str, Any]:
         "token_cost": 0,
         "events": [],
     }
+    if api_key:
+        state["api_key"] = api_key
     state["events"].append(_event(state, "TASK_STARTED", detail={"task": task}))
 
     try:

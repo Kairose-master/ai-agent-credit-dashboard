@@ -30,6 +30,9 @@ class RunRequest(BaseModel):
     task_id: str = Field(min_length=1)
     task: str = Field(min_length=1, max_length=4000)
     callback_url: str = Field(min_length=1)
+    # BYOK: the requesting user's own Anthropic key. Optional — without it the
+    # runtime bills its own ANTHROPIC_API_KEY. Never logged.
+    api_key: str | None = None
 
 
 def _require_secret(provided: str | None) -> None:
@@ -40,7 +43,7 @@ def _require_secret(provided: str | None) -> None:
 
 def _process(request: RunRequest) -> None:
     """Run the agent, then report the outcome back to the caller."""
-    result = run_task(request.agent_id, request.task_id, request.task)
+    result = run_task(request.agent_id, request.task_id, request.task, api_key=request.api_key)
     payload = {"task_id": request.task_id, "agent_id": request.agent_id, **result}
     headers = {"Content-Type": "application/json"}
     if config.RUNTIME_SHARED_SECRET:

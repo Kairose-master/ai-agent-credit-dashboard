@@ -122,6 +122,9 @@ export async function startVerifiedTask(input: {
     status: 'running',
   })
 
+  const { resolveUserAnthropicKey } = await import('@/lib/user-keys')
+  const apiKey = await resolveUserAnthropicKey(userId)
+
   const h = await headers()
   const proto = h.get('x-forwarded-proto') ?? 'https'
   const host = h.get('x-forwarded-host') ?? h.get('host')
@@ -130,6 +133,7 @@ export async function startVerifiedTask(input: {
     taskId: agentTaskId,
     task: problemPrompt(spec.problem),
     callbackUrl: `${proto}://${host}/api/runtime/callback`,
+    apiKey,
   })
 
   await db
