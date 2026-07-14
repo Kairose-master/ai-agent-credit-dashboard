@@ -11,20 +11,11 @@ import { nanoid } from 'nanoid'
 import { asActionError } from '@/lib/action-error'
 import { logPlatformEvent } from '@/lib/platform-feed'
 import { runAgentTask } from '@/lib/agent-tasks'
+import { requirePermission } from '@/lib/admin'
 
 async function requireUser() {
   const session = await getSession()
   if (!session?.user) throw new Error('Unauthorized')
-  return session.user.id
-}
-
-/** Dispute review is restricted to ADMIN_EMAIL — an independent party, not
- *  the job's requester or worker. */
-async function requireAdmin() {
-  const session = await getSession()
-  if (!session?.user) throw new Error('Unauthorized')
-  const adminEmail = process.env.ADMIN_EMAIL
-  if (!adminEmail || session.user.email !== adminEmail) throw new Error('Admin access required')
   return session.user.id
 }
 
@@ -250,7 +241,7 @@ export async function raiseDisputeAction(requesterAgentId: string, jobId: number
 /** Admin-only: every Disputed job, with the original requirements and the
  *  worker's actual submitted output side by side. */
 export async function getDisputedJobs() {
-  await requireAdmin()
+  await requirePermission('disputes')
 
   const { readJobs } = await import('@/lib/onchain/labor')
   const jobs = await readJobs()
@@ -283,7 +274,7 @@ export async function getDisputedJobs() {
  *  worker (and credits its reputation same as a normal approval); false
  *  refunds the requester. */
 export async function resolveDisputeAction(jobId: number, releaseToWorker: boolean) {
-  await requireAdmin()
+  await requirePermission('disputes')
 
   try {
     const { resolveDispute, readJobs } = await import('@/lib/onchain/labor')

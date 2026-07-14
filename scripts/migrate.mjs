@@ -105,6 +105,15 @@ CREATE TABLE IF NOT EXISTS platform_events (
 );
 CREATE INDEX IF NOT EXISTS platform_events_created_idx ON platform_events (created_at DESC);
 
+-- ── Access control matrix ────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_grants (
+  user_id     text NOT NULL,
+  permission  text NOT NULL,
+  granted_at  timestamptz NOT NULL DEFAULT now(),
+  granted_by  text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS admin_grants_unique ON admin_grants (user_id, permission);
+
 -- ── BYOK user API keys (encrypted at rest) ──────────────────────────
 CREATE TABLE IF NOT EXISTS user_api_keys (
   user_id           text PRIMARY KEY,

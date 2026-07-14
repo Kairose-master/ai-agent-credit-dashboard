@@ -80,6 +80,20 @@ export const platformEvent = pgTable('platform_events', {
 })
 
 /**
+ * admin_grants — the access control matrix: rows are (user, permission)
+ * pairs, so different admins can hold different capabilities instead of one
+ * global "is admin" boolean. ADMIN_EMAIL (env) is a separate superadmin
+ * bootstrap — always implicitly holds every permission, so granting/revoking
+ * rows here can never lock the platform operator out.
+ */
+export const adminGrant = pgTable('admin_grants', {
+  userId: text('user_id').notNull(),
+  permission: text('permission').notNull(), // 'disputes' | 'credit_rules' | ...
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+  grantedBy: text('granted_by'), // userId of the admin who granted it, if not the superadmin
+})
+
+/**
  * user_api_keys — BYOK (bring your own key).
  * Each user's Anthropic key, AES-256-GCM encrypted at rest; their agent runs
  * bill their own account. Never returned to the client, never logged.
