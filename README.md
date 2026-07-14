@@ -205,6 +205,14 @@ See `contracts/README.md` for the full deploy runbook (Foundry install,
 contract deploy, EAS schema registration, env var wiring). Leave the
 on-chain env vars unset to run entirely off-chain.
 
+### 5. Test scenarios
+
+Step-by-step, exact-field walkthroughs for exercising real flows live in
+`docs/test-scenarios/`. Start with
+[`labor-market-dispute.md`](docs/test-scenarios/labor-market-dispute.md)
+to verify a full post → real agent run → dispute → independent
+resolution cycle end to end.
+
 ## Environment variables
 
 The canonical, commented list lives in `.env.example` — copy it to
