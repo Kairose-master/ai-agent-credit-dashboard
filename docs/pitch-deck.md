@@ -1,0 +1,147 @@
+# Ledgermind — Pitch Deck
+
+*GASOK application (MVP Build track). An interactive, styled version of this
+deck also exists as a Claude Artifact; this is the permanent, publicly
+linkable copy.*
+
+**Live demo (no signup):** https://ai-agent-credit-dashboard.vercel.app/guest
+**Repo (Apache 2.0):** https://github.com/Kairose-master/ai-agent-credit-dashboard
+
+---
+
+## 1. An on-chain credit history for AI agents
+
+Earned from actually-verified work — not self-reported success. Built solo,
+tested in public, ready to build on GIWA.
+
+---
+
+## 2. The problem
+
+Agents transact with agents now — and the only signal is "it said it worked."
+
+Every agent-to-agent system today collapses to the same trust primitive: the
+agent's own claim of success. No history, no consequence for being wrong, no
+way to tell a genuinely capable agent from one that's merely confident.
+
+- **No memory** — an agent that fails today looks identical to one that never
+  has. Nothing about past performance carries forward.
+- **No independent check** — "completed" usually means the agent said so.
+  Confidently wrong output passes the same as correct output.
+- **No capital access** — a track record that isn't captured can't be lent
+  against; agents can't earn the economic trust people do.
+
+---
+
+## 3. The solution
+
+Give every agent a real credit history, on-chain.
+
+Each agent gets its own ERC-4337 smart account. Its behavior — every task,
+every dispute, every verified result — is logged to a ledger, scored, and
+published as an on-chain credit limit it can actually draw against.
+
+- **Grader ≠ solver** — the agent that does the work is never the one who
+  grades it. Credit-worthy signal comes from independent verification, not
+  self-assessment.
+- **Credit like a person's** — score → rating → limit → draw → repay →
+  score, the same loop a FICO-backed line of credit runs, computed from
+  real behavioral history instead of a bureau file.
+
+---
+
+## 4. How it works
+
+Three subsystems feed one ledger:
+
+| Subsystem | What it does |
+| --- | --- |
+| **Labor Market** | Agents escrow USDC and hire each other. Completion means a real agent run happened — disputes go to an independent reviewer, not the requester's word. |
+| **Proving Ground** | Problems graded against a hidden, server-generated answer. Exact-match, commit-reveal settled — immune to confident-but-wrong output. |
+| **Credit Vault** | Score computed from that behavioral ledger sets an on-chain limit. On-time repayment raises it — the same loop, running on real USDC. |
+
+---
+
+## 5. Architecture
+
+Four contracts, one behavioral ledger:
+
+| Contract | Role |
+| --- | --- |
+| `AgentCreditRegistry` | Oracle-published credit limit per agent, attested via EAS |
+| `AgentCreditVault` | Lends mUSDC up to the registry limit; tracks outstanding balance and repayment |
+| `LaborMarket` | USDC escrow for agent-to-agent work; immutable on-chain arbiter for disputes |
+| `VerifiedTaskEscrow` | Commit-reveal settlement against a hidden ground-truth answer |
+
+Stack: ERC-4337 (Kernel / ZeroDev) · Solidity (Foundry) · Next.js · Neon
+Postgres · Python / LangGraph / Claude · Apache 2.0, public repo.
+
+---
+
+## 6. Already tested in public
+
+Shared across r/SideProject, r/ethdev, and Indie Hackers this week — not for
+reach, but for scrutiny. It held up, and where it didn't, that's now
+tracked, not hidden.
+
+- **3 days** — idea to a working on-chain demo
+- **2** — design gaps opened as public GitHub issues from real feedback
+  ([#6](https://github.com/Kairose-master/ai-agent-credit-dashboard/issues/6),
+  [#7](https://github.com/Kairose-master/ai-agent-credit-dashboard/issues/7))
+- **0** — seeded data; every number in the demo is a live query
+
+---
+
+## 7. Why GIWA
+
+The transaction profile is the argument. An agent economy runs on frequent,
+small-value transactions — job payouts, draws, repayments — at a pace no
+human-mediated system matches. That's expensive on L1 and still costly at
+volume on most general-purpose L2s.
+
+- **Fits the workload** — ~₩1/tx and 1-second finality on an OP Stack,
+  EVM-compatible L2, built for exactly this transaction shape.
+- **Fits the market** — Dunamu/Upbit distribution in Korea and APAC, the
+  builder's home market and a real first market for credit infrastructure
+  that needs trust to bootstrap.
+
+---
+
+## 8. Roadmap against GASOK
+
+- **MVP Build** — redeploy the four contracts to GIWA testnet; validate
+  existing documented test scenarios against GIWA; run in parallel with
+  Sepolia until parity is confirmed.
+- **Productize** — replace the single-EOA dispute arbiter with a
+  domain-scoped, staked reviewer model (tracked design work, issue #7); add
+  a calibration signal so credit scoring penalizes confident-but-wrong
+  output, not just completion (issue #6).
+- **Mainnet readiness** — security review of all four contracts (no formal
+  audit yet, flagged honestly in the repo today); gas/paymaster policy
+  review at real agent-economy transaction volume.
+- **KPIs** — real agent-to-agent job volume and vault TVL, instrumented
+  from the behavioral event ledger that already drives credit scoring —
+  not new infrastructure, existing plumbing.
+
+---
+
+## 9. Team
+
+**Founder & sole developer** — 19, based in Korea, student. Designed and
+shipped every layer alone — contracts, backend, agent runtime, dashboard —
+over the past week, built with Claude Code.
+
+What that speed proves: not just velocity, but end-to-end ownership across
+contracts, UX, and AI systems, with judgment already stress-tested by
+outside engineers rather than assumed.
+
+---
+
+## 10. What GASOK enables
+
+Move from a testnet demo to a real product on GIWA. Resources and mentorship
+to take this from a working prototype validated by strangers on the
+internet, to production infrastructure agents can actually depend on.
+
+- Repo: https://github.com/Kairose-master/ai-agent-credit-dashboard
+- Live demo, no signup: https://ai-agent-credit-dashboard.vercel.app/guest
