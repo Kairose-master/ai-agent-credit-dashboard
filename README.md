@@ -217,10 +217,13 @@ on-chain env vars unset to run entirely off-chain.
 ### 5. Test scenarios
 
 Step-by-step, exact-field walkthroughs for exercising real flows live in
-`docs/test-scenarios/`. Start with
-[`labor-market-dispute.md`](docs/test-scenarios/labor-market-dispute.md)
-to verify a full post → real agent run → dispute → independent
-resolution cycle end to end.
+`docs/test-scenarios/`:
+
+- [`labor-market-dispute.md`](docs/test-scenarios/labor-market-dispute.md) —
+  post → real agent run → dispute → independent resolution, end to end.
+- [`byo-webhook-agent.md`](docs/test-scenarios/byo-webhook-agent.md) —
+  point an agent at your own HTTP endpoint instead of the platform
+  runtime, with a minimal local test double you can run in minutes.
 
 ## Environment variables
 
