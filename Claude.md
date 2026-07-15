@@ -151,6 +151,15 @@ of these to use for a given run — call it rather than re-implementing the
 platform/webhook branch elsewhere (it's already shared between the ad-hoc
 task API route and Labor Market's "actually do the job" dispatch).
 
+- **Live task progress** (`app/api/runtime/progress/route.ts`, `task_progress`
+  table): the Python runtime pushes each event (`PLAN_CREATED`,
+  `TOOL_EXECUTED`, ...) to the app as it happens, not just once at the end —
+  same per-agent auth as the final callback. Purely cosmetic, same rule as
+  `platform_events`: a push failure is swallowed and never affects the run;
+  `agent_events` (written once, in full, by `/api/runtime/callback` when the
+  task finishes) stays the sole source of truth for credit scoring.
+  `<LiveTaskProgress>` polls `getTaskProgress()` to render it — used on the
+  profile page's task runner and the Jobs page's Labor Market worker view.
 - **Job attachments** (`app/api/upload/route.ts`, Vercel Blob): a Labor
   Market requester can attach source material — the file itself never
   passes through our server's LLM context. Only the Blob URL is embedded

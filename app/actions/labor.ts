@@ -75,6 +75,7 @@ export async function getJobs() {
       workerName: label(j.worker),
       mine: byAddress.has(j.requester.toLowerCase()),
       workerRunStatus: task?.status ?? null, // running | processing | completed | failed
+      agentTaskId: spec?.agentTaskId ?? null,
       output: task?.status === 'completed' ? task.output : null,
       disputeNote: spec?.disputeNote ?? null,
       attachmentUrl: spec?.attachmentUrl ?? null,

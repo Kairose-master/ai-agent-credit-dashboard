@@ -43,14 +43,15 @@ def _require_secret(provided: str | None) -> None:
 
 def _process(request: RunRequest) -> None:
     """Run the agent, then report the outcome back to the caller."""
-    # The wallet API lives at the same origin as the callback endpoint.
-    wallet_api = request.callback_url.rsplit("/", 1)[0] + "/wallet"
+    # The wallet/progress APIs live at the same origin as the callback endpoint.
+    origin = request.callback_url.rsplit("/", 1)[0]
     result = run_task(
         request.agent_id,
         request.task_id,
         request.task,
         api_key=request.api_key,
-        wallet_api=wallet_api,
+        wallet_api=origin + "/wallet",
+        progress_url=origin + "/progress",
     )
     payload = {"task_id": request.task_id, "agent_id": request.agent_id, **result}
     headers = {"Content-Type": "application/json"}

@@ -14,6 +14,7 @@ import time
 from typing import Any, TypedDict
 
 import anthropic
+import httpx
 from langgraph.graph import END, StateGraph
 
 from . import config
@@ -41,6 +42,7 @@ class AgentState(TypedDict, total=False):
     task: str
     api_key: str  # BYOK — the user's own Anthropic key for this run
     wallet_api: str  # app endpoint for the agent's wallet tools
+    progress_url: str  # app endpoint for live (cosmetic) per-step updates
     plan: str
     output: str
     success: bool
@@ -66,6 +68,36 @@ def _event(state: AgentState, event_type: str, *, success: bool = True,
     }
 
 
+def _push_progress(state: AgentState, event: dict[str, Any]) -> None:
+    """Best-effort live push of one step to the app, so the dashboard can
+    show what the agent is doing right now. Cosmetic only — agent_events
+    (written once, from the full event list, when the run finishes) is the
+    real record, so a failure or timeout here must never affect the run."""
+    url = state.get("progress_url")
+    if not url:
+        return
+    try:
+        headers = {"Content-Type": "application/json"}
+        if config.RUNTIME_SHARED_SECRET:
+            headers["X-Runtime-Secret"] = config.RUNTIME_SHARED_SECRET
+        httpx.post(
+            url,
+            json={"task_id": state["task_id"], "event": event},
+            headers=headers,
+            timeout=3,
+        )
+    except Exception:
+        pass
+
+
+def _emit(state: AgentState, event_type: str, **kwargs: Any) -> dict[str, Any]:
+    """Record an event (for the final callback) and live-push it (cosmetic)."""
+    event = _event(state, event_type, **kwargs)
+    state["events"].append(event)
+    _push_progress(state, event)
+    return event
+
+
 def _usage(message: anthropic.types.Message) -> int:
     return message.usage.input_tokens + message.usage.output_tokens
 
@@ -87,9 +119,7 @@ def planner_node(state: AgentState) -> AgentState:
     tokens = _usage(message)
     state["plan"] = plan
     state["token_cost"] = state.get("token_cost", 0) + tokens
-    state["events"].append(
-        _event(state, "PLAN_CREATED", token_cost=tokens, detail={"plan": plan})
-    )
+    _emit(state, "PLAN_CREATED", token_cost=tokens, detail={"plan": plan})
     return state
 
 
@@ -133,14 +163,12 @@ def executor_node(state: AgentState) -> AgentState:
         results = []
         for tool_use in tool_uses:
             result = run_tool(tool_use.name, tool_use.input, ctx=tool_ctx)
-            state["events"].append(
-                _event(
-                    state,
-                    "TOOL_EXECUTED",
-                    success=not result.startswith("error:"),
-                    detail={"tool": tool_use.name, "input": tool_use.input,
-                            "result_preview": result[:300]},
-                )
+            _emit(
+                state,
+                "TOOL_EXECUTED",
+                success=not result.startswith("error:"),
+                detail={"tool": tool_use.name, "input": tool_use.input,
+                        "result_preview": result[:300]},
             )
             results.append(
                 {"type": "tool_result", "tool_use_id": tool_use.id, "content": result}
@@ -186,15 +214,13 @@ def evaluator_node(state: AgentState) -> AgentState:
     state["success"] = state.get("success", False) and verdict_pass
 
     terminal = "TASK_COMPLETED" if state["success"] else "TASK_FAILED"
-    state["events"].append(
-        _event(
-            state,
-            terminal,
-            success=state["success"],
-            quality_score=quality,
-            token_cost=state["token_cost"],
-            detail={"feedback": feedback, "output_preview": state["output"][:500]},
-        )
+    _emit(
+        state,
+        terminal,
+        success=state["success"],
+        quality_score=quality,
+        token_cost=state["token_cost"],
+        detail={"feedback": feedback, "output_preview": state["output"][:500]},
     )
     return state
 
@@ -220,6 +246,7 @@ def run_task(
     task: str,
     api_key: str | None = None,
     wallet_api: str | None = None,
+    progress_url: str | None = None,
 ) -> dict[str, Any]:
     """Execute one task end-to-end and return the structured run record."""
     state: AgentState = {
@@ -234,16 +261,16 @@ def run_task(
         state["api_key"] = api_key
     if wallet_api:
         state["wallet_api"] = wallet_api
-    state["events"].append(_event(state, "TASK_STARTED", detail={"task": task}))
+    if progress_url:
+        state["progress_url"] = progress_url
+    _emit(state, "TASK_STARTED", detail={"task": task})
 
     try:
         final: AgentState = AGENT_GRAPH.invoke(state)
     except Exception as exc:
         # Runtime failures are behavioral data too — they must reach the ledger.
-        state["events"].append(
-            _event(state, "TASK_FAILED", success=False, quality_score=0.0,
-                   token_cost=state.get("token_cost", 0), detail={"error": str(exc)[:500]})
-        )
+        _emit(state, "TASK_FAILED", success=False, quality_score=0.0,
+              token_cost=state.get("token_cost", 0), detail={"error": str(exc)[:500]})
         return {
             "success": False,
             "output": f"Agent runtime error: {exc}",

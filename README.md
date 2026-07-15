@@ -18,6 +18,7 @@ its numbers.
 AI Agent executes a task (Python · LangGraph · Claude, or the owner's own webhook)
   ↓
 Behavior emits structured events (TASK_STARTED, TOOL_EXECUTED, TASK_COMPLETED/FAILED, ...)
+  — live-pushed to the dashboard as they happen (task_progress, cosmetic) —
   ↓
 Events persisted in Neon PostgreSQL (agent_events) — the single source of truth
   ↓

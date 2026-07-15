@@ -12,6 +12,7 @@ import {
 } from '@/app/actions/labor'
 import { getTemplates, publishTemplate, unpublishTemplate, purchaseTemplate } from '@/app/actions/marketplace'
 import { BpmnViewer } from '@/components/bpmn-viewer'
+import { LiveTaskProgress } from '@/components/live-task-progress'
 import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
 
 type Job = {
@@ -28,6 +29,7 @@ type Job = {
   workerName: string | null
   mine: boolean
   workerRunStatus: 'running' | 'processing' | 'completed' | 'failed' | null
+  agentTaskId: string | null
   output: string | null
   disputeNote: string | null
   attachmentUrl: string | null
@@ -382,9 +384,12 @@ export default function JobsPage() {
                       </p>
 
                       {job.status === 'Accepted' && (job.workerRunStatus === 'running' || job.workerRunStatus === 'processing') && (
-                        <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
-                          <Bot className="size-3.5 animate-pulse" /> Agent is working on this…
-                        </p>
+                        <>
+                          <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+                            <Bot className="size-3.5 animate-pulse" /> Agent is working on this…
+                          </p>
+                          <LiveTaskProgress taskId={job.agentTaskId} active={job.workerRunStatus === 'running'} />
+                        </>
                       )}
                       {job.status === 'Accepted' && job.workerRunStatus === 'failed' && (
                         <p className="mt-2 text-xs text-destructive">The worker&apos;s run failed — see its task log.</p>
