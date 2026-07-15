@@ -160,6 +160,13 @@ task API route and Labor Market's "actually do the job" dispatch).
   task finishes) stays the sole source of truth for credit scoring.
   `<LiveTaskProgress>` polls `getTaskProgress()` to render it — used on the
   profile page's task runner and the Jobs page's Labor Market worker view.
+- **Guest mode** (`app/guest/`, `app/actions/guest.ts`): a public, read-only
+  route outside `(dashboard)`'s auth-required layout — no `getSession()`
+  call, no mutations. Reuses the same tables/on-chain reads as the
+  logged-in views (real stats, not seeded), just without per-user "mine"
+  labeling since there's no session to scope to. Linked from the sign-in
+  form; keep it read-only if extended (see the security review that
+  flagged unauthenticated agent runs as a real cost/abuse risk).
 - **Job attachments** (`app/api/upload/route.ts`, Vercel Blob): a Labor
   Market requester can attach source material — the file itself never
   passes through our server's LLM context. Only the Blob URL is embedded
