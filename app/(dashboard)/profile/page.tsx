@@ -37,6 +37,7 @@ import {
 } from '@/app/actions/onchain'
 import { getBalanceSheet, type BalanceSheet } from '@/app/actions/balance-sheet'
 import { CreditEvolutionChart } from '@/components/charts'
+import { LiveTaskProgress } from '@/components/live-task-progress'
 
 type OnchainInfo = {
   configured: boolean
@@ -97,6 +98,7 @@ type CreditHistoryEntry = {
 }
 
 type TaskResult = {
+  taskId?: string
   status: 'running' | 'processing' | 'completed' | 'failed'
   output: string | null
   result: {
@@ -149,6 +151,7 @@ export default function ProfilePage() {
   const [task, setTask] = useState('')
   const [running, setRunning] = useState(false)
   const [lastRun, setLastRun] = useState<TaskResult | null>(null)
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
 
   const [drawAmount, setDrawAmount] = useState('')
@@ -294,6 +297,7 @@ export default function ProfilePage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`)
       setTask('')
+      setRunningTaskId(data.taskId)
       pollTask(agentId, data.taskId)
     } catch (error) {
       setRunError(error instanceof Error ? error.message : String(error))
@@ -507,6 +511,8 @@ export default function ProfilePage() {
             {running ? 'Running…' : 'Execute Task'}
           </button>
         </div>
+
+        <LiveTaskProgress taskId={runningTaskId} active={running} />
 
         {runError && (
           <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

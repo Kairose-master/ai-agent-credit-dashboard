@@ -109,6 +109,16 @@ CREATE TABLE IF NOT EXISTS platform_events (
 );
 CREATE INDEX IF NOT EXISTS platform_events_created_idx ON platform_events (created_at DESC);
 
+-- ── Live per-task progress feed (cosmetic; agent_events stays authoritative) ──
+CREATE TABLE IF NOT EXISTS task_progress (
+  id         text PRIMARY KEY,
+  task_id    text NOT NULL,
+  event_type text NOT NULL,
+  detail     jsonb DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS task_progress_task_idx ON task_progress (task_id, created_at);
+
 -- ── Access control matrix ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS admin_grants (
   user_id     text NOT NULL,

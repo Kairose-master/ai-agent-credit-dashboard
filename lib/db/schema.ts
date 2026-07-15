@@ -80,6 +80,23 @@ export const platformEvent = pgTable('platform_events', {
 })
 
 /**
+ * task_progress — live, per-task step feed (PLAN_CREATED, TOOL_EXECUTED,
+ * TASK_COMPLETED, ...) pushed by the runtime as a task actually runs, so the
+ * UI can show what an agent is doing in real time instead of only a final
+ * result. Purely cosmetic, same as platform_events: agent_events (the
+ * credit-scoring ledger) remains the sole authoritative record, written
+ * once by /api/runtime/callback when the run finishes. A failed live push
+ * never breaks the run itself.
+ */
+export const taskProgress = pgTable('task_progress', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  eventType: text('event_type').notNull(),
+  detail: jsonb('detail').default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * admin_grants — the access control matrix: rows are (user, permission)
  * pairs, so different admins can hold different capabilities instead of one
  * global "is admin" boolean. ADMIN_EMAIL (env) is a separate superadmin
