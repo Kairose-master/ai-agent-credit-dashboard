@@ -28,7 +28,7 @@ type Job = {
   requesterName: string | null
   workerName: string | null
   mine: boolean
-  workerRunStatus: 'running' | 'processing' | 'completed' | 'failed' | null
+  workerRunStatus: 'queued' | 'running' | 'processing' | 'completed' | 'failed' | null
   workerRunError: string | null
   agentTaskId: string | null
   output: string | null
@@ -402,6 +402,11 @@ export default function JobsPage() {
                         {job.workerName && ` · worker ${job.workerName}`}
                       </p>
 
+                      {job.status === 'Accepted' && job.workerRunStatus === 'queued' && (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+                          <Bot className="size-3.5" /> Waiting for the worker&apos;s local machine to pick this up…
+                        </p>
+                      )}
                       {job.status === 'Accepted' && (job.workerRunStatus === 'running' || job.workerRunStatus === 'processing') && (
                         <>
                           <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">

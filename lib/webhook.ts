@@ -26,11 +26,14 @@ export type CallbackAuth =
   | { required: false } // platform runtime, no RUNTIME_SHARED_SECRET configured (open dev mode)
   | { required: true; secret: string } // must match exactly
 
-/** What an incoming callback for this agent's task must present to be authentic. */
+/** What an incoming callback for this agent's task must present to be
+ *  authentic. Applies to 'webhook' agents (their server calls us back) AND
+ *  'local' agents (their worker polls us and calls back) — both use the
+ *  per-agent secret, never the platform-wide one. */
 export async function resolveCallbackAuth(agentId: string): Promise<CallbackAuth> {
   const [ag] = await db.select().from(agent).where(eq(agent.id, agentId))
 
-  if (ag?.runtimeType === 'webhook' && ag.webhookSecretEnc) {
+  if ((ag?.runtimeType === 'webhook' || ag?.runtimeType === 'local') && ag.webhookSecretEnc) {
     try {
       return { required: true, secret: decryptSecret(ag.webhookSecretEnc) }
     } catch (error) {

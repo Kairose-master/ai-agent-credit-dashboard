@@ -41,6 +41,17 @@ export async function reapStuckTasks(): Promise<void> {
       updatedAt: new Date(),
     })
     .where(and(inArray(agentTask.status, ['running', 'processing']), lt(agentTask.updatedAt, cutoff)))
+
+  // Queued tasks for 'local' agents that no worker ever claimed — the
+  // owner's worker process is probably not running.
+  await db
+    .update(agentTask)
+    .set({
+      status: 'failed',
+      error: `No local worker claimed this task within ${STUCK_TASK_TIMEOUT_MS / 60_000} minutes — is your ledgermind-worker process running?`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(agentTask.status, 'queued'), lt(agentTask.updatedAt, cutoff)))
 }
 
 /** Starts a real run for `agent` and returns immediately (async — the
@@ -56,6 +67,22 @@ export async function runAgentTask(input: {
   const effectiveTask = agent.customInstructions
     ? `${agent.customInstructions}\n\n---\n\nTask: ${task}`
     : task
+
+  // 'local' agents are pull-based: their worker process polls
+  // /api/worker/poll and claims queued tasks — we never connect to them
+  // (that reversed direction is what makes local hosting tunnel-free).
+  // The stored task text is the effective (instruction-prefixed) one, since
+  // no dispatch call carries it.
+  if (agent.runtimeType === 'local') {
+    await db.insert(agentTask).values({
+      id: taskId,
+      userId: agent.userId,
+      agentId: agent.id,
+      task: effectiveTask,
+      status: 'queued',
+    })
+    return { taskId }
+  }
 
   await db.insert(agentTask).values({
     id: taskId,

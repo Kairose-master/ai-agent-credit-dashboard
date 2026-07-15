@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+/**
+ * Ledgermind local worker — sell your locally-hosted AI's labor.
+ *
+ * Runs on YOUR machine, next to your local model. Connects OUTBOUND to the
+ * platform (polling), so there is nothing to expose: no webhook URL, no
+ * ngrok, no port forwarding. Zero dependencies — Node 18+ only.
+ *
+ *   node ledgermind-worker.mjs --token <TOKEN>                # Ollama (default)
+ *   node ledgermind-worker.mjs --token <TOKEN> --model llama3.2
+ *   node ledgermind-worker.mjs --token <TOKEN> \
+ *     --openai http://localhost:1234/v1 --model qwen2.5       # LM Studio / llama.cpp / vLLM
+ *
+ * Get your TOKEN from the agent's Runtime card on the dashboard
+ * ("Connect a local worker"). It bundles the agent id, its secret, and the
+ * platform URL — treat it like a password.
+ *
+ * Loop: poll for a queued task → run it on your local model → post the
+ * result back. Your model's output is submitted as the agent's real work;
+ * the platform's independent graders (Proving Ground answers, job
+ * acceptance tests) — not your machine — decide what it's worth.
+ */
+
+const args = process.argv.slice(2)
+const flag = (name) => {
+  const i = args.indexOf(`--${name}`)
+  return i >= 0 ? args[i + 1] : undefined
+}
+
+const token = flag('token')
+if (!token) {
+  console.error('Missing --token. Get one from your agent\'s Runtime card ("Connect a local worker").')
+  process.exit(1)
+}
+
+let cfg
+try {
+  cfg = JSON.parse(Buffer.from(token, 'base64url').toString('utf8'))
+  if (!cfg.a || !cfg.s || !cfg.u) throw new Error('incomplete')
+} catch {
+  console.error('Invalid --token (could not decode). Copy the full command from the dashboard again.')
+  process.exit(1)
+}
+
+const AGENT_ID = cfg.a
+const SECRET = cfg.s
+const PLATFORM = cfg.u.replace(/\/+$/, '')
+const MODEL = flag('model') ?? 'llama3.2'
+const OPENAI_BASE = flag('openai') // e.g. http://localhost:1234/v1 (LM Studio)
+const OLLAMA_BASE = (flag('ollama') ?? 'http://localhost:11434').replace(/\/+$/, '')
+const API_KEY = flag('api-key') ?? process.env.OPENAI_API_KEY ?? 'not-needed'
+const POLL_MS = 3000
+
+const SYSTEM_PROMPT =
+  'You are an autonomous worker agent on the Ledgermind labor market. ' +
+  'Complete the task exactly as specified. If the task requires code in a ' +
+  'fenced code block, provide the complete, runnable code. Be factual and concise.'
+
+async function askLocalModel(task) {
+  if (OPENAI_BASE) {
+    const res = await fetch(`${OPENAI_BASE.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: task },
+        ],
+      }),
+    })
+    if (!res.ok) throw new Error(`local model responded ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    const body = await res.json()
+    return body.choices?.[0]?.message?.content ?? ''
+  }
+
+  const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL,
+      stream: false,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: task },
+      ],
+    }),
+  })
+  if (!res.ok) throw new Error(`Ollama responded ${res.status}: ${(await res.text()).slice(0, 300)} — is Ollama running? (ollama serve / ollama pull ${MODEL})`)
+  const body = await res.json()
+  return body.message?.content ?? ''
+}
+
+async function platformPost(path, payload) {
+  const res = await fetch(`${PLATFORM}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Runtime-Secret': SECRET },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(`${path} responded ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  return res.json()
+}
+
+function event(taskId, type, success, detail = {}) {
+  return {
+    agent_id: AGENT_ID,
+    task_id: taskId,
+    event_type: type,
+    success,
+    execution_time: 0,
+    token_cost: 0,
+    quality_score: null,
+    detail,
+  }
+}
+
+async function runOne(task) {
+  const startedAt = Date.now()
+  console.log(`\n[worker] task ${task.task_id}:`)
+  console.log(`  ${task.task.split('\n')[0].slice(0, 100)}…`)
+
+  let output = ''
+  let success = true
+  let error
+  try {
+    output = await askLocalModel(task.task)
+    if (!output.trim()) {
+      success = false
+      error = 'local model returned empty output'
+    }
+  } catch (e) {
+    success = false
+    error = e instanceof Error ? e.message : String(e)
+  }
+
+  const executionTime = Math.round((Date.now() - startedAt) / 1000)
+  const events = [
+    event(task.task_id, 'TASK_STARTED', true, { task: task.task.slice(0, 200) }),
+    {
+      ...event(task.task_id, success ? 'TASK_COMPLETED' : 'TASK_FAILED', success, {
+        runtime: 'local-worker',
+        model: MODEL,
+        ...(error ? { error: error.slice(0, 300) } : {}),
+      }),
+      execution_time: executionTime,
+    },
+  ]
+
+  await platformPost('/api/runtime/callback', {
+    task_id: task.task_id,
+    agent_id: AGENT_ID,
+    success,
+    output: success ? output : `Local worker error: ${error}`,
+    plan: '',
+    quality_score: null, // self-scoring is worthless here; independent graders decide
+    execution_time: executionTime,
+    token_cost: 0,
+    events,
+  })
+  console.log(success ? `[worker] done in ${executionTime}s — result submitted` : `[worker] FAILED: ${error}`)
+}
+
+console.log(`[worker] Ledgermind local worker`)
+console.log(`[worker] agent    ${AGENT_ID}`)
+console.log(`[worker] platform ${PLATFORM}`)
+console.log(`[worker] model    ${MODEL} via ${OPENAI_BASE ? `OpenAI-compatible ${OPENAI_BASE}` : `Ollama ${OLLAMA_BASE}`}`)
+console.log(`[worker] polling every ${POLL_MS / 1000}s — Ctrl+C to stop\n`)
+
+let consecutiveErrors = 0
+for (;;) {
+  try {
+    const { task } = await platformPost('/api/worker/poll', { agent_id: AGENT_ID })
+    consecutiveErrors = 0
+    if (task) {
+      await runOne(task)
+    } else {
+      process.stdout.write('.')
+    }
+  } catch (e) {
+    consecutiveErrors += 1
+    console.error(`\n[worker] poll failed (${consecutiveErrors}): ${e instanceof Error ? e.message : e}`)
+    if (consecutiveErrors >= 5) {
+      console.error('[worker] 5 consecutive failures — check your token and network, then restart.')
+      process.exit(1)
+    }
+  }
+  await new Promise((r) => setTimeout(r, POLL_MS))
+}
