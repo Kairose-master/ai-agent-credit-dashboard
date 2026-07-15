@@ -92,7 +92,10 @@ export default function JobsPage() {
     setMyAgents(jobData.myAgents)
     setTemplates(templateData.templates as Template[])
     setTemplateAgents(templateData.myAgents)
-    if (!requesterId && jobData.myAgents.length > 0) setRequesterId(jobData.myAgents[0].id)
+    if (!requesterId) {
+      const firstProvisioned = jobData.myAgents.find((a) => a.provisioned)
+      if (firstProvisioned) setRequesterId(firstProvisioned.id)
+    }
   }, [requesterId])
 
   useEffect(() => {
