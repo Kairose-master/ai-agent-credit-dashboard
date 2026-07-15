@@ -35,6 +35,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function VerifyPage() {
   const [configured, setConfigured] = useState(true)
+  const [explorer, setExplorer] = useState('https://sepolia.etherscan.io')
   const [tasks, setTasks] = useState<Task[]>([])
   const [myAgents, setMyAgents] = useState<MyAgent[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +52,7 @@ export default function VerifyPage() {
   const refresh = useCallback(async () => {
     const data = await getVerifiedTasks()
     setConfigured(data.configured)
+    if (data.explorer) setExplorer(data.explorer)
     setTasks(data.tasks as Task[])
     setMyAgents(data.myAgents)
     return data.tasks as Task[]
@@ -213,12 +215,12 @@ export default function VerifyPage() {
                 {t.error && <p className="mt-1 text-xs text-destructive">{t.error}</p>}
                 <p className="mt-1 flex gap-3 text-xs">
                   {t.postTxHash && (
-                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`https://sepolia.etherscan.io/tx/${t.postTxHash}`}>
+                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${t.postTxHash}`}>
                       escrow tx
                     </a>
                   )}
                   {t.settleTxHash && (
-                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`https://sepolia.etherscan.io/tx/${t.settleTxHash}`}>
+                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${t.settleTxHash}`}>
                       payout tx
                     </a>
                   )}

@@ -241,6 +241,9 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `BLOB_READ_WRITE_TOKEN` | Labor Market job attachments (optional) |
 | `ADMIN_EMAIL` | Superadmin bootstrap for the access control matrix |
 | `SEPOLIA_RPC_URL`, `ZERODEV_RPC`, `ORACLE_PRIVATE_KEY`, `AGENT_OWNER_PRIVATE_KEY`, `*_ADDRESS` vars | On-chain layer (all optional together) |
+| `ONCHAIN_CHAIN` | `sepolia` (default) or `giwa-sepolia` — selects the chain the on-chain layer talks to |
+| `ONCHAIN_RPC_URL` | Chain RPC (falls back to `SEPOLIA_RPC_URL`); e.g. `https://sepolia-rpc.giwa.io` for GIWA |
+| `AGENT_ACCOUNT_MODE` | `kernel` (ERC-4337 via ZeroDev; Sepolia) or `eoa` (derived per-agent EOAs; GIWA, where 4337 infra isn't live yet). Auto-detected from `ZERODEV_RPC` when unset |
 | `WALLET_MAX_TX_USD`, `WALLET_DAILY_CAP_USD` | Treasury spending caps |
 
 ## API

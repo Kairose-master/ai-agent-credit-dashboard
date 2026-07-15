@@ -1,4 +1,4 @@
-# On-Chain Credit Layer (Ethereum Sepolia)
+# On-Chain Credit Layer (Ethereum Sepolia / GIWA Sepolia)
 
 Turns the off-chain credit score into an **on-chain enforced spending limit**.
 
@@ -80,6 +80,45 @@ Redeploy Vercel. The **On-Chain (Sepolia)** card appears on the agent profile.
 
 Every action links to Sepolia Etherscan; attestations are viewable on
 sepolia.easscan.org under the agent's smart-account address.
+
+## Deploying to GIWA Sepolia instead
+
+GIWA is an OP Stack, EVM-compatible L2 (chain id 91342) — the same contracts
+deploy unchanged. Differences from the Sepolia flow:
+
+```bash
+# Deploy + verify (GIWA's explorer is Blockscout, not Etherscan):
+export ETHERSCAN_API_KEY=dummy   # foundry quirk: blockscout path still requires the var to exist
+forge script script/Deploy.s.sol --rpc-url giwa_sepolia --broadcast \
+  --private-key $DEPLOYER_PRIVATE_KEY \
+  --verify --verifier blockscout \
+  --verifier-url https://sepolia-explorer.giwa.io/api
+```
+
+Gas ETH comes from the GIWA Sepolia faucet or by bridging Sepolia ETH.
+
+**EAS** ships as an OP Stack predeploy on GIWA (`EAS
+0x4200000000000000000000000000000000000021`, `SchemaRegistry
+0x…0020`) — no easscan UI, so register the schema with cast:
+
+```bash
+cast send 0x4200000000000000000000000000000000000020 \
+  "register(string,address,bool)" \
+  "bytes32 agentId,uint256 creditScore,string rating,uint256 creditLimit,string riskLevel" \
+  0x0000000000000000000000000000000000000000 true \
+  --rpc-url https://sepolia-rpc.giwa.io --private-key $ORACLE_PRIVATE_KEY
+```
+
+The schema UID is in the transaction's `Registered` event log (view it on
+https://sepolia-explorer.giwa.io).
+
+**App env for GIWA:** set `ONCHAIN_CHAIN=giwa-sepolia`,
+`ONCHAIN_RPC_URL=https://sepolia-rpc.giwa.io`, the five `*_ADDRESS` vars from
+the deploy output, and `EAS_SCHEMA_UID`. Do **not** set `ZERODEV_RPC` — GIWA
+has no live 4337 bundler/paymaster/Kernel factory yet, so the app falls back
+to `AGENT_ACCOUNT_MODE=eoa` (deterministic per-agent EOAs derived from
+`AGENT_OWNER_PRIVATE_KEY`; the oracle account auto-tops-up their gas). When
+GIWA's 4337 infra goes live, switching back is just setting `ZERODEV_RPC`.
 
 ## Notes
 

@@ -1,16 +1,27 @@
 /**
- * ZeroDev (ERC-4337 / Kernel) smart-account service.
+ * Agent account service — two interchangeable modes (config.agentAccountMode):
  *
- * Every agent gets its own Kernel smart account, derived deterministically
- * from a single owner key plus a per-agent index (so each agent has a
- * distinct on-chain address without managing N private keys). The account is
- * what draws/repays against the vault, so the on-chain credit limit is
- * enforced against the agent itself.
+ * 'kernel' — ZeroDev (ERC-4337 / Kernel) smart accounts. Each agent gets a
+ * Kernel account derived deterministically from a single owner key plus a
+ * per-agent index. Gas is sponsored by ZeroDev's paymaster. Requires the
+ * chain to have live 4337 infra (bundler, paymaster, Kernel factory) —
+ * true on Sepolia via ZERODEV_RPC.
  *
- * Targets @zerodev/sdk ^5.5 with EntryPoint v0.7 / Kernel v3.1. ZeroDev's RPC
- * (ZERODEV_RPC) serves both the bundler and the (gas-sponsoring) paymaster.
+ * 'eoa' — plain per-agent EOAs, each derived deterministically from the same
+ * single owner key (keccak of ownerKey ‖ agentId → private key). Used on
+ * chains where 4337 infra isn't live yet (GIWA Sepolia as of 2026-07:
+ * EntryPoint v0.7 exists as a predeploy, but no public bundler/paymaster and
+ * no Kernel factory — verified via eth_getCode). Same one-key/N-agents
+ * property and the same "the agent's own address transacts" semantics; gas
+ * is auto-topped-up from the oracle account instead of sponsored.
+ *
+ * Both modes answer the same three calls: getAgentAccountAddress,
+ * sendAgentCall, and (kernel-only, internal) getAgentKernel — so nothing
+ * above this file knows which mode is active.
+ *
+ * Kernel mode targets @zerodev/sdk ^5.5 with EntryPoint v0.7 / Kernel v3.1.
  */
-import { http, keccak256, toHex, type Address, type Hex } from 'viem'
+import { concat, createWalletClient, http, keccak256, toHex, type Address, type Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
   createKernelAccount,
@@ -19,21 +30,71 @@ import {
 } from '@zerodev/sdk'
 import { getEntryPoint, KERNEL_V3_1 } from '@zerodev/sdk/constants'
 import { signerToEcdsaValidator } from '@zerodev/ecdsa-validator'
-import { CHAIN, onchainEnv } from './config'
-import { publicClient } from './clients'
+import { CHAIN, agentAccountMode, onchainEnv } from './config'
+import { publicClient, oracleWallet } from './clients'
 
 const entryPoint = getEntryPoint('0.7')
 const kernelVersion = KERNEL_V3_1
 
-/** Stable per-agent account index derived from the agent id. */
+/** Stable per-agent account index derived from the agent id (kernel mode). */
 export function accountIndex(agentId: string): bigint {
   return BigInt(keccak256(toHex(agentId))) % 2n ** 48n
 }
 
-function ownerSigner() {
+function ownerKey(): Hex {
   const pk = onchainEnv.agentOwnerPrivateKey
-  return privateKeyToAccount((pk.startsWith('0x') ? pk : `0x${pk}`) as Hex)
+  return (pk.startsWith('0x') ? pk : `0x${pk}`) as Hex
 }
+
+function ownerSigner() {
+  return privateKeyToAccount(ownerKey())
+}
+
+// ---------------------------------------------------------------------------
+// EOA mode
+// ---------------------------------------------------------------------------
+
+/** Deterministic per-agent private key: keccak256(ownerKey ‖ agentId).
+ *  Never stored — re-derived on demand, so there is still exactly one secret
+ *  (AGENT_OWNER_PRIVATE_KEY) no matter how many agents exist. */
+function agentEoaAccount(agentId: string) {
+  const derived = keccak256(concat([ownerKey(), toHex(agentId)]))
+  return privateKeyToAccount(derived)
+}
+
+/** Gas floor/top-up for agent EOAs. GIWA gas runs ~0.001 gwei, so 0.0002 ETH
+ *  funds thousands of calls; the oracle refills whenever a send finds the
+ *  balance under the floor. */
+const AGENT_GAS_FLOOR = 50_000_000_000_000n // 0.00005 ETH
+const AGENT_GAS_TOPUP = 200_000_000_000_000n // 0.0002 ETH
+
+async function ensureAgentGas(address: Address): Promise<void> {
+  const client = publicClient()
+  const balance = await client.getBalance({ address })
+  if (balance >= AGENT_GAS_FLOOR) return
+  const hash = await oracleWallet().sendTransaction({ to: address, value: AGENT_GAS_TOPUP })
+  await client.waitForTransactionReceipt({ hash })
+}
+
+async function sendEoaCall(
+  agentId: string,
+  call: { to: Address; data: Hex; value?: bigint },
+): Promise<Hex> {
+  const account = agentEoaAccount(agentId)
+  await ensureAgentGas(account.address)
+  const wallet = createWalletClient({ account, chain: CHAIN, transport: http(onchainEnv.rpcUrl) })
+  const hash = await wallet.sendTransaction({
+    to: call.to,
+    data: call.data,
+    value: call.value ?? 0n,
+  })
+  await publicClient().waitForTransactionReceipt({ hash })
+  return hash
+}
+
+// ---------------------------------------------------------------------------
+// Kernel (ERC-4337) mode
+// ---------------------------------------------------------------------------
 
 /** Build the Kernel account + client for one agent. */
 export async function getAgentKernel(agentId: string) {
@@ -67,8 +128,15 @@ export async function getAgentKernel(agentId: string) {
   return { account, kernelClient, address: account.address as Address }
 }
 
-/** Just the deterministic smart-account address (no bundler needed to read). */
+// ---------------------------------------------------------------------------
+// Mode-agnostic API
+// ---------------------------------------------------------------------------
+
+/** The agent's on-chain address (deterministic in both modes; no bundler
+ *  needed to read). */
 export async function getAgentAccountAddress(agentId: string): Promise<Address> {
+  if (agentAccountMode === 'eoa') return agentEoaAccount(agentId).address
+
   const client = publicClient()
   const ecdsaValidator = await signerToEcdsaValidator(client, {
     signer: ownerSigner(),
@@ -89,6 +157,8 @@ export async function sendAgentCall(
   agentId: string,
   call: { to: Address; data: Hex; value?: bigint },
 ): Promise<Hex> {
+  if (agentAccountMode === 'eoa') return sendEoaCall(agentId, call)
+
   const { account, kernelClient } = await getAgentKernel(agentId)
   const userOpHash = await kernelClient.sendUserOperation({
     callData: await account.encodeCalls([

@@ -13,7 +13,7 @@ export async function POST(req: Request) {
 
     // Check if user exists
     const existing = await db.query.user.findFirst({
-      where: (u) => u.email === email,
+      where: (u, { eq }) => eq(u.email, email),
     })
 
     if (existing) {

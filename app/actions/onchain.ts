@@ -17,12 +17,10 @@ async function requireOwnedAgent(agentId: string) {
   return { agent: found, userId: session.user.id }
 }
 
-const SEPOLIA_EXPLORER = 'https://sepolia.etherscan.io'
-
 /** Read-only on-chain status for the UI. Safe to call when nothing is configured. */
 export async function getOnchainInfo(agentId: string) {
   const { agent: ag } = await requireOwnedAgent(agentId)
-  const { isOnchainConfigured, isAgentAccountConfigured } = await import('@/lib/onchain/config')
+  const { isOnchainConfigured, isAgentAccountConfigured, EXPLORER_URL, CHAIN } = await import('@/lib/onchain/config')
 
   const info = {
     configured: isOnchainConfigured(),
@@ -30,7 +28,8 @@ export async function getOnchainInfo(agentId: string) {
     smartAccountAddress: ag.smartAccountAddress,
     available: null as number | null,
     outstanding: null as number | null,
-    explorer: SEPOLIA_EXPLORER,
+    explorer: EXPLORER_URL,
+    chainName: CHAIN.name,
   }
 
   if (info.configured && ag.smartAccountAddress) {
@@ -51,7 +50,9 @@ export async function provisionSmartAccount(agentId: string) {
   await requireOwnedAgent(agentId)
   const { isAgentAccountConfigured } = await import('@/lib/onchain/config')
   if (!isAgentAccountConfigured()) {
-    throw new Error('On-chain not configured (set ZERODEV_RPC, AGENT_OWNER_PRIVATE_KEY, etc.)')
+    throw new Error(
+      'On-chain not configured (set AGENT_OWNER_PRIVATE_KEY plus ZERODEV_RPC for kernel mode, or AGENT_ACCOUNT_MODE=eoa)',
+    )
   }
 
   try {

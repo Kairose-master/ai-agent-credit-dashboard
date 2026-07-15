@@ -1,20 +1,48 @@
 /**
- * On-chain layer configuration (Ethereum Sepolia).
+ * On-chain layer configuration (Ethereum Sepolia or GIWA Sepolia).
  *
  * The whole on-chain layer is OPTIONAL and gated on these env vars — when
  * they're absent the app runs exactly as before (off-chain only). When set,
  * the credit engine mirrors each recalculated limit to the registry and
  * attests the score via EAS, and agents can draw/repay real (test) USDC
- * through their ZeroDev smart accounts.
+ * through their own on-chain accounts.
+ *
+ * Chain is selected with ONCHAIN_CHAIN ('sepolia' default | 'giwa-sepolia').
+ * Agent accounts run in one of two modes (AGENT_ACCOUNT_MODE, auto-detected
+ * from ZERODEV_RPC when unset):
+ *  - 'kernel': ERC-4337 Kernel smart accounts via ZeroDev (Sepolia).
+ *  - 'eoa':    per-agent EOAs derived deterministically from the owner key —
+ *              for chains where 4337 infra (bundler/paymaster/Kernel factory)
+ *              isn't live yet, like GIWA Sepolia as of 2026-07. Same
+ *              one-key/N-agents property, no bundler dependency.
  */
+import { defineChain } from 'viem'
 import { sepolia } from 'viem/chains'
 
-export const CHAIN = sepolia
+export const giwaSepolia = defineChain({
+  id: 91342,
+  name: 'GIWA Sepolia',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: ['https://sepolia-rpc.giwa.io'] } },
+  blockExplorers: { default: { name: 'GIWA Explorer', url: 'https://sepolia-explorer.giwa.io' } },
+  testnet: true,
+})
+
+const CHAINS = { sepolia, 'giwa-sepolia': giwaSepolia } as const
+export const CHAIN = CHAINS[(process.env.ONCHAIN_CHAIN ?? 'sepolia') as keyof typeof CHAINS] ?? sepolia
+export const EXPLORER_URL = CHAIN.blockExplorers?.default.url ?? 'https://sepolia.etherscan.io'
 export const USDC_DECIMALS = 6
 
+/** EAS deployment per chain. GIWA is OP Stack, so EAS ships as a predeploy
+ *  (verified present via eth_getCode); Sepolia uses the standalone deployment. */
+const EAS_DEFAULTS: Record<number, `0x${string}`> = {
+  [sepolia.id]: '0xC2679fBD37d54388Ce493F1DB75320D236e1815e',
+  [giwaSepolia.id]: '0x4200000000000000000000000000000000000021',
+}
+
 export const onchainEnv = {
-  rpcUrl: process.env.SEPOLIA_RPC_URL ?? '',
-  zerodevRpc: process.env.ZERODEV_RPC ?? '', // bundler + paymaster (ZeroDev v3 RPC)
+  rpcUrl: process.env.ONCHAIN_RPC_URL ?? process.env.SEPOLIA_RPC_URL ?? '',
+  zerodevRpc: process.env.ZERODEV_RPC ?? '', // bundler + paymaster (ZeroDev v3 RPC), kernel mode only
   oraclePrivateKey: process.env.ORACLE_PRIVATE_KEY ?? '', // publishes limits + attests
   agentOwnerPrivateKey: process.env.AGENT_OWNER_PRIVATE_KEY ?? '', // signer behind every agent account
   registryAddress: (process.env.CREDIT_REGISTRY_ADDRESS ?? '') as `0x${string}` | '',
@@ -22,10 +50,19 @@ export const onchainEnv = {
   laborMarketAddress: (process.env.LABOR_MARKET_ADDRESS ?? '') as `0x${string}` | '',
   verifiedEscrowAddress: (process.env.VERIFIED_TASK_ESCROW_ADDRESS ?? '') as `0x${string}` | '',
   usdcAddress: (process.env.MOCK_USDC_ADDRESS ?? '') as `0x${string}` | '',
-  easAddress: (process.env.EAS_ADDRESS ??
-    '0xC2679fBD37d54388Ce493F1DB75320D236e1815e') as `0x${string}`, // EAS on Sepolia
+  // Both supported chains have an EAS default, so this is always a real address.
+  easAddress: (process.env.EAS_ADDRESS ?? EAS_DEFAULTS[CHAIN.id]) as `0x${string}`,
   easSchemaUid: (process.env.EAS_SCHEMA_UID ?? '') as `0x${string}` | '',
 }
+
+/** How agent accounts transact. Explicit env wins; otherwise infer from
+ *  whether a ZeroDev RPC is configured. */
+export const agentAccountMode: 'kernel' | 'eoa' =
+  process.env.AGENT_ACCOUNT_MODE === 'eoa' || process.env.AGENT_ACCOUNT_MODE === 'kernel'
+    ? process.env.AGENT_ACCOUNT_MODE
+    : onchainEnv.zerodevRpc
+      ? 'kernel'
+      : 'eoa'
 
 /** True when enough is configured to talk to the registry/vault as the oracle. */
 export function isOnchainConfigured(): boolean {
@@ -37,9 +74,12 @@ export function isOnchainConfigured(): boolean {
   )
 }
 
-/** True when agents can transact (ZeroDev bundler + agent signer present). */
+/** True when agents can transact. Kernel mode additionally needs the ZeroDev
+ *  bundler RPC; EOA mode only needs the owner key (gas is topped up by the
+ *  oracle account). */
 export function isAgentAccountConfigured(): boolean {
-  return Boolean(onchainEnv.zerodevRpc && onchainEnv.agentOwnerPrivateKey && isOnchainConfigured())
+  if (!onchainEnv.agentOwnerPrivateKey || !isOnchainConfigured()) return false
+  return agentAccountMode === 'eoa' || Boolean(onchainEnv.zerodevRpc)
 }
 
 /** True when the on-chain labor market is available. */
