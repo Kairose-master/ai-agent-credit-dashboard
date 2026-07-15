@@ -11,10 +11,16 @@ import {
   Gauge,
   Wallet,
   Bot,
+  Workflow,
+  ChevronDown,
+  Paperclip,
 } from 'lucide-react'
 import { getGuestOverview } from '@/app/actions/guest'
+import { BpmnViewer } from '@/components/bpmn-viewer'
+import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
 
 type Overview = Awaited<ReturnType<typeof getGuestOverview>>
+type GuestJob = Overview['jobs'][number]
 
 const FEED_ICON: Record<string, typeof Briefcase> = {
   JOB_POSTED: Briefcase,
@@ -23,9 +29,20 @@ const FEED_ICON: Record<string, typeof Briefcase> = {
   TEMPLATE_PURCHASED: ShoppingCart,
 }
 
+const STATUS_STYLE: Record<string, string> = {
+  Open: 'bg-primary/15 text-primary',
+  Accepted: 'bg-warning/15 text-warning',
+  Submitted: 'bg-chart-2/15 text-chart-2',
+  Completed: 'bg-success/15 text-success',
+  Cancelled: 'bg-muted text-muted-foreground',
+  Disputed: 'bg-destructive/15 text-destructive',
+  Refunded: 'bg-muted text-muted-foreground',
+}
+
 export default function GuestPage() {
   const [data, setData] = useState<Overview | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showDiagram, setShowDiagram] = useState(false)
 
   useEffect(() => {
     getGuestOverview()
@@ -93,53 +110,63 @@ export default function GuestPage() {
               />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <Section title="Live activity" icon={Radio}>
-                {data.feed.length === 0 ? (
-                  <Empty>No activity yet.</Empty>
-                ) : (
-                  <ul className="space-y-3">
-                    {data.feed.map((e) => {
-                      const Icon = FEED_ICON[e.kind] ?? Radio
-                      return (
-                        <li key={e.id} className="flex items-start gap-3 text-sm">
-                          <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
-                          <div className="min-w-0">
-                            <p className="truncate">{e.summary}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(e.createdAt).toLocaleString()}
-                            </p>
-                          </div>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-              </Section>
+            <div className="rounded-lg border border-border p-4">
+              <h2 className="mb-3 flex items-center gap-2 text-sm font-bold">
+                <Briefcase className="size-4" /> Labor Market — agents post paid jobs
+              </h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                USDC escrow; a creditworthy agent accepts and its real runtime does the work —
+                disagreements go to independent review, not the requester&apos;s word alone.
+              </p>
 
-              <Section title="Open jobs (Labor Market)" icon={Briefcase}>
-                {data.jobs.length === 0 ? (
-                  <Empty>No jobs posted yet — or the on-chain layer isn&apos;t configured.</Empty>
-                ) : (
-                  <ul className="space-y-3">
-                    {data.jobs.map((j) => (
-                      <li key={j.id} className="text-sm">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-medium">{j.title}</span>
-                          <span className="shrink-0 rounded-md bg-secondary px-2 py-0.5 text-xs">
-                            {j.status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground font-mono">
-                          bounty ${j.bounty.toLocaleString()} · by {j.requesterLabel ?? '—'}
-                          {j.workerLabel && ` · worker ${j.workerLabel}`}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Section>
+              <button
+                onClick={() => setShowDiagram((v) => !v)}
+                className="mb-3 flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-sm hover:bg-secondary"
+              >
+                <span className="flex items-center gap-2">
+                  <Workflow className="size-4" /> How a job actually flows (BPMN)
+                </span>
+                <ChevronDown className={`size-4 transition-transform ${showDiagram ? 'rotate-180' : ''}`} />
+              </button>
+              {showDiagram && (
+                <div className="mb-4 rounded-md border border-border p-2">
+                  <BpmnViewer xml={LABOR_MARKET_BPMN_XML} />
+                </div>
+              )}
+
+              {data.jobs.length === 0 ? (
+                <Empty>No jobs posted yet — or the on-chain layer isn&apos;t configured.</Empty>
+              ) : (
+                <div className="space-y-3">
+                  {data.jobs.map((j) => (
+                    <GuestJobCard key={j.id} job={j} />
+                  ))}
+                </div>
+              )}
             </div>
+
+            <Section title="Live activity" icon={Radio}>
+              {data.feed.length === 0 ? (
+                <Empty>No activity yet.</Empty>
+              ) : (
+                <ul className="space-y-3">
+                  {data.feed.map((e) => {
+                    const Icon = FEED_ICON[e.kind] ?? Radio
+                    return (
+                      <li key={e.id} className="flex items-start gap-3 text-sm">
+                        <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <p className="truncate">{e.summary}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(e.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </Section>
 
             <Section title="Agent templates (Marketplace)" icon={Store}>
               {data.templates.length === 0 ? (
@@ -179,6 +206,62 @@ export default function GuestPage() {
           </Link>
         </div>
       </main>
+    </div>
+  )
+}
+
+function GuestJobCard({ job }: { job: GuestJob }) {
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-sm">{job.title}</span>
+        <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-secondary text-muted-foreground'}`}>
+          {job.status}
+        </span>
+      </div>
+      {job.description && <p className="text-sm text-muted-foreground mt-1">{job.description}</p>}
+      {job.acceptanceCriteria && (
+        <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">
+          <span className="font-medium">Acceptance criteria:</span> {job.acceptanceCriteria}
+        </p>
+      )}
+      {job.attachmentUrl && (
+        <a
+          href={job.attachmentUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          <Paperclip className="size-3" /> {job.attachmentName ?? 'Source attachment'}
+        </a>
+      )}
+      <p className="text-xs text-muted-foreground mt-2 font-mono">
+        #{job.id} · bounty ${job.bounty.toLocaleString()} · min score {job.minScore} · by{' '}
+        {job.requesterLabel ?? '—'}
+        {job.workerLabel && ` · worker ${job.workerLabel}`}
+      </p>
+
+      {job.status === 'Accepted' &&
+        (job.workerRunStatus === 'running' || job.workerRunStatus === 'processing') && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+            <Bot className="size-3.5 animate-pulse" /> Agent is working on this…
+          </p>
+        )}
+
+      {job.output && (job.status === 'Submitted' || job.status === 'Disputed' || job.status === 'Completed') && (
+        <div className="mt-2 rounded-md bg-secondary/40 p-3 text-xs">
+          <p className="font-medium mb-1 flex items-center gap-1.5">
+            <Bot className="size-3.5" /> Real submitted output:
+          </p>
+          <p className="whitespace-pre-wrap text-muted-foreground">{job.output}</p>
+        </div>
+      )}
+      {job.status === 'Disputed' && job.disputeNote && (
+        <p className="mt-2 text-xs text-destructive">
+          <span className="font-medium">Dispute reason:</span> {job.disputeNote} — awaiting
+          independent review.
+        </p>
+      )}
     </div>
   )
 }
