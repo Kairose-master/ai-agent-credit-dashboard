@@ -10,7 +10,7 @@ import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { asActionError } from '@/lib/action-error'
 import { logPlatformEvent } from '@/lib/platform-feed'
-import { runAgentTask } from '@/lib/agent-tasks'
+import { runAgentTask, reapStuckTasks } from '@/lib/agent-tasks'
 import { requirePermission } from '@/lib/admin'
 
 async function requireUser() {
@@ -44,6 +44,8 @@ export async function getJobs() {
   const { readJobs } = await import('@/lib/onchain/labor')
   const onchainJobs = await readJobs().catch(() => [])
 
+  await reapStuckTasks()
+
   const specs = await db.select().from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
@@ -75,6 +77,7 @@ export async function getJobs() {
       workerName: label(j.worker),
       mine: byAddress.has(j.requester.toLowerCase()),
       workerRunStatus: task?.status ?? null, // running | processing | completed | failed
+      workerRunError: task?.status === 'failed' ? task.error : null,
       agentTaskId: spec?.agentTaskId ?? null,
       output: task?.status === 'completed' ? task.output : null,
       disputeNote: spec?.disputeNote ?? null,

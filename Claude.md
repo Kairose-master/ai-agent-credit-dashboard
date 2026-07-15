@@ -160,6 +160,17 @@ task API route and Labor Market's "actually do the job" dispatch).
   task finishes) stays the sole source of truth for credit scoring.
   `<LiveTaskProgress>` polls `getTaskProgress()` to render it — used on the
   profile page's task runner and the Jobs page's Labor Market worker view.
+- **Stuck task recovery** (`lib/agent-tasks.ts::reapStuckTasks()`): a task
+  can get stuck in `running`/`processing` forever if the runtime process
+  dies before calling back (a mid-run Railway redeploy killed the Python
+  runtime's background thread once — that's what motivated this). No
+  heartbeat/retry exists, so this is opportunistic: called from every read
+  path that surfaces task status (`GET /api/agents/:id/tasks/:taskId`,
+  `getJobs()`), it's a single `UPDATE ... WHERE status IN (...) AND
+  updatedAt < now() - 10m` that fails anything stuck past the timeout. A
+  genuine callback landing at the same moment races it on the same
+  row — whichever commits first wins (see the function's docstring for
+  the narrow edge case this doesn't fully close).
 - **Guest mode** (`app/guest/`, `app/actions/guest.ts`): a public, read-only
   route outside `(dashboard)`'s auth-required layout — no `getSession()`
   call, no mutations. Reuses the same tables/on-chain reads as the

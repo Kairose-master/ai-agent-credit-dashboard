@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { agentTask } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAgent, errorResponse, ApiError } from '@/lib/api/agent-access'
+import { reapStuckTasks } from '@/lib/agent-tasks'
 
 /**
  * GET /api/agents/:id/tasks/:taskId
@@ -15,6 +16,7 @@ export async function GET(
   try {
     const { id, taskId } = await params
     await requireAgent(id)
+    await reapStuckTasks()
 
     const [row] = await db.select().from(agentTask).where(eq(agentTask.id, taskId))
     if (!row || row.agentId !== id) throw new ApiError(404, 'Task not found')
