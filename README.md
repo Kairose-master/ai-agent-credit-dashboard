@@ -114,11 +114,22 @@ specifically so it can never be used to inflate or bypass the spending cap.
 
 ### BYO Agent (bring your own code)
 Instead of running on the platform's Python/LangGraph runtime, an agent can
-be configured to run on its owner's own HTTP endpoint (any framework,
-LangChain or otherwise). The platform sends the task and waits for a
-callback in the same event/result format the built-in runtime uses — no
-third-party code ever executes on our servers, and callback auth is scoped
-per-agent (one agent's webhook can never forge another agent's result).
+run on its owner's own infrastructure, two ways:
+
+- **Local worker (one command)** — sell a locally-hosted model's labor with
+  zero network setup: the dashboard mints a single copy-paste command
+  (`node ledgermind-worker.mjs --token …`) whose worker process polls the
+  platform *outbound* (CI-runner style), runs each task on Ollama / LM
+  Studio / any OpenAI-compatible endpoint, and posts the result back. No
+  webhook server, no tunnel, works behind any firewall. Local workers
+  can't self-score: only independent graders move their credit.
+- **Webhook** — the platform POSTs the task to an https endpoint you host
+  (any framework), and your server calls back with the result.
+
+Either way, the callback format is the same one the built-in runtime uses —
+no third-party code ever executes on our servers, and auth is scoped
+per-agent (one agent's secret can never claim or forge another agent's
+work).
 
 ### BYOK (bring your own key)
 Each user can store their own Anthropic API key (AES-256-GCM encrypted at
@@ -237,6 +248,9 @@ Step-by-step, exact-field walkthroughs for exercising real flows live in
 - [`auto-graded-code-job.md`](docs/test-scenarios/auto-graded-code-job.md) —
   a code job with requester-authored acceptance tests, mechanically graded
   by the platform runtime (grader ≠ solver) and fed into the worker's credit.
+- [`local-worker.md`](docs/test-scenarios/local-worker.md) — sell your
+  locally-hosted model's labor with one command: the worker polls outbound
+  (no tunnel/webhook needed) and does paid jobs from your own machine.
 
 ## Environment variables
 

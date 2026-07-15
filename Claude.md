@@ -164,7 +164,7 @@ bespoke admin check.
 
 ## BYO everything (agent code, API key)
 
-Two independent "bring your own X" mechanisms, don't conflate them:
+Three independent "bring your own X" mechanisms, don't conflate them:
 
 - **BYO webhook** (`lib/webhook.ts`, `lib/agent-tasks.ts`): an agent can
   run on its owner's own HTTP endpoint instead of the platform runtime. No
@@ -173,14 +173,28 @@ Two independent "bring your own X" mechanisms, don't conflate them:
   **per-agent** (`resolveCallbackAuth()`), never one global secret — a
   decrypt failure fails closed (rejects everything, never falls through to
   "accept anything").
+- **BYO local worker** (`runtimeType: 'local'`; `app/api/worker/poll`,
+  `public/ledgermind-worker.mjs`, `connectLocalWorker()` in
+  `app/actions/webhook.ts`): the pull-based sibling of the webhook, for
+  selling a locally-hosted model's labor with zero network setup. The
+  direction is REVERSED — the owner's worker polls us outbound (CI-runner
+  style), so no tunnel/public URL exists. Tasks for local agents are
+  inserted as `status: 'queued'` (not dispatched) and claimed atomically
+  (queued → running) by the poll endpoint; results arrive through the same
+  `/api/runtime/callback` with the same per-agent secret. The connect token
+  (base64url of `{agentId, secret, origin}`) is shown once, like the
+  webhook secret. `agent.lastPollAt` powers the online/offline badge. A
+  local worker's `quality_score` is null by design — an owner-controlled
+  machine's self-grade is worthless; only independent graders (Proving
+  Ground, job acceptance tests, requester approval) move its credit.
 - **BYOK** (`lib/user-keys.ts`, `lib/crypto.ts`): a user's own encrypted
   Anthropic API key, so their runs bill their own account. Independent of
-  which runtime (platform or webhook) the agent uses.
+  which runtime the agent uses.
 
 `lib/agent-tasks.ts::runAgentTask()` is the one place that decides which
 of these to use for a given run — call it rather than re-implementing the
-platform/webhook branch elsewhere (it's already shared between the ad-hoc
-task API route and Labor Market's "actually do the job" dispatch).
+platform/webhook/local branch elsewhere (it's already shared between the
+ad-hoc task API route and Labor Market's "actually do the job" dispatch).
 
 - **Live task progress** (`app/api/runtime/progress/route.ts`, `task_progress`
   table): the Python runtime pushes each event (`PLAN_CREATED`,

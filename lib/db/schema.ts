@@ -149,9 +149,10 @@ export const agent = pgTable('agent', {
   walletAddress: text('walletAddress').notNull().unique(),
   smartAccountAddress: text('smartAccountAddress'), // ERC-4337 Kernel account (Sepolia)
   customInstructions: text('customInstructions'), // from a purchased/cloned agent template, if any
-  runtimeType: text('runtimeType').default('platform'), // 'platform' | 'webhook' (bring-your-own-agent)
+  runtimeType: text('runtimeType').default('platform'), // 'platform' | 'webhook' (BYO endpoint we call) | 'local' (owner's worker polls us — no tunnel needed)
   webhookUrl: text('webhookUrl'), // BYO agent HTTP endpoint, called instead of the platform runtime
-  webhookSecretEnc: text('webhookSecretEnc'), // AES-256-GCM encrypted per-agent callback secret
+  webhookSecretEnc: text('webhookSecretEnc'), // AES-256-GCM encrypted per-agent secret (webhook callbacks AND local-worker polling)
+  lastPollAt: timestamp('lastPollAt', { withTimezone: true }), // local worker's last poll — powers the online/offline badge
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
   creditScore: decimal('creditScore', { precision: 6, scale: 2 }).notNull().default('0'),
   creditRating: text('creditRating').default('unrated'),

@@ -24,11 +24,12 @@ import {
   Webhook,
   RefreshCw,
   Scale,
+  Bot,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
 import { getTreasury, sendFromTreasury, mintTestUsdc } from '@/app/actions/treasury'
-import { getWebhookConfig, setWebhookUrl, switchToPlatformRuntime, generateAgentWebhookSecret } from '@/app/actions/webhook'
+import { getWebhookConfig, setWebhookUrl, switchToPlatformRuntime, generateAgentWebhookSecret, connectLocalWorker } from '@/app/actions/webhook'
 import {
   getOnchainInfo,
   provisionSmartAccount,
@@ -996,28 +997,41 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
  * format our own runtime uses. See the Guide for the exact contract.
  */
 function RuntimeCard({ agentId }: { agentId: string }) {
-  const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook'>('platform')
+  const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook' | 'local'>('platform')
   const [webhookUrl, setWebhookUrlState] = useState('')
   const [hasSecret, setHasSecret] = useState(false)
   const [editing, setEditing] = useState(false)
   const [urlInput, setUrlInput] = useState('')
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
+  const [localCommand, setLocalCommand] = useState<string | null>(null)
+  const [lastPollAt, setLastPollAt] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const cfg = await getWebhookConfig(agentId)
-    setRuntimeType((cfg.runtimeType as 'platform' | 'webhook') ?? 'platform')
+    setRuntimeType((cfg.runtimeType as 'platform' | 'webhook' | 'local') ?? 'platform')
     setWebhookUrlState(cfg.webhookUrl ?? '')
     setUrlInput(cfg.webhookUrl ?? '')
     setHasSecret(cfg.hasSecret)
+    setLastPollAt(cfg.lastPollAt)
   }, [agentId])
 
   useEffect(() => {
     load()
     setRevealedSecret(null)
+    setLocalCommand(null)
     setEditing(false)
   }, [load])
+
+  // Live online/offline badge for a connected local worker (it polls every
+  // ~3s; consider it online if we heard from it in the last 30s).
+  useEffect(() => {
+    if (runtimeType !== 'local') return
+    const t = setInterval(() => load().catch(() => {}), 5000)
+    return () => clearInterval(t)
+  }, [runtimeType, load])
+  const workerOnline = lastPollAt !== null && Date.now() - new Date(lastPollAt).getTime() < 30_000
 
   const saveUrl = async () => {
     setBusy(true)
@@ -1061,24 +1075,45 @@ function RuntimeCard({ agentId }: { agentId: string }) {
     }
   }
 
+  const connectLocal = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const { command } = await connectLocalWorker(agentId)
+      setLocalCommand(command)
+      await load()
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="border border-border rounded-lg p-6">
       <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
         <Webhook className="size-5" /> Runtime
       </h3>
       <p className="text-sm text-muted-foreground mb-4">
-        By default this agent runs on the platform&apos;s Claude runtime. You can instead point it at
-        your own HTTP endpoint (e.g. a LangChain agent you host yourself) — we send the task, your
-        server sends back the result in our callback format. No code of yours ever runs on our
-        servers.
+        By default this agent runs on the platform&apos;s Claude runtime. Two ways to run it on YOUR
+        infrastructure instead: connect a <strong>local worker</strong> (one command; your machine
+        polls us — works behind any firewall, no tunnel, perfect for Ollama/LM Studio), or point it
+        at a <strong>webhook</strong> you host. Either way, no code of yours ever runs on our
+        servers — and grading stays independent regardless of who runs the work.
       </p>
 
       <div className="flex items-center gap-2 mb-3 text-sm">
-        <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${runtimeType === 'webhook' ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>
-          {runtimeType === 'webhook' ? 'Bring-your-own webhook' : 'Platform runtime'}
+        <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${runtimeType !== 'platform' ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>
+          {runtimeType === 'webhook' ? 'Bring-your-own webhook' : runtimeType === 'local' ? 'Local worker (polling)' : 'Platform runtime'}
         </span>
         {runtimeType === 'webhook' && webhookUrl && (
           <code className="text-xs text-muted-foreground truncate max-w-xs">{webhookUrl}</code>
+        )}
+        {runtimeType === 'local' && (
+          <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${workerOnline ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
+            <span className={`size-1.5 rounded-full ${workerOnline ? 'bg-success' : 'bg-warning'}`} />
+            {workerOnline ? 'worker online' : 'worker offline — run the connect command'}
+          </span>
         )}
       </div>
 
@@ -1091,31 +1126,66 @@ function RuntimeCard({ agentId }: { agentId: string }) {
             Switch back to platform runtime
           </button>
         </div>
+      ) : runtimeType === 'local' ? (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={connectLocal} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
+            Regenerate connect command
+          </button>
+          <button onClick={switchToPlatform} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
+            Switch back to platform runtime
+          </button>
+        </div>
       ) : (
-        (editing || runtimeType !== 'webhook') && (
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="https://your-server.example.com/agent"
-              className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
-              disabled={busy}
-            />
-            <button
-              onClick={saveUrl}
-              disabled={busy || !urlInput.trim()}
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
-              Use this webhook
-            </button>
-            {editing && (
-              <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
-                Cancel
-              </button>
+        (editing || runtimeType === 'platform') && (
+          <div className="space-y-3">
+            {!editing && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={connectLocal}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+                  Connect a local worker (one command)
+                </button>
+                <span className="text-xs text-muted-foreground">Ollama / LM Studio / any OpenAI-compatible local model</span>
+              </div>
             )}
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="https://your-server.example.com/agent"
+                className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
+                disabled={busy}
+              />
+              <button
+                onClick={saveUrl}
+                disabled={busy || !urlInput.trim()}
+                className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
+                Use this webhook
+              </button>
+              {editing && (
+                <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
         )
+      )}
+
+      {localCommand && (
+        <div className="mt-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+          <p className="font-medium mb-1">
+            Shown once — run this on the machine hosting your local model (Node 18+; default expects
+            Ollama at localhost:11434, add <code>--openai http://localhost:1234/v1 --model &lt;m&gt;</code> for
+            LM Studio etc). The token is a credential; don&apos;t share it.
+          </p>
+          <code className="block break-all font-mono select-all">{localCommand}</code>
+        </div>
       )}
 
       {runtimeType === 'webhook' && (

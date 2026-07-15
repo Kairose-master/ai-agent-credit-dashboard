@@ -176,6 +176,7 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "customInstructions" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "runtimeType" text DEFAULT 'platform';
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookUrl" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookSecretEnc" text;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "lastPollAt" timestamptz;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
