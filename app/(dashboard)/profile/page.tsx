@@ -46,6 +46,7 @@ type OnchainInfo = {
   available: number | null
   outstanding: number | null
   explorer: string
+  chainName?: string
 }
 
 type CreditState = {
@@ -556,15 +557,15 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* On-chain layer (ERC-4337 · EAS · Sepolia) */}
+      {/* On-chain layer (agent account · EAS · configured chain) */}
       {onchain?.configured && (
         <div className="border border-border rounded-lg p-6">
           <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-            <Link2 className="size-5" /> On-Chain (Sepolia)
+            <Link2 className="size-5" /> On-Chain ({onchain.chainName ?? 'Sepolia'})
           </h3>
           <p className="text-sm text-muted-foreground mb-4">
             The credit limit is published to the on-chain registry and attested via EAS; draws and
-            repayments settle as real USDC through the agent&apos;s ERC-4337 smart account.
+            repayments settle as real USDC through the agent&apos;s own on-chain account.
           </p>
 
           {onchain.smartAccountAddress ? (
@@ -766,7 +767,7 @@ export default function ProfilePage() {
 
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-              Get test USDC (Sepolia testnet — free, not real money)
+              Get test USDC ({onchain?.chainName ?? 'Sepolia'} testnet — free, not real money)
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <input

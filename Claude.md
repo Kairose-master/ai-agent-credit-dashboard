@@ -97,8 +97,22 @@ the app runs off-chain exactly the same way; every server action that
 touches chain state lazy-imports its on-chain module and checks
 configuration first.
 
-- **Agent smart accounts**: one deterministic ERC-4337 Kernel account per
-  agent (`lib/onchain/account.ts`), sponsored gas via ZeroDev paymaster.
+- **Chain is env-selected** (`ONCHAIN_CHAIN`: `sepolia` default,
+  `giwa-sepolia` for GIWA — an OP Stack L2, chain id 91342). Explorer links
+  come from `EXPLORER_URL` in `lib/onchain/config.ts`; never hardcode
+  `sepolia.etherscan.io` in UI. EAS defaults per chain too (Sepolia
+  standalone deployment vs GIWA's OP Stack predeploy `0x4200…0021`).
+- **Agent accounts run in one of two modes** (`agentAccountMode` in
+  `lib/onchain/config.ts`, both implemented in `lib/onchain/account.ts`
+  behind the same `getAgentAccountAddress`/`sendAgentCall` API):
+  - `kernel` — deterministic ERC-4337 Kernel account per agent, sponsored
+    gas via ZeroDev paymaster. Requires live 4337 infra (Sepolia).
+  - `eoa` — deterministic per-agent EOA derived
+    `keccak256(ownerKey ‖ agentId)`; the oracle auto-tops-up gas before
+    sends. Exists because GIWA (as of 2026-07) has EntryPoint v0.7 as a
+    predeploy but **no** public bundler/paymaster and no Kernel factory
+    (verified via `eth_getCode`) — so 4337 simply isn't usable there yet.
+    Still one secret total; still "the agent's own address transacts."
 - **Registry + Vault**: the scoring engine mirrors each recalculated limit
   to `AgentCreditRegistry` and writes an EAS attestation
   (`mirrorOnchain()` in `credit-engine/index.ts`); agents draw/repay real

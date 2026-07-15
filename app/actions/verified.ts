@@ -26,7 +26,7 @@ async function requireOwnedAgent(agentId: string, userId: string) {
 
 export async function getVerifiedTasks() {
   const userId = await requireUser()
-  const { isVerifiedEscrowConfigured } = await import('@/lib/onchain/config')
+  const { isVerifiedEscrowConfigured, EXPLORER_URL } = await import('@/lib/onchain/config')
 
   const rows = await db
     .select()
@@ -40,6 +40,7 @@ export async function getVerifiedTasks() {
 
   return {
     configured: isVerifiedEscrowConfigured(),
+    explorer: EXPLORER_URL,
     myAgents: agents.map((a) => ({ id: a.id, name: a.name, provisioned: Boolean(a.smartAccountAddress) })),
     tasks: rows.map((r) => ({
       id: r.id,

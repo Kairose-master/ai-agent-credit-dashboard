@@ -57,12 +57,13 @@ export default function GuidePage() {
       <div className="rounded-lg border border-border bg-secondary/30 p-6 text-sm leading-relaxed">
         <p className="font-medium text-foreground mb-2">The core idea</p>
         <p className="text-muted-foreground">
-          Your AI agent has its own on-chain wallet (an ERC-4337 smart account on Ethereum Sepolia
-          testnet). Every task it completes, every credit it repays, and every job it delivers is
-          recorded as a behavioral event. A scoring engine turns that history into a credit score,
-          which becomes a real, on-chain enforced spending limit — no fake numbers, no manual
-          approval. Everything below uses <strong>Sepolia testnet</strong> and{' '}
-          <strong>test USDC (mUSDC)</strong> — nothing here costs or moves real money.
+          Your AI agent has its own on-chain wallet on a public Ethereum test network (Sepolia or
+          GIWA Sepolia, depending on the deployment). Every task it completes, every credit it
+          repays, and every job it delivers is recorded as a behavioral event. A scoring engine
+          turns that history into a credit score, which becomes a real, on-chain enforced spending
+          limit — no fake numbers, no manual approval. Everything below uses a{' '}
+          <strong>testnet</strong> and <strong>test USDC (mUSDC)</strong> — nothing here costs or
+          moves real money.
         </p>
       </div>
 
@@ -82,9 +83,10 @@ export default function GuidePage() {
       <Section icon={Link2} step={2} title="Provision your agent's smart account">
         <p>
           Open <Link href="/profile" className="text-primary hover:underline">Profile</Link> and find the
-          <strong> On-Chain (Sepolia)</strong> card. Click <strong>Provision smart account</strong> — this
+          <strong> On-Chain</strong> card. Click <strong>Provision smart account</strong> — this
           deterministically derives your agent&apos;s own wallet address on-chain (an ERC-4337 Kernel
-          account via ZeroDev). Gas is sponsored, so this costs you nothing. Do this once per agent.
+          account on Sepolia, or a derived per-agent account on GIWA). This costs you nothing —
+          gas is sponsored or auto-funded. Do this once per agent.
         </p>
       </Section>
 
@@ -230,7 +232,7 @@ export default function GuidePage() {
         <p>
           Scores range 300–990 and map to ratings AAA down to D. Every recalculation is published
           on-chain (registry limit + an EAS attestation) — click any transaction link on your Profile
-          page to see it on Sepolia Etherscan.
+          page to see it on the chain&apos;s block explorer.
         </p>
       </Section>
 
@@ -256,9 +258,9 @@ export default function GuidePage() {
       <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm flex gap-3">
         <AlertTriangle className="size-5 shrink-0 text-warning" />
         <p className="text-muted-foreground">
-          Everything on this platform runs on <strong>Ethereum Sepolia</strong>, a public test network.
-          USDC here is a test token with no real value. Do not send real assets to any address shown
-          in this app.
+          Everything on this platform runs on a <strong>public test network</strong> (Ethereum
+          Sepolia or GIWA Sepolia). USDC here is a test token with no real value. Do not send real
+          assets to any address shown in this app.
         </p>
       </div>
     </div>
