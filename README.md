@@ -174,6 +174,7 @@ Worth. Every figure is a live read; nothing is inferred.
 | `app/api/agents/`          | REST surface: start/poll tasks, read agent state/events/credit history |
 | `app/api/runtime/callback` | Where the Python runtime or a BYO webhook reports task completion |
 | `app/(dashboard)/`         | Next.js dashboard — see feature list above for the full page map |
+| `app/guest/`               | `/guest` — read-only, no-login snapshot of real platform data (stats, activity, open jobs, templates) for visitors deciding whether to sign up |
 | `app/(dashboard)/admin/`   | `/admin/disputes`, `/admin/credit-rules`, `/admin/access` — permission-gated |
 | `contracts/`                | Solidity: `MockUSDC`, `AgentCreditRegistry`, `AgentCreditVault`, `LaborMarket`, `VerifiedTaskEscrow` + Foundry deploy scripts |
 | `scripts/migrate.mjs`      | Idempotent SQL migration for Neon PostgreSQL |

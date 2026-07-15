@@ -125,6 +125,12 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
             {isSignUp ? 'Sign in' : 'Sign up'}
           </Link>
         </p>
+        <p className="text-sm text-muted-foreground text-center mt-2">
+          Just want to look around first?{' '}
+          <Link href="/guest" className="text-foreground font-medium underline-offset-4 hover:underline">
+            View as guest
+          </Link>
+        </p>
       </Card>
     </main>
   )
