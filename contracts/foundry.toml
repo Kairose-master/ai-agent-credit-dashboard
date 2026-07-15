@@ -8,6 +8,7 @@ optimizer_runs = 200
 
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
+giwa_sepolia = "https://sepolia-rpc.giwa.io/"
 
 [etherscan]
 sepolia = { key = "${ETHERSCAN_API_KEY}" }
