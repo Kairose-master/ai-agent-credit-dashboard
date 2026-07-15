@@ -7,12 +7,41 @@
  */
 import { db } from '@/lib/db'
 import { agentTask, type agent as agentTable } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray, lt } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { startAgentTask } from '@/lib/agent-runtime/client'
 import { resolveCallbackAuth } from '@/lib/webhook'
 
 type AgentRow = typeof agentTable.$inferSelect
+
+const STUCK_TASK_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+
+/**
+ * A task can get stuck in 'running'/'processing' forever if the runtime
+ * process dies before it calls back — e.g. a mid-run redeploy kills the
+ * Python runtime's background thread, or a webhook agent's own server
+ * crashes. There's no heartbeat/retry, so nothing else would ever notice.
+ *
+ * Call this from any read path that surfaces task status (it's a single
+ * cheap UPDATE...WHERE, safe to call on every poll). A genuine callback
+ * landing at the exact same moment races this on the same row — whichever
+ * UPDATE commits first wins. In the rare case this one wins right as a real
+ * result was arriving, that result is dropped (matches the existing
+ * idempotent-callback behavior: /api/runtime/callback already no-ops with
+ * `{status: 'ignored'}` when it can't claim a 'running' row). Timeout is 10
+ * minutes, generous for a normal task, so this window is narrow.
+ */
+export async function reapStuckTasks(): Promise<void> {
+  const cutoff = new Date(Date.now() - STUCK_TASK_TIMEOUT_MS)
+  await db
+    .update(agentTask)
+    .set({
+      status: 'failed',
+      error: `Timed out waiting for the runtime (no response after ${STUCK_TASK_TIMEOUT_MS / 60_000} minutes) — it may have crashed or been redeployed mid-run.`,
+      updatedAt: new Date(),
+    })
+    .where(and(inArray(agentTask.status, ['running', 'processing']), lt(agentTask.updatedAt, cutoff)))
+}
 
 /** Starts a real run for `agent` and returns immediately (async — the
  *  runtime/webhook calls back on completion). Returns the new taskId. */

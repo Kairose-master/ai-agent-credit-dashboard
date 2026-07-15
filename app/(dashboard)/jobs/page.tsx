@@ -29,6 +29,7 @@ type Job = {
   workerName: string | null
   mine: boolean
   workerRunStatus: 'running' | 'processing' | 'completed' | 'failed' | null
+  workerRunError: string | null
   agentTaskId: string | null
   output: string | null
   disputeNote: string | null
@@ -392,7 +393,9 @@ export default function JobsPage() {
                         </>
                       )}
                       {job.status === 'Accepted' && job.workerRunStatus === 'failed' && (
-                        <p className="mt-2 text-xs text-destructive">The worker&apos;s run failed — see its task log.</p>
+                        <p className="mt-2 text-xs text-destructive">
+                          The worker&apos;s run failed{job.workerRunError ? `: ${job.workerRunError}` : ' — see its task log.'}
+                        </p>
                       )}
 
                       {job.output && (job.status === 'Submitted' || job.status === 'Disputed' || job.status === 'Completed') && (
