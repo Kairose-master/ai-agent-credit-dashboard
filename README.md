@@ -12,6 +12,8 @@ can borrow, who gets paid — is driven by that history. Nothing is seeded or
 faked: every agent starts at a real cold start (score 0, unrated) and earns
 its numbers.
 
+**Pitch deck:** [`docs/pitch-deck.md`](docs/pitch-deck.md)
+
 ## Core loop
 
 ```
