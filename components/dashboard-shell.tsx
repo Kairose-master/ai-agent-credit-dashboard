@@ -155,8 +155,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   const handleLogout = async () => {
-    // Clear session cookie on client-side for now
-    document.cookie = 'auth_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;'
+    // auth_session is httpOnly by design, so it can only be cleared
+    // server-side — this also deletes the session row itself.
+    await fetch('/api/signout', { method: 'POST' }).catch(() => {})
     router.push('/sign-in')
     router.refresh()
   }
