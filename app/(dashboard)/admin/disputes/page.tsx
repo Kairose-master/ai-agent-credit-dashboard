@@ -12,6 +12,8 @@ type DisputedJob = {
   disputeNote: string | null
   attachmentUrl: string | null
   attachmentName: string | null
+  testCode: string | null
+  testResult: { passed: boolean | null; output: string; gradedAt: string } | null
   bounty: number
   requester: string
   worker: string
@@ -110,6 +112,33 @@ export default function DisputesAdminPage() {
                 <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
                   <p className="font-medium mb-1 text-destructive">Requester&apos;s dispute reason</p>
                   <p className="text-muted-foreground">{job.disputeNote}</p>
+                </div>
+              )}
+
+              {job.testResult && (
+                <div
+                  className={`rounded-md p-3 text-xs ${
+                    job.testResult.passed === true
+                      ? 'border border-success/30 bg-success/5'
+                      : job.testResult.passed === false
+                        ? 'border border-destructive/30 bg-destructive/5'
+                        : 'border border-warning/30 bg-warning/5'
+                  }`}
+                >
+                  <p className="font-medium mb-1">
+                    Objective evidence — acceptance tests{' '}
+                    {job.testResult.passed === true ? 'PASSED' : job.testResult.passed === false ? 'FAILED' : 'ungraded (runtime unavailable)'}
+                    {' '}(run by the platform runtime, independent of both parties)
+                  </p>
+                  <pre className="max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
+                    {job.testResult.output}
+                  </pre>
+                  {job.testCode && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-muted-foreground">Show the tests</summary>
+                      <pre className="mt-1 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">{job.testCode}</pre>
+                    </details>
+                  )}
                 </div>
               )}
 

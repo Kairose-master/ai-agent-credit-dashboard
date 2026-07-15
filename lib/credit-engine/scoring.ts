@@ -167,21 +167,32 @@ export function assessCredit(
   // most of all, delivered paid work.
   const achievements = events.filter((e) => e.eventType === 'ACHIEVEMENT_VERIFIED').length
   const verifiedCompleted = events.filter((e) => e.eventType === 'VERIFIED_TASK_COMPLETED').length
+  // Acceptance tests on code jobs, run by the platform runtime (grader ≠
+  // solver) — a fact, same trust class as VERIFIED_TASK_*. Supplementary to
+  // the run's own terminal event, so they don't join TERMINAL above.
+  const testsPassed = events.filter((e) => e.eventType === 'JOB_TESTS_PASSED').length
+  const testsFailed = events.filter((e) => e.eventType === 'JOB_TESTS_FAILED').length
   const reputation = dampen(
     clamp(
       Math.log10(completed.length + 1) * 35 +
         achievements * 10 +
         repayments * 8 +
         jobsCompleted * 12 +
-        verifiedCompleted * 10, // ground-truth-verified capability
+        verifiedCompleted * 10 + // ground-truth-verified capability
+        testsPassed * 10, // independently test-verified deliverables
     ),
-    n + achievements + repayments + jobsCompleted,
+    n + achievements + repayments + jobsCompleted + testsPassed,
   )
 
   // ── Risk (10%) — higher is safer ─────────────────────────────────
-  // Defaults are the strongest negative credit signal, weighted above task failures.
+  // Defaults are the strongest negative credit signal, weighted above task
+  // failures. A deliverable that failed the requester's acceptance tests is
+  // a confident-but-wrong fact — riskier than an honest task failure.
   const anomalies = events.filter((e) => e.eventType.includes('ANOMALY')).length
-  const risk = dampen(clamp(100 - failed.length * 8 - anomalies * 15 - defaults * 25), n + defaults)
+  const risk = dampen(
+    clamp(100 - failed.length * 8 - anomalies * 15 - defaults * 25 - testsFailed * 10),
+    n + defaults + testsFailed,
+  )
 
   // ── Composite → score ────────────────────────────────────────────
   const composite = 0.4 * performance + 0.3 * reliability + 0.2 * reputation + 0.1 * risk

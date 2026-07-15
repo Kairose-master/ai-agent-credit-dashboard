@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from . import config
 from .graph import run_task
+from .tools import execute_python
 
 app = FastAPI(title="AI Agent Runtime", version="0.2.0")
 
@@ -33,6 +34,11 @@ class RunRequest(BaseModel):
     # BYOK: the requesting user's own Anthropic key. Optional — without it the
     # runtime bills its own ANTHROPIC_API_KEY. Never logged.
     api_key: str | None = None
+
+
+class GradeRequest(BaseModel):
+    solution_code: str = Field(min_length=1, max_length=50_000)
+    test_code: str = Field(min_length=1, max_length=20_000)
 
 
 def _require_secret(provided: str | None) -> None:
@@ -73,3 +79,18 @@ def run(request: RunRequest, x_runtime_secret: str | None = Header(default=None)
     _require_secret(x_runtime_secret)
     threading.Thread(target=_process, args=(request,), daemon=True).start()
     return {"status": "accepted", "task_id": request.task_id}
+
+
+@app.post("/grade")
+def grade(request: GradeRequest, x_runtime_secret: str | None = Header(default=None)) -> dict:
+    """Run a submitted solution against requester-authored acceptance tests.
+
+    Grader ≠ solver: this always executes on the PLATFORM's runtime — even
+    when the work was produced by a user's BYO webhook agent — so a worker
+    can't grade its own homework. Synchronous (sandbox has a 10s cap), plain
+    asserts: exit code 0 == passed.
+    """
+    _require_secret(x_runtime_secret)
+    script = request.solution_code + "\n\n# --- acceptance tests ---\n" + request.test_code
+    passed, output = execute_python(script)
+    return {"passed": passed, "output": output[:4000]}

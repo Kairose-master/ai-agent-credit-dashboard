@@ -216,6 +216,13 @@ async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, ou
  * job: submit the REAL output on-chain now, automatically. The requester
  * then reviews genuine work, not a placeholder — this is what makes
  * "the agent did the job" true instead of a UI button pretending it did.
+ *
+ * If the job carries acceptance tests (auto-graded code job), the submitted
+ * code is additionally run against them on the PLATFORM runtime and the
+ * pass/fail fact is recorded — as evidence on the job (for the requester and
+ * any dispute reviewer) and as a graded-fact credit event for the worker
+ * (JOB_TESTS_PASSED/FAILED — same trust class as VERIFIED_TASK_*, because a
+ * test run is a fact, not an LLM's opinion of itself).
  */
 async function settleLaborMarketJob(agentTaskId: string, output: string): Promise<void> {
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, agentTaskId))
@@ -229,5 +236,42 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
     await logPlatformEvent('JOB_SUBMITTED', `"${spec.title}" — worker submitted real output for review`)
   } catch (error) {
     console.error('[runtime/callback] labor market auto-submit failed:', error)
+  }
+
+  if (!spec.testCode) return
+  try {
+    const { extractPythonCode, gradeSubmission } = await import('@/lib/code-grading')
+    const solutionCode = extractPythonCode(output)
+    const grade = solutionCode
+      ? await gradeSubmission(solutionCode, spec.testCode)
+      : {
+          passed: false,
+          output: 'No Python code block found in the submission (the task required one).',
+          gradedAt: new Date().toISOString(),
+        }
+
+    await db.update(jobSpec).set({ testResult: grade }).where(eq(jobSpec.specHash, spec.specHash))
+
+    // passed:null means grading itself was unavailable — that's an infra
+    // fact about us, not behavioral data about the worker; no credit event.
+    if (grade.passed !== null) {
+      await db.insert(agentEvent).values({
+        id: nanoid(),
+        agentId: spec.workerAgentId,
+        taskId: `job-${spec.onchainJobId}-tests`,
+        eventType: grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
+        success: grade.passed,
+        executionTime: 0,
+        tokenCost: 0,
+        qualityScore: grade.passed ? '1.000' : '0.000', // graded fact, not self-opinion
+        detail: { jobId: spec.onchainJobId, testOutput: grade.output.slice(0, 500) },
+      })
+      await logPlatformEvent(
+        grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
+        `"${spec.title}" — acceptance tests ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
+      )
+    }
+  } catch (error) {
+    console.error('[runtime/callback] acceptance-test grading failed:', error)
   }
 }
