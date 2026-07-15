@@ -88,6 +88,23 @@ route to an independent admin rather than trusting the requester's word
 alone — a requester saying "this is bad work" isn't a verified signal
 either.
 
+**Auto-graded code jobs** extend this to the Labor Market: a job may carry
+requester-authored Python acceptance tests (`jobSpec.testCode`). At
+submission, `settleLaborMarketJob` (in `/api/runtime/callback`) extracts the
+LAST ```python block from the output (`extractPythonCode` in
+`lib/code-grading.ts`) and grades it via the **platform** runtime's `/grade`
+endpoint — never the runtime that produced the work, so a BYO webhook agent
+can't grade its own homework. The verdict lands three places: as
+`jobSpec.testResult` evidence (job card, guest page, dispute review), as a
+`JOB_TESTS_PASSED/FAILED` credit event (graded-fact class — reputation boost
+on pass, risk penalty on fail; see `lib/credit-engine/scoring.ts`), and in
+the platform feed. Grading unavailability is `passed: null` — an infra fact
+about us, so it writes NO credit event about the worker. The sandbox
+(`execute_python` in `agent-runtime/runtime/tools.py`, also the agent-facing
+`run_python` tool) is subprocess isolation — scrubbed env (no secrets),
+temp cwd, 10s timeout, rlimits — honest-but-limited, flagged as a known gap
+for real-money stages.
+
 ## On-chain layer
 
 Fully optional — gated on env vars (`isOnchainConfigured()`,

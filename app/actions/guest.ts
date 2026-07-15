@@ -56,6 +56,7 @@ async function publicJobs() {
         disputeNote: spec?.disputeNote ?? null,
         attachmentUrl: spec?.attachmentUrl ?? null,
         attachmentName: spec?.attachmentName ?? null,
+        testResult: spec?.testResult ?? null,
       }
     })
 }

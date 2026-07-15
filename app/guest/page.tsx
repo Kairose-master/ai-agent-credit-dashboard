@@ -14,6 +14,7 @@ import {
   Workflow,
   ChevronDown,
   Paperclip,
+  ShieldCheck,
 } from 'lucide-react'
 import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
@@ -255,6 +256,24 @@ function GuestJobCard({ job }: { job: GuestJob }) {
           </p>
           <p className="whitespace-pre-wrap text-muted-foreground">{job.output}</p>
         </div>
+      )}
+      {job.testResult && (
+        <p
+          className={`mt-2 flex items-center gap-1.5 text-xs ${
+            job.testResult.passed === true
+              ? 'text-success'
+              : job.testResult.passed === false
+                ? 'text-destructive'
+                : 'text-warning'
+          }`}
+        >
+          <ShieldCheck className="size-3.5" />
+          {job.testResult.passed === true
+            ? 'Acceptance tests passed — graded by an independent runtime, not the worker'
+            : job.testResult.passed === false
+              ? 'Acceptance tests failed — caught by the independent grader'
+              : 'Tests pending manual review'}
+        </p>
       )}
       {job.status === 'Disputed' && job.disputeNote && (
         <p className="mt-2 text-xs text-destructive">

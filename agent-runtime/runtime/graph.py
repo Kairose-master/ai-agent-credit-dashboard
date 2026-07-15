@@ -110,8 +110,10 @@ def planner_node(state: AgentState) -> AgentState:
         system=(
             "You are the planning module of an autonomous research agent. "
             "Produce a concise numbered plan (max 5 steps) to accomplish the task. "
-            "Available tools: fetch_url, calculator, current_date, wallet_balance, send_usdc "
-            "(payments only when the task explicitly requires one). Plan only — do not execute."
+            "Available tools: fetch_url, calculator, current_date, run_python (execute Python "
+            "code — use it to build and verify code deliverables before submitting), "
+            "wallet_balance, send_usdc (payments only when the task explicitly requires one). "
+            "Plan only — do not execute."
         ),
         messages=[{"role": "user", "content": state["task"]}],
     )

@@ -83,6 +83,8 @@ export async function getJobs() {
       disputeNote: spec?.disputeNote ?? null,
       attachmentUrl: spec?.attachmentUrl ?? null,
       attachmentName: spec?.attachmentName ?? null,
+      hasTests: Boolean(spec?.testCode),
+      testResult: spec?.testResult ?? null,
     }
   })
 
@@ -103,6 +105,10 @@ export async function postJobAction(input: {
   minScore: number
   attachmentUrl?: string
   attachmentName?: string
+  /** Optional Python asserts — makes this an auto-graded code job: the
+   *  worker's submitted code block is run against these on the platform
+   *  runtime (grader ≠ solver) and the result recorded as evidence. */
+  testCode?: string
 }) {
   const userId = await requireUser()
   const ag = await requireOwnedAgent(input.requesterAgentId, userId)
@@ -131,6 +137,7 @@ export async function postJobAction(input: {
       requesterAgentId: input.requesterAgentId,
       attachmentUrl: input.attachmentUrl || null,
       attachmentName: input.attachmentName || null,
+      testCode: input.testCode?.trim() || null,
     })
 
     const { postJob } = await import('@/lib/onchain/labor')
@@ -173,6 +180,13 @@ export async function acceptJobAction(workerAgentId: string, jobId: number) {
             ? `Source material for this task is attached at: ${spec.attachmentUrl}` +
               (spec.attachmentName ? ` (original filename: ${spec.attachmentName})` : '') +
               `\nUse the fetch_url tool to read it before doing the work — it is not summarized here.`
+            : '',
+          spec.testCode
+            ? `This job is AUTO-GRADED. Your answer MUST include your complete Python solution in a ` +
+              '```python fenced code block — the LAST such block in your answer is what gets graded, ' +
+              `by running it against the acceptance tests below (plain asserts appended after your code). ` +
+              `Use the run_python tool to run your code against these exact tests BEFORE answering, and ` +
+              `only submit once they pass.\n\nAcceptance tests:\n${spec.testCode}`
             : '',
         ]
           .filter(Boolean)
@@ -279,6 +293,8 @@ export async function getDisputedJobs() {
       disputeNote: spec?.disputeNote ?? null,
       attachmentUrl: spec?.attachmentUrl ?? null,
       attachmentName: spec?.attachmentName ?? null,
+      testCode: spec?.testCode ?? null,
+      testResult: spec?.testResult ?? null,
       bounty: j.bounty,
       requester: j.requester,
       worker: j.worker,

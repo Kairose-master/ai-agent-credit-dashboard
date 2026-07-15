@@ -35,6 +35,8 @@ type Job = {
   disputeNote: string | null
   attachmentUrl: string | null
   attachmentName: string | null
+  hasTests: boolean
+  testResult: { passed: boolean | null; output: string; gradedAt: string } | null
 }
 
 type MyAgent = { id: string; name: string; provisioned: boolean }
@@ -85,6 +87,7 @@ export default function JobsPage() {
   const [attachment, setAttachment] = useState<{ url: string; name: string } | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [testCode, setTestCode] = useState('')
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -159,6 +162,7 @@ export default function JobsPage() {
         minScore: parseInt(minScore || '0', 10),
         attachmentUrl: attachment?.url,
         attachmentName: attachment?.name,
+        testCode: testCode.trim() || undefined,
       }).then(() => {
         setTitle('')
         setDescription('')
@@ -166,6 +170,7 @@ export default function JobsPage() {
         setBounty('')
         setAttachment(null)
         setUploadError(null)
+        setTestCode('')
       }),
     )
 
@@ -320,6 +325,19 @@ export default function JobsPage() {
                     )}
                     {uploadError && <p className="mt-1 text-xs text-destructive">{uploadError}</p>}
                   </div>
+                  <div className="md:col-span-2">
+                    <textarea
+                      value={testCode}
+                      onChange={(e) => setTestCode(e.target.value)}
+                      placeholder={'Acceptance tests (Python, optional) — makes this an auto-graded code job.\nPlain asserts, run against the worker\'s submitted code by an independent grader, e.g.:\nassert fib(10) == 55\nassert fib(0) == 0'}
+                      rows={3}
+                      className="w-full rounded-md border border-border bg-background p-3 text-sm font-mono"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      With tests, the worker must deliver runnable Python and the platform runtime grades
+                      it mechanically — pass/fail is recorded as evidence and feeds the worker&apos;s credit.
+                    </p>
+                  </div>
                   <input
                     value={bounty}
                     onChange={(e) => setBounty(e.target.value)}
@@ -405,6 +423,37 @@ export default function JobsPage() {
                           </p>
                           <p className="whitespace-pre-wrap text-muted-foreground">{job.output}</p>
                         </div>
+                      )}
+                      {job.testResult && (
+                        <div
+                          className={`mt-2 rounded-md p-3 text-xs ${
+                            job.testResult.passed === true
+                              ? 'bg-success/10 text-success'
+                              : job.testResult.passed === false
+                                ? 'bg-destructive/10 text-destructive'
+                                : 'bg-warning/10 text-warning'
+                          }`}
+                        >
+                          <p className="font-medium flex items-center gap-1.5">
+                            <ShieldCheck className="size-3.5" />
+                            {job.testResult.passed === true
+                              ? 'Acceptance tests passed — graded by the platform runtime, not the worker'
+                              : job.testResult.passed === false
+                                ? 'Acceptance tests FAILED — graded by the platform runtime, not the worker'
+                                : 'Tests could not be graded (runtime unavailable) — review manually'}
+                          </p>
+                          {job.testResult.output && (
+                            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] opacity-80">
+                              {job.testResult.output}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                      {job.hasTests && !job.testResult && job.status === 'Open' && (
+                        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <ShieldCheck className="size-3.5" /> Auto-graded: submission will be run against
+                          the requester&apos;s acceptance tests.
+                        </p>
                       )}
                       {job.status === 'Disputed' && job.disputeNote && (
                         <p className="mt-2 text-xs text-destructive">

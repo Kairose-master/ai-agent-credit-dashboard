@@ -10,6 +10,9 @@ import ast
 import datetime
 import operator
 import re
+import subprocess
+import sys
+import tempfile
 
 import httpx
 
@@ -45,6 +48,23 @@ TOOL_SCHEMAS = [
         "name": "current_date",
         "description": "Return today's date in ISO format.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "run_python",
+        "description": (
+            "Execute a Python script in an isolated subprocess and return its stdout/stderr. "
+            "Use this to actually compute, test, or verify things — e.g. run the code you are "
+            "about to submit against the job's acceptance tests before answering. Standard "
+            "library only (no pip installs, no network); 10-second time limit; print() what "
+            "you want to see."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Complete Python script to execute"}
+            },
+            "required": ["code"],
+        },
     },
     {
         "name": "wallet_balance",
@@ -162,6 +182,65 @@ def current_date() -> str:
     return datetime.date.today().isoformat()
 
 
+_PY_TIMEOUT_SECONDS = 10
+_PY_MAX_OUTPUT = 8000
+
+
+def _py_resource_limits() -> None:
+    """Best-effort resource caps for the child (Linux). Applied pre-exec."""
+    try:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_CPU, (_PY_TIMEOUT_SECONDS, _PY_TIMEOUT_SECONDS))
+        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+    except Exception:
+        pass
+
+
+def execute_python(code: str, timeout: int = _PY_TIMEOUT_SECONDS) -> tuple[bool, str]:
+    """Run a Python script in an isolated subprocess.
+
+    Isolation is deliberate and layered, but honest about its limits:
+    -I (isolated mode, no user site-packages), a scrubbed environment (so the
+    child can never read ANTHROPIC_API_KEY / RUNTIME_SHARED_SECRET), a temp
+    cwd, a wall-clock timeout, and CPU/memory rlimits. It is NOT a security
+    boundary against a determined attacker with network access — acceptable
+    for the testnet stage, and flagged as a known gap in the repo docs.
+
+    Returns (exit_ok, combined_output).
+    """
+    with tempfile.TemporaryDirectory(prefix="agentpy-") as workdir:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-I", "-c", code],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=workdir,
+                env={"PATH": "/usr/bin:/bin", "HOME": workdir, "LANG": "C.UTF-8"},
+                preexec_fn=_py_resource_limits if sys.platform.startswith("linux") else None,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"error: execution timed out after {timeout}s"
+        except Exception as exc:
+            return False, f"error: failed to launch python: {exc}"
+
+    output = (proc.stdout or "") + (("\n--- stderr ---\n" + proc.stderr) if proc.stderr else "")
+    output = output.strip() or "(no output)"
+    if len(output) > _PY_MAX_OUTPUT:
+        output = output[:_PY_MAX_OUTPUT] + f"\n[truncated — {len(output) - _PY_MAX_OUTPUT} more characters]"
+    if proc.returncode != 0:
+        output = f"[exit code {proc.returncode}]\n{output}"
+    return proc.returncode == 0, output
+
+
+def run_python(code: str) -> str:
+    if not code.strip():
+        return "error: empty code"
+    ok, output = execute_python(code)
+    return output if ok else (output if output.startswith("error:") else f"error: {output}")
+
+
 def _wallet_call(ctx: dict | None, action: str, extra: dict | None = None) -> str:
     """Proxy wallet actions to the app's secret-authed wallet API. The runtime
     never holds keys; the app enforces the spending policy and signs."""
@@ -190,6 +269,8 @@ def run_tool(name: str, tool_input: dict, ctx: dict | None = None) -> str:
         return calculator(tool_input.get("expression", ""))
     if name == "current_date":
         return current_date()
+    if name == "run_python":
+        return run_python(tool_input.get("code", ""))
     if name == "wallet_balance":
         return _wallet_call(ctx, "balance")
     if name == "send_usdc":
