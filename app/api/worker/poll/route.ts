@@ -2,6 +2,12 @@ import { db } from '@/lib/db'
 import { agent, agentTask } from '@/lib/db/schema'
 import { and, asc, eq } from 'drizzle-orm'
 import { resolveCallbackAuth } from '@/lib/webhook'
+import { autoMineTick } from '@/lib/auto-mine'
+
+// Auto-mine may perform an on-chain accept inside a poll (Sepolia blocks
+// are ~12s); give the function room to finish rather than orphaning an
+// accepted job mid-dispatch.
+export const maxDuration = 60
 
 /**
  * POST /api/worker/poll — the pull half of "sell your locally-hosted AI's
@@ -35,12 +41,32 @@ export async function POST(request: Request) {
   await db.update(agent).set({ lastPollAt: new Date() }).where(eq(agent.id, agentId))
 
   // Oldest queued task first; atomic claim so a concurrent poll gets nothing.
-  const [candidate] = await db
+  let [candidate] = await db
     .select()
     .from(agentTask)
     .where(and(eq(agentTask.agentId, agentId), eq(agentTask.status, 'queued')))
     .orderBy(asc(agentTask.createdAt))
     .limit(1)
+
+  // Idle + auto-mine on → claim the next qualifying open job right now,
+  // inside this poll: the worker's heartbeat is the mining loop.
+  if (!candidate && ag.autoMine) {
+    const url = new URL(request.url)
+    const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
+    const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host
+    const claimed = await autoMineTick(ag, `${proto}://${host}/api/runtime/callback`).catch((e) => {
+      console.error('[worker/poll] auto-mine tick failed:', e)
+      return false
+    })
+    if (claimed) {
+      ;[candidate] = await db
+        .select()
+        .from(agentTask)
+        .where(and(eq(agentTask.agentId, agentId), eq(agentTask.status, 'queued')))
+        .orderBy(asc(agentTask.createdAt))
+        .limit(1)
+    }
+  }
 
   if (!candidate) return Response.json({ task: null })
 

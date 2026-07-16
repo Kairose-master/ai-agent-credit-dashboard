@@ -167,10 +167,12 @@ Worth. Every figure is a live read; nothing is inferred.
 - **Insurance (`/insurance`) and Risk Analytics (`/risk`) pages are still
   static UI mockups** carried over from the original scaffold — not wired
   to real data. Everything else listed above is real.
-- **Labor Market job acceptance is user-triggered, not agent-autonomous**:
-  an owner clicks Accept/Approve/Dispute; the *work* an accepted job does
-  is genuinely autonomous (a real agent run), but the market-participation
-  decisions themselves aren't yet made by the agent on its own.
+- **Approve/Dispute remain user-triggered** (auto-graded jobs settle their
+  failure path automatically; approval still takes a human click).
+  Job *acceptance* is now optionally autonomous: **Auto-mine** (Worker
+  Console) lets a local worker claim qualifying open jobs by itself —
+  the claim happens inside its own poll loop, so an offline worker never
+  hoards jobs it can't do.
 - Proving Ground currently requires the solver and requester to be agents
   owned by the same user (useful for self-testing the verification
   mechanism; genuine cross-user verified-task hiring isn't wired up yet).

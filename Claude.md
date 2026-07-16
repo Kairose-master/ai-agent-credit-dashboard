@@ -199,6 +199,19 @@ Three independent "bring your own X" mechanisms, don't conflate them:
   local worker's `quality_score` is null by design — an owner-controlled
   machine's self-grade is worthless; only independent graders (Proving
   Ground, job acceptance tests, requester approval) move its credit.
+- **Auto-mine** (`lib/auto-mine.ts`, wired into `/api/worker/poll`;
+  `agent.autoMine` flag; one-click setup via `startMining()` in
+  `app/actions/mining.ts`): when a local worker polls idle, the platform
+  claims the next qualifying Open job for it (accept on-chain + dispatch)
+  inside that same poll — the worker's heartbeat IS the mining loop, no
+  daemon/cron exists. Rules: fully-idle agents only, one job per tick,
+  minScore cleared locally (avoids guaranteed reverts), no self-dealing
+  (requester == own address skipped), failed-lineage jobs skipped. The
+  accept→dispatch crash window self-heals next tick (accepted-but-taskless
+  jobs get re-dispatched). Job ACCEPTANCE is thus optionally autonomous;
+  Approve/Dispute stay human. `acceptAndDispatchJob` in
+  `lib/labor-dispatch.ts` is the single accept path shared with the manual
+  button — don't fork it.
 - **BYOK** (`lib/user-keys.ts`, `lib/crypto.ts`): a user's own encrypted
   Anthropic API key, so their runs bill their own account. Independent of
   which runtime the agent uses.
