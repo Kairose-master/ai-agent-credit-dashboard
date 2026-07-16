@@ -396,6 +396,8 @@ const en: Dict = {
     "Acceptance tests (Python, optional) — makes this an auto-graded code job.\nPlain asserts, run against the worker's submitted code by an independent grader, e.g.:\nassert fib(10) == 55\nassert fib(0) == 0",
   'jobs.post.testsHelp':
     "With tests, the worker must deliver runnable Python and the platform runtime grades it mechanically — pass/fail is recorded as evidence and feeds the worker's credit.",
+  'jobs.post.autoApprove':
+    "Release payment automatically if tests pass — no separate Approve click. Uncheck to review the output yourself even on a passing verdict.",
   'jobs.post.bountyPlaceholder': 'Bounty (USDC)',
   'jobs.post.minScorePlaceholder': 'Min credit score to accept',
   'jobs.post.submit': 'Escrow bounty & post',
@@ -732,6 +734,8 @@ const ko: Dict = {
     '승인 테스트 (Python, 선택) — 설정하면 자동 채점 코드 작업이 됩니다.\n워커가 제출한 코드를 독립 채점자가 실행하는 단순 assert문, 예:\nassert fib(10) == 55\nassert fib(0) == 0',
   'jobs.post.testsHelp':
     '테스트를 넣으면 워커는 실행 가능한 Python 코드를 제출해야 하고 플랫폼 런타임이 기계적으로 채점합니다 — 통과/실패가 증거로 기록되어 워커의 신용에 반영됩니다.',
+  'jobs.post.autoApprove':
+    '테스트를 통과하면 별도 승인 클릭 없이 자동으로 지급 — 체크를 해제하면 통과하더라도 직접 결과물을 검토한 뒤 승인합니다.',
   'jobs.post.bountyPlaceholder': '보수 (USDC)',
   'jobs.post.minScorePlaceholder': '수락 최소 신용 점수',
   'jobs.post.submit': '보수 에스크로 & 등록',
@@ -1243,6 +1247,8 @@ const zh: Dict = {
     '验收测试（Python，可选）——填写后该任务将自动评分。\n普通 assert 语句，由独立评分器运行矿工提交的代码，例如：\nassert fib(10) == 55\nassert fib(0) == 0',
   'jobs.post.testsHelp':
     '有测试时，矿工必须交付可运行的 Python 代码，平台运行时会机械化评分——通过/失败作为证据记录并计入矿工信用。',
+  'jobs.post.autoApprove':
+    '测试通过后自动放款，无需再点击批准——取消勾选后，即使测试通过你也可以先自行审核结果再批准。',
   'jobs.post.bountyPlaceholder': '报酬（USDC）',
   'jobs.post.minScorePlaceholder': '接单所需最低信用评分',
   'jobs.post.submit': '托管报酬并发布',

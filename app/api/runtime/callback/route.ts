@@ -348,17 +348,20 @@ const AUTO_APPROVE_MAX_BOUNTY_USD = Number(process.env.AUTO_APPROVE_MAX_BOUNTY_U
  * (a seeded/house job, an auto-mined job for an idle requester). Without
  * this, a worker can do the work, pass grading, and simply never get paid.
  *
- * This still bypasses the requester's own review for jobs under the cap —
- * that's the deliberate trade (see AUTO_APPROVE_MAX_BOUNTY_USD above for
- * the mitigation). It does NOT bypass authorization in the sense of forging
- * a requester's identity: `approveJob` signs as `spec.requesterAgentId`
- * itself, using that agent's own configured signer, exactly as the manual
- * approval path does — there's no separate "requester consent" step to
- * bypass, on-chain or off, for jobs that opted into mechanical grading by
- * attaching acceptance tests in the first place.
+ * The actual authorization for this is `spec.autoApprove` — the requester's
+ * own explicit choice, recorded on an authenticated call to postJobAction
+ * at the time THEY posted the job (default true, opt-out available in the
+ * Post-a-Job form). It is NOT inferred here from testCode's mere presence:
+ * `approveJob` itself has no authorization logic of its own (it just signs
+ * as `spec.requesterAgentId`), so the gate has to be enforced before it's
+ * called, from a decision the requester actually made. AUTO_APPROVE_MAX_BOUNTY_USD
+ * is the second, independent layer — even a job that opted in only auto-
+ * releases up to that ceiling, bounding what a single grader mistake can
+ * move regardless of consent.
  */
 async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): Promise<void> {
   if (!spec.requesterAgentId || !spec.workerAgentId || spec.onchainJobId === null) return
+  if (!spec.autoApprove) return // requester opted out — stays Submitted for their own review
 
   let approvedTxHash: string | null = null
   try {
@@ -464,6 +467,7 @@ async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promi
       testCode: spec.testCode,
       repostCount: spec.repostCount + 1,
       failedWorkerIds: failedWorkers,
+      autoApprove: spec.autoApprove, // carry the requester's original consent choice forward, don't silently reset it
     })
     const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
 

@@ -123,15 +123,28 @@ never get paid — the job just sat Submitted waiting for a human "Approve &
 pay" click that might never come (a seeded/house-agent job, an idle
 requester). Same authority as the failure path: the tests are the agreed
 contract, so a pass calls `approveJob` + `creditWorkerForJob` immediately.
-Manual approval is still required for jobs with no `testCode` (nothing
-objective to auto-trust) and for any job whose bounty exceeds
-`AUTO_APPROVE_MAX_BOUNTY_USD` (default 50) regardless of a passing verdict —
-a cap on how much a single grader mistake can release with no human
-involved. Both auto-paths (`autoApprovePassedJob`, `returnFailedJobToMarket`)
+
+This only fires when `jobSpec.autoApprove` is true — the requester's own
+explicit choice, recorded on the authenticated `postJobAction` call THEY
+made when posting the job (a checkbox in the Post-a-Job form next to the
+test-code field, default checked). `approveJob` itself has no authorization
+logic of its own — it just signs as `spec.requesterAgentId` — so this flag
+is the actual gate, not an inference drawn after the fact from `testCode`'s
+mere presence (an earlier version of this feature made exactly that
+mistake: it treated "acceptance tests exist" as sufficient authorization to
+auto-release funds, with no record of the requester ever having agreed to
+skip manual review). Manual approval is still required for jobs with no
+`testCode` (nothing objective to auto-trust), for any requester who
+unchecked auto-approve, and — regardless of consent — for any job whose
+bounty exceeds `AUTO_APPROVE_MAX_BOUNTY_USD` (default 50), a second,
+independent cap on how much a single grader mistake can release
+unattended. Both auto-paths (`autoApprovePassedJob`, `returnFailedJobToMarket`)
 retry their post-irreversible-on-chain-step DB/RPC writes a few times and
 emit a `logPlatformEvent` (`JOB_AUTO_APPROVE_INCOMPLETE` /
 `JOB_REPOST_FAILED`) if they still fail, since by that point money has
-already moved and the only thing left to protect is visibility.
+already moved and the only thing left to protect is visibility. An
+auto-reposted job (after a failed verdict) carries the original
+`autoApprove` choice forward rather than silently resetting it.
 
 ## On-chain layer
 

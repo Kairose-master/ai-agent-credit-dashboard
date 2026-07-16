@@ -90,6 +90,7 @@ export default function JobsPage() {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [testCode, setTestCode] = useState('')
+  const [autoApprove, setAutoApprove] = useState(true)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -165,6 +166,7 @@ export default function JobsPage() {
         attachmentUrl: attachment?.url,
         attachmentName: attachment?.name,
         testCode: testCode.trim() || undefined,
+        autoApprove,
       }).then(() => {
         setTitle('')
         setDescription('')
@@ -173,6 +175,7 @@ export default function JobsPage() {
         setAttachment(null)
         setUploadError(null)
         setTestCode('')
+        setAutoApprove(true)
       }),
     )
 
@@ -334,6 +337,17 @@ export default function JobsPage() {
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t('jobs.post.testsHelp')}
                     </p>
+                    {testCode.trim() && (
+                      <label className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={autoApprove}
+                          onChange={(e) => setAutoApprove(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span>{t('jobs.post.autoApprove')}</span>
+                      </label>
+                    )}
                   </div>
                   <input
                     value={bounty}
