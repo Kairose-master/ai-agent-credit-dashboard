@@ -13,6 +13,7 @@ Both directions are authenticated with a shared secret (X-Runtime-Secret).
 """
 from __future__ import annotations
 
+import base64
 import threading
 
 import httpx
@@ -81,16 +82,84 @@ def run(request: RunRequest, x_runtime_secret: str | None = Header(default=None)
     return {"status": "accepted", "task_id": request.task_id}
 
 
+_GRADE_MARKER = "___LEDGERMIND_GRADE_RESULT___"
+
+
+def _build_grading_script(solution_code: str, test_code: str) -> str:
+    """Wrap solution + test code so a premature process exit — anywhere in
+    either phase — can never be mistaken for a passing verdict.
+
+    The naive version of this (`solution_code + "\\n" + test_code` run as
+    one top-level script, judged by the process's exit code) is directly
+    exploitable: a submission ending in `sys.exit(0)` / `quit()` /
+    `os._exit(0)` — accidental (models sometimes emit a demo `if __name__
+    == "__main__": sys.exit(main())` block) or deliberate — short-circuits
+    the test code before a single assert runs, while the subprocess still
+    exits 0. Since a passing verdict now auto-releases real escrow (see
+    autoApprovePassedJob in app/api/runtime/callback/route.ts), "exit code
+    0" being forgeable by the exact code under test is a real exploit, not
+    a style nit.
+
+    Fix: run each phase in its own try/except that explicitly catches
+    SystemExit (sys.exit()/quit()) alongside ordinary exceptions, and only
+    print an unguessable marker line after BOTH phases have provably run
+    to completion. The caller trusts the PRESENCE of that exact marker in
+    stdout, never the bare exit code — os._exit()/a kill signal skip
+    Python's exception handling entirely, but they also skip ever
+    reaching the print, so the caller still (correctly) reads that as a
+    failure. Source is base64-embedded to sidestep any quote/backslash
+    escaping bugs from splicing arbitrary submitted code into a script.
+    """
+    solution_b64 = base64.b64encode(solution_code.encode("utf-8")).decode("ascii")
+    test_b64 = base64.b64encode(test_code.encode("utf-8")).decode("ascii")
+    return f'''
+import base64, sys
+
+_ns = {{}}
+_solution_src = base64.b64decode("{solution_b64}").decode("utf-8")
+_test_src = base64.b64decode("{test_b64}").decode("utf-8")
+
+def _run():
+    try:
+        exec(compile(_solution_src, "<solution>", "exec"), _ns)
+    except SystemExit:
+        print("[grading] solution code exited early (sys.exit/quit) — treated as failing", file=sys.stderr)
+        return False
+    except BaseException as exc:
+        print(f"[grading] solution raised {{type(exc).__name__}}: {{exc}}", file=sys.stderr)
+        return False
+    try:
+        exec(compile(_test_src, "<tests>", "exec"), _ns)
+    except SystemExit:
+        print("[grading] test code exited early (sys.exit/quit) — treated as failing", file=sys.stderr)
+        return False
+    except BaseException as exc:
+        print(f"[grading] {{type(exc).__name__}}: {{exc}}", file=sys.stderr)
+        return False
+    return True
+
+_passed = _run()
+sys.stdout.flush()
+print("{_GRADE_MARKER}" + ("PASS" if _passed else "FAIL"))
+sys.exit(0 if _passed else 1)
+'''
+
+
 @app.post("/grade")
 def grade(request: GradeRequest, x_runtime_secret: str | None = Header(default=None)) -> dict:
     """Run a submitted solution against requester-authored acceptance tests.
 
     Grader ≠ solver: this always executes on the PLATFORM's runtime — even
     when the work was produced by a user's BYO webhook agent — so a worker
-    can't grade its own homework. Synchronous (sandbox has a 10s cap), plain
-    asserts: exit code 0 == passed.
+    can't grade its own homework. Synchronous (sandbox has a 10s cap).
+
+    Passed is decided by the presence of the marker _build_grading_script
+    prints, never by the bare subprocess exit code — see that function's
+    docstring for why the exit code alone is forgeable by the submission
+    under test.
     """
     _require_secret(x_runtime_secret)
-    script = request.solution_code + "\n\n# --- acceptance tests ---\n" + request.test_code
-    passed, output = execute_python(script)
+    script = _build_grading_script(request.solution_code, request.test_code)
+    _exit_ok, output = execute_python(script)
+    passed = f"{_GRADE_MARKER}PASS" in output
     return {"passed": passed, "output": output[:4000]}
