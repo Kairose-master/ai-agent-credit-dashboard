@@ -130,6 +130,12 @@ async function mirrorOnchain(
       .update(creditScoreEntry)
       .set({ registryTxHash, attestationTxHash })
       .where(eq(creditScoreEntry.id, scoreEntryId))
+
+    // ERC-8004 mirror: the same recalculated score, published as oracle
+    // feedback into the standard Reputation Registry (portable/composable
+    // outside this app). Best-effort like everything else here.
+    const { publishCreditFeedback } = await import('@/lib/onchain/erc8004')
+    await publishCreditFeedback(agentId, assessment.score, assessment.rating)
   } catch (error) {
     console.error('[credit-engine] on-chain mirror failed (non-fatal):', error)
   }

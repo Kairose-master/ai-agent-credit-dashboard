@@ -177,6 +177,7 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "runtimeType" text DEFAULT 'platfor
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookUrl" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookSecretEnc" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "lastPollAt" timestamptz;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "erc8004Id" integer;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns

@@ -73,7 +73,11 @@ export async function POST(request: Request) {
     }
 
     // Verified task? Grade against the hidden answer and settle the escrow.
-    await settleVerifiedTask(taskId, agentId, String(body?.output ?? ''))
+    const verifiedOutcome = await settleVerifiedTask(taskId, agentId, String(body?.output ?? ''))
+    if (verifiedOutcome !== null) {
+      const { publishValidation } = await import('@/lib/onchain/erc8004')
+      await publishValidation(agentId, verifiedOutcome ? 100 : 0, 'proving-ground', `task-${taskId}`)
+    }
 
     // Labor Market job? Submit the REAL output on-chain — no more manual
     // "Submit work" click, no more placeholder text.
@@ -129,12 +133,16 @@ export async function POST(request: Request) {
  * smart account. Both outcomes are recorded as VERIFIED_TASK_* events — the
  * factual quality signal the credit engine weighs above self-evaluation.
  */
-async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, output: string) {
+async function settleVerifiedTask(
+  agentTaskId: string,
+  solverAgentId: string,
+  output: string,
+): Promise<boolean | null> {
   const [row] = await db
     .select()
     .from(verifiableTask)
     .where(eq(verifiableTask.agentTaskId, agentTaskId))
-  if (!row || row.status !== 'solving') return
+  if (!row || row.status !== 'solving') return null
 
   const submitted = extractAnswer(output)
   const correct = submitted !== null && submitted === row.answer
@@ -176,6 +184,7 @@ async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, ou
           onchain: true,
         },
       })
+      return true
     } else {
       await db
         .update(verifiableTask)
@@ -197,6 +206,7 @@ async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, ou
           submitted: submitted ?? '(no FINAL_ANSWER found)',
         },
       })
+      return false
     }
   } catch (error) {
     console.error('[runtime/callback] verified settlement failed:', error)
@@ -209,6 +219,7 @@ async function settleVerifiedTask(agentTaskId: string, solverAgentId: string, ou
       })
       .where(eq(verifiableTask.id, row.id))
   }
+  return null
 }
 
 /**
@@ -269,6 +280,16 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
       await logPlatformEvent(
         grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
         `"${spec.title}" — acceptance tests ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
+      )
+
+      // Mirror the graded fact into the ERC-8004 Validation Registry
+      // (best-effort; publishValidation no-ops when unconfigured).
+      const { publishValidation } = await import('@/lib/onchain/erc8004')
+      await publishValidation(
+        spec.workerAgentId,
+        grade.passed ? 100 : 0,
+        'acceptance-tests',
+        `job-${spec.onchainJobId}`,
       )
     }
 

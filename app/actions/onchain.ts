@@ -62,6 +62,21 @@ export async function provisionSmartAccount(agentId: string) {
     await db.update(agent).set({ smartAccountAddress: address }).where(eq(agent.id, agentId))
     await recalculateCredit(agentId) // publishes the limit to the registry now that we have an address
 
+    // ERC-8004: the agent registers itself in the Identity Registry,
+    // pointing at its public registration file. Best-effort mirror.
+    try {
+      const { isErc8004Configured, registerAgentErc8004 } = await import('@/lib/onchain/erc8004')
+      if (isErc8004Configured()) {
+        const { headers } = await import('next/headers')
+        const h = await headers()
+        const proto = h.get('x-forwarded-proto') ?? 'https'
+        const host = h.get('x-forwarded-host') ?? h.get('host')
+        await registerAgentErc8004(agentId, `${proto}://${host}/api/agents/${agentId}/card`)
+      }
+    } catch (error) {
+      console.error('[erc8004] agent registration failed (non-blocking):', error)
+    }
+
     revalidatePath('/profile')
     return { address }
   } catch (error) {
