@@ -90,9 +90,21 @@ function progressTicker() {
   }
 }
 
+/** Final cleanup for reasoning models: drop closed <think> blocks (older
+ *  Ollama embeds them in content); if content is empty but the model
+ *  streamed a separate thinking channel, fall back to it — a messy answer
+ *  beats an empty submission. */
+function finishOutput(content, thinking) {
+  const cleaned = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+  if (cleaned) return cleaned
+  if (content.trim()) return content.trim()
+  return thinking.trim()
+}
+
 async function askLocalModel(task) {
   const tick = progressTicker()
   let content = ''
+  let thinking = ''
 
   if (OPENAI_BASE) {
     const res = await fetch(`${OPENAI_BASE.replace(/\/+$/, '')}/chat/completions`, {
@@ -113,16 +125,15 @@ async function askLocalModel(task) {
       const data = line.slice(5).trim()
       if (data === '[DONE]') return
       try {
-        const delta = JSON.parse(data).choices?.[0]?.delta?.content
-        if (delta) {
-          content += delta
-          tick()
-        }
+        const delta = JSON.parse(data).choices?.[0]?.delta
+        if (delta?.content) content += delta.content
+        if (delta?.reasoning_content) thinking += delta.reasoning_content
+        if (delta?.content || delta?.reasoning_content) tick()
       } catch {
         /* partial/keepalive line */
       }
     })
-    return content
+    return finishOutput(content, thinking)
   }
 
   const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
@@ -141,18 +152,17 @@ async function askLocalModel(task) {
   await readStreamLines(res, (line) => {
     try {
       const chunk = JSON.parse(line)
-      // Reasoning models may stream a separate "thinking" field — skipping it
-      // keeps chain-of-thought noise out of the submitted answer.
-      const piece = chunk.message?.content
-      if (piece) {
-        content += piece
-        tick()
-      }
+      // Reasoning models stream a separate "thinking" channel. Collect both:
+      // the answer comes from content, but if a model pours everything into
+      // thinking and leaves content empty, finishOutput falls back to it.
+      if (chunk.message?.content) content += chunk.message.content
+      if (chunk.message?.thinking) thinking += chunk.message.thinking
+      if (chunk.message?.content || chunk.message?.thinking) tick()
     } catch {
       /* partial line */
     }
   })
-  return content
+  return finishOutput(content, thinking)
 }
 
 async function platformPost(path, payload) {
