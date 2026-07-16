@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
@@ -16,18 +16,18 @@ import {
   Settings,
   BookOpen,
   MessageSquare,
-  Search,
-  Bell,
   Menu,
   X,
-  Command,
-  ChevronsUpDown,
   LogOut,
   Heart,
   Copy,
   Check,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getShellStatus } from "@/app/actions/shell"
+import { SiteFooter } from "@/components/site-footer"
+
+type ShellStatus = Awaited<ReturnType<typeof getShellStatus>>
 
 const DONATION_ADDRESS = "0xe274231b7d91dDa77cdbD150B7b5E4fA6F5140ae"
 
@@ -80,7 +80,22 @@ const nav = [
   { label: "Settings", href: "/settings", icon: Settings },
 ]
 
-function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function Sidebar({
+  pathname,
+  onNavigate,
+  status,
+}: {
+  pathname: string
+  onNavigate?: () => void
+  status: ShellStatus | null
+}) {
+  const initials = (status?.user?.name ?? "")
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
@@ -89,7 +104,7 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
         </div>
         <div className="leading-tight">
           <p className="text-sm font-semibold tracking-tight text-sidebar-foreground">Ledgermind</p>
-          <p className="text-[11px] text-muted-foreground">Agent Credit Layer</p>
+          <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure</p>
         </div>
       </div>
 
@@ -121,28 +136,41 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
       </nav>
 
       <div className="border-t border-sidebar-border p-3">
+        {/* Real network status — live chain + block from the RPC, or an
+            honest "off-chain mode" label. Never a made-up number. */}
         <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-muted-foreground">Network status</span>
-            <span className="flex items-center gap-1.5 text-[11px] font-medium text-success">
-              <span className="size-1.5 rounded-full bg-success" /> Live
-            </span>
+            <span className="text-[11px] font-medium text-muted-foreground">Network</span>
+            {status?.chain ? (
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-success">
+                <span className="size-1.5 rounded-full bg-success" /> Testnet · live
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                <span className="size-1.5 rounded-full bg-muted-foreground" /> Off-chain mode
+              </span>
+            )}
           </div>
-          <p className="mt-2 font-mono text-xs text-sidebar-foreground">Base L2 · Block 21,884,201</p>
+          {status?.chain && (
+            <p className="mt-2 font-mono text-xs tabular-nums text-sidebar-foreground">
+              {status.chain.name} · #{status.chain.block.toLocaleString()}
+            </p>
+          )}
         </div>
         <div className="mt-3">
           <SupportCard />
         </div>
-        <button className="mt-3 flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left hover:bg-sidebar-accent/50">
-          <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
-            ML
+        {status?.user && (
+          <div className="mt-3 flex w-full items-center gap-2.5 rounded-md px-2 py-2">
+            <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
+              {initials || "?"}
+            </div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-sm font-medium text-sidebar-foreground">{status.user.name}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{status.user.email}</p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1 leading-tight">
-            <p className="truncate text-sm font-medium text-sidebar-foreground">Meridian Labs</p>
-            <p className="truncate text-[11px] text-muted-foreground">Institutional</p>
-          </div>
-          <ChevronsUpDown className="size-4 text-muted-foreground" />
-        </button>
+        )}
       </div>
     </div>
   )
@@ -153,6 +181,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [status, setStatus] = useState<ShellStatus | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => getShellStatus().then((s) => !cancelled && setStatus(s)).catch(() => {})
+    load()
+    const t = setInterval(load, 30_000) // keep the block number honest
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+  }, [])
 
   const handleLogout = async () => {
     // auth_session is httpOnly by design, so it can only be cleared
@@ -162,11 +202,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     router.refresh()
   }
 
+  const initials = (status?.user?.name ?? "")
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+
   return (
     <div className="min-h-svh bg-background">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-sidebar-border bg-sidebar lg:block">
-        <Sidebar pathname={pathname} />
+        <Sidebar pathname={pathname} status={status} />
       </aside>
 
       {/* Mobile drawer */}
@@ -181,7 +228,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             >
               <X className="size-4" />
             </button>
-            <Sidebar pathname={pathname} onNavigate={() => setMobileOpen(false)} />
+            <Sidebar pathname={pathname} onNavigate={() => setMobileOpen(false)} status={status} />
           </aside>
         </div>
       )}
@@ -196,35 +243,28 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <Menu className="size-4" />
           </button>
 
-          <div className="relative hidden max-w-md flex-1 md:block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search agents, wallets, transactions..."
-              className="h-9 w-full rounded-md border border-border bg-secondary/50 pl-9 pr-16 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none"
-            />
-            <span className="pointer-events-none absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              <Command className="size-3" /> K
-            </span>
-          </div>
+          {/* Environment disclosure — every credible financial UI labels
+              its environment. Everything on this deployment is testnet. */}
+          <span className="rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-warning">
+            Testnet
+          </span>
 
           <div className="ml-auto flex items-center gap-2">
-            <span className="hidden items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground sm:flex">
-              <span className="size-1.5 rounded-full bg-success" /> USDC Treasury: $2.41M
-            </span>
-            <button
-              className="relative flex size-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary"
-              aria-label="Notifications"
-            >
-              <Bell className="size-4" />
-              <span className="absolute right-2 top-2 size-1.5 rounded-full bg-destructive" />
-            </button>
+            {status?.vaultUsd !== null && status?.vaultUsd !== undefined && (
+              <span
+                className="hidden items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1.5 text-xs font-medium tabular-nums text-muted-foreground sm:flex"
+                title="Live USDC balance of the credit vault contract"
+              >
+                <span className="size-1.5 rounded-full bg-success" /> Vault liquidity: $
+                {status.vaultUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </span>
+            )}
             <div className="relative">
               <button
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
                 className="flex size-9 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary hover:opacity-80"
               >
-                A7
+                {initials || "…"}
               </button>
               {userMenuOpen && (
                 <div className="absolute right-0 top-full mt-2 w-40 rounded-md border border-border bg-background shadow-lg">
@@ -241,7 +281,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="mx-auto max-w-[1400px] p-4 md:p-6">{children}</main>
+        <main className="mx-auto max-w-[1400px] p-4 md:p-6">
+          {children}
+          <SiteFooter />
+        </main>
       </div>
     </div>
   )
