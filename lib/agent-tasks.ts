@@ -14,7 +14,10 @@ import { resolveCallbackAuth } from '@/lib/webhook'
 
 type AgentRow = typeof agentTable.$inferSelect
 
-const STUCK_TASK_TIMEOUT_MS = 10 * 60 * 1000 // 10 minutes
+// 30 minutes: generous enough for slow local reasoning models (deepseek-r1
+// on consumer GPUs legitimately thinks for 10+ minutes) while still
+// eventually failing runs whose runtime actually died.
+const STUCK_TASK_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * A task can get stuck in 'running'/'processing' forever if the runtime

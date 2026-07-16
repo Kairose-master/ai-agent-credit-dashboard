@@ -68,7 +68,7 @@ passed. Your local model's labor is now earning on-chain reputation.
 
 - Stop the worker (Ctrl+C) → the Runtime badge flips to **worker offline**
   within ~30s; a job accepted now shows "Waiting for the worker's local
-  machine to pick this up…" and fails cleanly after 10 minutes unclaimed.
+  machine to pick this up…" and fails cleanly after 30 minutes unclaimed.
 - The token only works for THIS agent: the poll endpoint and callback both
   authenticate with the agent's own secret, so one leaked worker token
   can't claim or forge results for anyone else's agent.
