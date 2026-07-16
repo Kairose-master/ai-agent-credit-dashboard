@@ -297,6 +297,7 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `ONCHAIN_RPC_URL` | Chain RPC (falls back to `SEPOLIA_RPC_URL`); e.g. `https://sepolia-rpc.giwa.io` for GIWA |
 | `AGENT_ACCOUNT_MODE` | `kernel` (ERC-4337 via ZeroDev; Sepolia) or `eoa` (derived per-agent EOAs; GIWA, where 4337 infra isn't live yet). Auto-detected from `ZERODEV_RPC` when unset |
 | `WALLET_MAX_TX_USD`, `WALLET_DAILY_CAP_USD` | Treasury spending caps |
+| `AUTO_APPROVE_MAX_BOUNTY_USD` | Bounty ceiling for auto-graded jobs whose acceptance tests pass (default 50) — above it, escrow still waits for the requester's own approval even on a passing verdict, bounding what a single grader mistake can release unattended |
 | `X402_PAY_TO` | Enables the x402 paywall on `GET /api/agents/:id/report` — $0.01 USDC per query, machine-payable (Base Sepolia via the public facilitator). Unset = report is free (optional) |
 | `ERC8004_IDENTITY_ADDRESS`, `ERC8004_REPUTATION_ADDRESS`, `ERC8004_VALIDATION_ADDRESS` | ERC-8004 registries (deploy with `contracts/script/DeployERC8004.s.sol`). When set: agents self-register on provision, graded facts publish to the Validation Registry, credit scores publish as Reputation feedback (all optional) |
 | `X402_JOB_REQUESTER_AGENT_ID` | House requester agent (provisioned, mUSDC-funded) that escrows bounties for x402-paid external job postings (optional) |
@@ -329,6 +330,15 @@ Full schema in `lib/db/schema.ts`. Grouped roughly as: Better Auth tables
 `platform_events`), the marketplace (`agent_templates`,
 `agent_template_purchases`), access control (`admin_grants`), and BYOK
 (`user_api_keys`).
+
+Query `user`/`session` with an explicit column list — `SAFE_USER_COLUMNS`
+(`lib/db/safe-select.ts`) or an equally explicit `db.select({...})` — never
+`db.select().from(user)` with no column list or `db.query.user.findFirst()`.
+Both of those expand to *every* column `schema.ts` declares regardless of
+whether the migration adding the newest one has actually run, and that
+mismatch has already taken production login down once. Extend
+`SAFE_USER_COLUMNS` when a real caller needs another column; don't add it
+defensively.
 
 ## Internationalization
 

@@ -11,6 +11,7 @@ import { db } from '@/lib/db'
 import { adminGrant, user } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm'
 import { getSession } from '@/lib/get-session'
+import { SAFE_USER_COLUMNS } from '@/lib/db/safe-select'
 
 export const PERMISSIONS = ['disputes', 'credit_rules'] as const
 export type Permission = (typeof PERMISSIONS)[number]
@@ -43,7 +44,7 @@ export async function requirePermission(permission: Permission) {
 export async function listGrants() {
   const grants = await db.select().from(adminGrant)
   const userIds = [...new Set(grants.map((g) => g.userId))]
-  const users = userIds.length > 0 ? await db.select().from(user) : []
+  const users = userIds.length > 0 ? await db.select(SAFE_USER_COLUMNS).from(user) : []
   const byId = new Map(users.map((u) => [u.id, u]))
 
   return grants
@@ -58,7 +59,7 @@ export async function listGrants() {
 
 /** Superadmin-only: grant `permission` to the user with `email`. */
 export async function grantPermission(email: string, permission: Permission, grantedBy: string) {
-  const [target] = await db.select().from(user).where(eq(user.email, email))
+  const [target] = await db.select(SAFE_USER_COLUMNS).from(user).where(eq(user.email, email))
   if (!target) throw new Error('No user found with that email')
   if (isSuperAdminEmail(target.email)) throw new Error('That account is already the superadmin')
 

@@ -287,13 +287,28 @@ export async function resolveDisputeAction(jobId: number, releaseToWorker: boole
   }
 }
 
-/** Shared by approveJobAction, a worker-favoring dispute resolution, and the
- *  auto-approve path for auto-graded jobs (see settleLaborMarketJob in
- *  /api/runtime/callback): map the worker's on-chain address back to our
- *  agent row, record the reputation event, and recalculate credit. */
+/**
+ * Shared by approveJobAction, a worker-favoring dispute resolution, and the
+ * auto-approve path for auto-graded jobs (see settleLaborMarketJob in
+ * /api/runtime/callback): map the worker's on-chain address back to our
+ * agent row, record the reputation event, and recalculate credit.
+ *
+ * Exported only so /api/runtime/callback can reach it via a server-side
+ * dynamic import — it has no internal auth check of its own (every current
+ * caller gates ownership/permission before calling it), and it is not
+ * referenced by any client component. Do not import this from a
+ * 'use client' file or a form action; if a future caller needs to, add an
+ * explicit authorization check here first.
+ */
 export async function creditWorkerForJob(workerAddress: string, jobId: number, bounty: number, txHash: string) {
   const [workerAgent] = await db.select().from(agent).where(eq(agent.smartAccountAddress, workerAddress))
-  if (!workerAgent) return
+  if (!workerAgent) {
+    // The on-chain payout already happened by the time this runs — losing
+    // the credit event silently would hide that fact entirely, so log it
+    // even though there's no agent row left to act on.
+    console.error(`[labor] creditWorkerForJob: no agent found for worker address ${workerAddress} (job ${jobId}) — payout succeeded on-chain but no credit event was recorded`)
+    return
+  }
 
   await db.insert(agentEvent).values({
     id: nanoid(),

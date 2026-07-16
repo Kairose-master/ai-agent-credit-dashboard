@@ -124,7 +124,14 @@ pay" click that might never come (a seeded/house-agent job, an idle
 requester). Same authority as the failure path: the tests are the agreed
 contract, so a pass calls `approveJob` + `creditWorkerForJob` immediately.
 Manual approval is still required for jobs with no `testCode` (nothing
-objective to auto-trust).
+objective to auto-trust) and for any job whose bounty exceeds
+`AUTO_APPROVE_MAX_BOUNTY_USD` (default 50) regardless of a passing verdict —
+a cap on how much a single grader mistake can release with no human
+involved. Both auto-paths (`autoApprovePassedJob`, `returnFailedJobToMarket`)
+retry their post-irreversible-on-chain-step DB/RPC writes a few times and
+emit a `logPlatformEvent` (`JOB_AUTO_APPROVE_INCOMPLETE` /
+`JOB_REPOST_FAILED`) if they still fail, since by that point money has
+already moved and the only thing left to protect is visibility.
 
 ## On-chain layer
 
