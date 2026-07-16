@@ -180,6 +180,19 @@ const en: Dict = {
   'mine.celebration.body':
     'Your machine did real work, an independent grader passed it, and the payout is now part of its permanent credit history. The rig is officially a worker.',
 
+  'mine.payout.title': 'Payout wallet',
+  'mine.payout.description':
+    "Where \"Withdraw all earnings\" sends every worker's USDC — save it once, then settle with one click.",
+  'mine.payout.placeholder': 'Payout address 0x…',
+  'mine.payout.save': 'Save',
+  'mine.payout.saving': 'Saving…',
+  'mine.payout.saved': 'Saved.',
+  'mine.payout.withdraw': 'Withdraw all earnings',
+  'mine.payout.withdrawing': 'Withdrawing…',
+  'mine.payout.noEarnings': 'No USDC to withdraw yet.',
+  'mine.payout.resultSummary': 'Sent ${total} to {address}.',
+  'mine.payout.perAgentError': '{name}: {error}',
+
   'profile.loading': 'Loading...',
   'profile.noAgentFound': 'No agent found',
   'profile.title': 'Agent Credit Profile',
@@ -635,6 +648,18 @@ const ko: Dict = {
   'mine.celebration.title': '첫 검증 작업 완료!',
   'mine.celebration.body':
     '여러분의 기계가 실제로 일했고, 독립 채점자가 통과시켰으며, 이제 그 보수가 영구 신용 이력의 일부가 됐습니다. 이 릭은 공식적으로 워커입니다.',
+  'mine.payout.title': '지급 지갑',
+  'mine.payout.description':
+    '"모든 수익 인출"이 각 워커의 USDC를 보낼 주소입니다 — 한 번만 저장하면 이후엔 클릭 한 번으로 정산됩니다.',
+  'mine.payout.placeholder': '지급 주소 0x…',
+  'mine.payout.save': '저장',
+  'mine.payout.saving': '저장 중…',
+  'mine.payout.saved': '저장됨.',
+  'mine.payout.withdraw': '모든 수익 인출',
+  'mine.payout.withdrawing': '인출 중…',
+  'mine.payout.noEarnings': '아직 인출할 USDC가 없습니다.',
+  'mine.payout.resultSummary': '{address}(으)로 ${total} 전송했습니다.',
+  'mine.payout.perAgentError': '{name}: {error}',
   'mine.title': '워커 콘솔',
   'mine.miningBadge': '채굴 중…',
   'mine.subtitle':
@@ -1137,6 +1162,17 @@ const zh: Dict = {
   'mine.celebration.title': '第一个已验证任务完成！',
   'mine.celebration.body':
     '你的机器完成了真正的工作，独立评分者通过了它，报酬现已计入其永久信用历史。这台矿机正式成为矿工。',
+  'mine.payout.title': '收款钱包',
+  'mine.payout.description': '"提取全部收益"会把每个矿工的 USDC 发送到这个地址——只需保存一次，之后一键结算。',
+  'mine.payout.placeholder': '收款地址 0x…',
+  'mine.payout.save': '保存',
+  'mine.payout.saving': '保存中…',
+  'mine.payout.saved': '已保存。',
+  'mine.payout.withdraw': '提取全部收益',
+  'mine.payout.withdrawing': '提取中…',
+  'mine.payout.noEarnings': '暂无可提取的 USDC。',
+  'mine.payout.resultSummary': '已向 {address} 发送 ${total}。',
+  'mine.payout.perAgentError': '{name}：{error}',
   'mine.title': '矿工控制台',
   'mine.miningBadge': '挖矿中…',
   'mine.subtitle': '你机器的劳动，经过验证并获得报酬。算力从未换来过信用评分——这里可以。',

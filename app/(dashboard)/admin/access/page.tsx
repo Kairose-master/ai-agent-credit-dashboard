@@ -1,8 +1,79 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages } from 'lucide-react'
+import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase } from 'lucide-react'
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
+import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
+
+/**
+ * One-touch: (re)post the ten standing seed jobs from docs/seed-jobs.md so
+ * a freshly connected worker always finds real work. Idempotent — already-
+ * open seed titles are skipped, so repeat clicks top the board back up to
+ * ten instead of duplicating it.
+ */
+function SeedJobsCard() {
+  const [status, setStatus] = useState<{ configured: boolean; openTitles: string[]; total: number } | null>(null)
+  const [seeding, setSeeding] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await getSeedJobsStatus())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const seed = async () => {
+    setSeeding(true)
+    setError(null)
+    setResult(null)
+    try {
+      const r = await seedLaborMarketJobs()
+      setResult(`Posted ${r.posted} new job(s), ${r.skipped} already open (${r.posted + r.skipped}/${r.total} on the board).`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-6">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <Briefcase className="size-5" /> Seed jobs
+      </h3>
+      <p className="text-sm text-muted-foreground mb-3">
+        Posts the ten standing auto-graded jobs (docs/seed-jobs.md) as the house requester agent
+        (X402_JOB_REQUESTER_AGENT_ID) — so a freshly connected worker always finds real work. Safe to
+        click repeatedly: jobs still Open are skipped, not duplicated.
+      </p>
+      {status && (
+        <p className="text-sm text-muted-foreground mb-3">
+          {status.configured
+            ? `${status.openTitles.length}/${status.total} seed jobs currently Open on the board.`
+            : 'Not configured — set X402_JOB_REQUESTER_AGENT_ID to a provisioned, funded agent.'}
+        </p>
+      )}
+      <button
+        onClick={seed}
+        disabled={seeding || status?.configured === false}
+        className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+      >
+        {seeding ? <Loader2 className="size-4 animate-spin" /> : <Briefcase className="size-4" />}
+        Post seed jobs
+      </button>
+      {result && <p className="mt-2 text-sm text-success">{result}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
 
 type I18nStatus = {
   totalKeys: number
@@ -261,6 +332,8 @@ export default function AccessControlPage() {
           </p>
         )}
       </div>
+
+      <SeedJobsCard />
 
       <TranslationsCard />
 

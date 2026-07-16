@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS "user" (
   updatedat     timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "payoutaddress" text;
+
 CREATE TABLE IF NOT EXISTS "session" (
   id        text PRIMARY KEY,
   userid    text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,

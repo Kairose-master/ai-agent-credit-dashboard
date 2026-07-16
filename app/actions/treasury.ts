@@ -2,7 +2,7 @@
 
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
-import { agent, agentEvent } from '@/lib/db/schema'
+import { agent, agentEvent, user } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
@@ -15,6 +15,12 @@ async function requireOwnedAgent(agentId: string) {
   const [found] = await db.select().from(agent).where(eq(agent.id, agentId))
   if (!found || found.userId !== session.user.id) throw new Error('Agent not found')
   return found
+}
+
+async function requireUserId() {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+  return session.user.id
 }
 
 export async function getTreasury(agentId: string) {
@@ -41,6 +47,30 @@ export async function getTreasury(agentId: string) {
   return info
 }
 
+/** Shared transfer core: balance check, on-chain transfer, ledger event.
+ *  Callers are responsible for ownership + spending-policy checks first. */
+async function doTransfer(agentId: string, smartAccountAddress: string, to: string, amountUsd: number, memo: string) {
+  const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
+  const balance = await usdcBalanceOf(smartAccountAddress as `0x${string}`)
+  if (amountUsd > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
+
+  const txHash = await transferUsdc(agentId, to as `0x${string}`, amountUsd)
+
+  await db.insert(agentEvent).values({
+    id: nanoid(),
+    agentId,
+    taskId: `wallet-${nanoid(8)}`,
+    eventType: 'WALLET_TRANSFER',
+    success: true,
+    executionTime: 0,
+    tokenCost: 0,
+    qualityScore: null,
+    detail: { amountUsd, to, memo, txHash, initiator: 'owner' },
+  })
+
+  return txHash
+}
+
 /** Owner-initiated withdrawal/payment to any external address. Same policy
  *  and same ledger as agent-initiated transfers. */
 export async function sendFromTreasury(agentId: string, to: string, amountUsd: number, memo?: string) {
@@ -51,29 +81,90 @@ export async function sendFromTreasury(agentId: string, to: string, amountUsd: n
   await enforceSpendingPolicy(agentId, amountUsd)
 
   try {
-    const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
-    const balance = await usdcBalanceOf(ag.smartAccountAddress as `0x${string}`)
-    if (amountUsd > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
-
-    const txHash = await transferUsdc(agentId, to, amountUsd)
-
-    await db.insert(agentEvent).values({
-      id: nanoid(),
-      agentId,
-      taskId: `wallet-${nanoid(8)}`,
-      eventType: 'WALLET_TRANSFER',
-      success: true,
-      executionTime: 0,
-      tokenCost: 0,
-      qualityScore: null,
-      detail: { amountUsd, to, memo: memo ?? '', txHash, initiator: 'owner' },
-    })
-
+    const txHash = await doTransfer(agentId, ag.smartAccountAddress, to, amountUsd, memo ?? '')
     revalidatePath('/profile')
     return { txHash }
   } catch (error) {
     throw asActionError(error, 'sendFromTreasury')
   }
+}
+
+/** The wallet earnings get swept to on "Withdraw all earnings". Saved once,
+ *  reused by every future one-click withdrawal — no re-typing an address
+ *  per agent, per payout. */
+export async function getPayoutAddress() {
+  const userId = await requireUserId()
+  const [row] = await db.select({ payoutAddress: user.payoutAddress }).from(user).where(eq(user.id, userId))
+  return { payoutAddress: row?.payoutAddress ?? null }
+}
+
+export async function setPayoutAddress(address: string) {
+  const userId = await requireUserId()
+  const trimmed = address.trim()
+  if (trimmed && !isValidAddress(trimmed)) throw new Error('Invalid wallet address')
+  await db
+    .update(user)
+    .set({ payoutAddress: trimmed || null, updatedAt: new Date() })
+    .where(eq(user.id, userId))
+  revalidatePath('/mine')
+  return { payoutAddress: trimmed || null }
+}
+
+/**
+ * One click, every worker settled: sweeps each owned agent's USDC balance
+ * to the saved payout address, respecting the same per-tx/24h caps as a
+ * manual send (per agent, since the ledger that enforces the cap is keyed
+ * per agent). An agent that would exceed its cap sends what it can and
+ * reports the shortfall rather than failing the whole batch — the rest
+ * still settle.
+ */
+export async function withdrawAllEarnings() {
+  const userId = await requireUserId()
+  const [row] = await db.select({ payoutAddress: user.payoutAddress }).from(user).where(eq(user.id, userId))
+  const to = row?.payoutAddress
+  if (!to) throw new Error('Set a payout wallet first')
+
+  const agents = await db
+    .select()
+    .from(agent)
+    .where(eq(agent.userId, userId))
+  const provisioned = agents.filter((a) => a.smartAccountAddress)
+
+  const results: { agentId: string; name: string; sent: number; txHash?: string; error?: string }[] = []
+
+  for (const ag of provisioned) {
+    try {
+      const { usdcBalanceOf } = await import('@/lib/onchain/treasury')
+      const balance = await usdcBalanceOf(ag.smartAccountAddress as `0x${string}`)
+      if (balance <= 0) continue
+
+      const spent = await spentLast24h(ag.id)
+      const remainingCap = Math.max(0, Math.min(WALLET_MAX_TX_USD, WALLET_DAILY_CAP_USD - spent))
+      const amount = Math.min(balance, remainingCap)
+      if (amount <= 0) {
+        results.push({ agentId: ag.id, name: ag.name, sent: 0, error: 'Daily transfer cap reached' })
+        continue
+      }
+
+      const txHash = await doTransfer(ag.id, ag.smartAccountAddress!, to, amount, 'Withdraw all earnings')
+      results.push({ agentId: ag.id, name: ag.name, sent: amount, txHash })
+      if (amount < balance) {
+        results[results.length - 1].error = `Only $${amount.toFixed(2)} of $${balance.toFixed(2)} sent (cap) — rest available tomorrow`
+      }
+    } catch (error) {
+      results.push({
+        agentId: ag.id,
+        name: ag.name,
+        sent: 0,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  revalidatePath('/mine')
+  revalidatePath('/profile')
+  const totalSent = results.reduce((sum, r) => sum + r.sent, 0)
+  return { to, totalSent, results }
 }
 
 const TEST_MINT_MAX_USD = 5000
