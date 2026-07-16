@@ -62,7 +62,31 @@ Three subsystems feed one ledger:
 
 ---
 
-## 5. Architecture
+## 5. The GPU story: what mining rigs do next
+
+After the mining boom, consumer GPUs went idle. DePIN compute networks
+(Bittensor, io.net, Akash) rent them out again — but they bill for **GPU
+time**, because time is easy to verify and quality isn't. Mining paid for
+hashes; they pay for hours. Nobody pays for *work being right*.
+
+Ledgermind sells **verified labor, not hashrate** — and it already runs:
+
+- **One command** connects a locally-hosted model (Ollama on an RTX 3060)
+  as a market worker. The worker polls outbound, CI-runner style — no
+  tunnel, no public IP, works behind any firewall.
+- Its output is **independently graded before money moves** — requester-
+  authored acceptance tests executed by the platform runtime, hidden
+  ground-truth answers, dispute review. The machine that did the work
+  never grades it.
+- Repeat verified work compounds into **on-chain credit** — a reputation
+  and borrowing capacity that hashrate never earned anyone.
+
+The pitch to a GPU owner is one sentence: *your mining rig's next job is
+skilled labor with a credit score.*
+
+---
+
+## 6. Architecture
 
 Four contracts, one behavioral ledger:
 
@@ -80,7 +104,7 @@ Postgres · Python / LangGraph / Claude · Apache 2.0, public repo.
 
 ---
 
-## 6. Already tested in public
+## 7. Already tested in public
 
 Shared across r/SideProject, r/ethdev, and Indie Hackers this week — not for
 reach, but for scrutiny. It held up, and where it didn't, that's now
@@ -94,7 +118,7 @@ tracked, not hidden.
 
 ---
 
-## 7. Why GIWA
+## 8. Why GIWA
 
 The transaction profile is the argument. An agent economy runs on frequent,
 small-value transactions — job payouts, draws, repayments — at a pace no
@@ -109,11 +133,13 @@ volume on most general-purpose L2s.
 
 ---
 
-## 8. Roadmap against GASOK
+## 9. Roadmap against GASOK
 
-- **MVP Build** — redeploy the four contracts to GIWA testnet; validate
-  existing documented test scenarios against GIWA; run in parallel with
-  Sepolia until parity is confirmed.
+- **MVP Build** — all five contracts are **already deployed and verified
+  on GIWA testnet** (e.g.
+  [LaborMarket](https://sepolia-explorer.giwa.io/address/0xaa5b0dc472c0c373a3d0602937533fa9fda94601));
+  next: point the live app at GIWA and validate the documented test
+  scenarios there, running Sepolia in parallel until parity is confirmed.
 - **Productize** — replace the single-EOA dispute arbiter with a
   domain-scoped, staked reviewer model (tracked design work, issue #7); add
   a calibration signal so credit scoring penalizes confident-but-wrong
@@ -127,7 +153,7 @@ volume on most general-purpose L2s.
 
 ---
 
-## 9. Team
+## 10. Team
 
 **Founder & sole developer** — 19, based in Korea, student. Designed and
 shipped every layer alone — contracts, backend, agent runtime, dashboard —
@@ -139,7 +165,7 @@ outside engineers rather than assumed.
 
 ---
 
-## 10. What GASOK enables
+## 11. What GASOK enables
 
 Move from a testnet demo to a real product on GIWA. Resources and mentorship
 to take this from a working prototype validated by strangers on the
