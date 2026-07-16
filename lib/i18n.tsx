@@ -23,14 +23,21 @@ type I18n = {
   locale: string
   locales: LocaleOption[]
   setLocale: (l: string) => void
-  t: (key: string) => string
+  t: (key: string, params?: Record<string, string | number>) => string
+}
+
+// {token} placeholders survive translation verbatim (the prompt demands it),
+// so interpolation happens after lookup, in every language.
+function interpolate(raw: string, params?: Record<string, string | number>) {
+  if (!params) return raw
+  return raw.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m))
 }
 
 const I18nContext = createContext<I18n>({
   locale: 'en',
   locales: LOCALES,
   setLocale: () => {},
-  t: (key) => DICTIONARIES.en[key] ?? key,
+  t: (key, params) => interpolate(DICTIONARIES.en[key] ?? key, params),
 })
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
@@ -71,8 +78,11 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const t = (key: string) =>
-    DICTIONARIES[locale as Locale]?.[key] ?? overrides[locale]?.[key] ?? DICTIONARIES.en[key] ?? key
+  const t = (key: string, params?: Record<string, string | number>) =>
+    interpolate(
+      DICTIONARIES[locale as Locale]?.[key] ?? overrides[locale]?.[key] ?? DICTIONARIES.en[key] ?? key,
+      params,
+    )
 
   return <I18nContext.Provider value={{ locale, locales, setLocale, t }}>{children}</I18nContext.Provider>
 }

@@ -3,12 +3,35 @@
  * and the entire interactive guide. Other pages remain English until their
  * strings are migrated onto t() — extend these maps, never fork them.
  */
-export type Locale = 'en' | 'ko' | 'zh'
+export type Locale =
+  | 'en'
+  | 'ko'
+  | 'zh'
+  | 'ja'
+  | 'es'
+  | 'fr'
+  | 'de'
+  | 'pt'
+  | 'ru'
+  | 'hi'
+  | 'ar'
+  | 'id'
+  | 'vi'
 
 export const LOCALES: { value: Locale; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'ko', label: '한국어' },
   { value: 'zh', label: '中文' },
+  { value: 'ja', label: '日本語' },
+  { value: 'es', label: 'Español' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'pt', label: 'Português' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'hi', label: 'हिन्दी' },
+  { value: 'ar', label: 'العربية' },
+  { value: 'id', label: 'Bahasa Indonesia' },
+  { value: 'vi', label: 'Tiếng Việt' },
 ]
 
 type Dict = Record<string, string>
@@ -214,4 +237,412 @@ const zh: Dict = {
     '干活的机器永远不给自己打分。试炼场的答案与隐藏的标准答案比对，任务测试套件在平台运行时执行，争议交给独立审核人——信用评分只由这些经过独立验证的事实计算得出。',
 }
 
-export const DICTIONARIES: Record<Locale, Dict> = { en, ko, zh }
+/*
+ * The ten locales below ship with the short, high-visibility keys
+ * (navigation, guide step titles/CTAs) hand-reviewed; longer prose keys are
+ * intentionally left to the runtime pipeline — Admin → Access Control →
+ * Runtime translations fills them with one click per language, and those
+ * rows lose to anything added here later.
+ */
+
+const ja: Dict = {
+  'nav.dashboard': 'ダッシュボード',
+  'nav.guide': 'ガイド',
+  'nav.agents': 'エージェント',
+  'nav.creditScores': '信用スコア',
+  'nav.transactions': '取引履歴',
+  'nav.messages': 'メッセージ',
+  'nav.laborMarket': '労働市場',
+  'nav.workerConsole': 'ワーカーコンソール',
+  'nav.provingGround': '検証場',
+  'nav.riskAnalytics': 'リスク分析',
+  'nav.insurance': '保険',
+  'nav.settings': '設定',
+
+  'guide.title': 'はじめに',
+  'guide.progress': 'ステップ完了',
+  'guide.done': '完了',
+  'guide.todo': '未完了',
+  'guide.goto': '今すぐやる',
+
+  'guide.s1.title': '最初のエージェントを作成',
+  'guide.s1.cta': 'ダッシュボードを開く',
+  'guide.s2.title': 'Anthropic APIキーを登録（BYOK）',
+  'guide.s2.cta': '設定を開く',
+  'guide.s3.title': 'エージェントのオンチェーンアカウントを開設',
+  'guide.s3.cta': 'プロフィールを開く',
+  'guide.s4.title': '最初のタスクを実行',
+  'guide.s4.cta': 'タスクを実行',
+  'guide.s5.title': 'ローカルGPUワーカーを接続',
+  'guide.s5.cta': 'ワーカーコンソールを開く',
+  'guide.s6.title': 'Auto-mineをオンにする',
+  'guide.s6.cta': 'ワーカーコンソールを開く',
+  'guide.s7.title': '初めての有償ジョブを完了',
+  'guide.s7.cta': '労働市場を開く',
+  'guide.s8.title': 'ERC-8004に登録',
+  'guide.s8.cta': 'プロフィールを開く',
+
+  'guide.trust.title': 'すべての背後にあるただ一つの原則',
+}
+
+const es: Dict = {
+  'nav.dashboard': 'Panel',
+  'nav.guide': 'Guía',
+  'nav.agents': 'Agentes',
+  'nav.creditScores': 'Puntuaciones de crédito',
+  'nav.transactions': 'Transacciones',
+  'nav.messages': 'Mensajes',
+  'nav.laborMarket': 'Mercado laboral',
+  'nav.workerConsole': 'Consola de minería',
+  'nav.provingGround': 'Campo de pruebas',
+  'nav.riskAnalytics': 'Análisis de riesgo',
+  'nav.insurance': 'Seguros',
+  'nav.settings': 'Configuración',
+
+  'guide.title': 'Primeros pasos',
+  'guide.progress': 'pasos completados',
+  'guide.done': 'Hecho',
+  'guide.todo': 'Pendiente',
+  'guide.goto': 'Hazlo ahora',
+
+  'guide.s1.title': 'Crea tu primer agente',
+  'guide.s1.cta': 'Abrir panel',
+  'guide.s2.title': 'Añade tu clave API de Anthropic (BYOK)',
+  'guide.s2.cta': 'Abrir configuración',
+  'guide.s3.title': 'Aprovisiona la cuenta on-chain del agente',
+  'guide.s3.cta': 'Abrir perfil',
+  'guide.s4.title': 'Ejecuta una primera tarea',
+  'guide.s4.cta': 'Ejecutar una tarea',
+  'guide.s5.title': 'Conecta un worker GPU local',
+  'guide.s5.cta': 'Abrir la consola de minería',
+  'guide.s6.title': 'Activa Auto-mine',
+  'guide.s6.cta': 'Abrir la consola de minería',
+  'guide.s7.title': 'Completa tu primer trabajo remunerado',
+  'guide.s7.cta': 'Abrir el mercado laboral',
+  'guide.s8.title': 'Registra el agente en ERC-8004',
+  'guide.s8.cta': 'Abrir perfil',
+
+  'guide.trust.title': 'El único principio detrás de todo',
+}
+
+const fr: Dict = {
+  'nav.dashboard': 'Tableau de bord',
+  'nav.guide': 'Guide',
+  'nav.agents': 'Agents',
+  'nav.creditScores': 'Scores de crédit',
+  'nav.transactions': 'Transactions',
+  'nav.messages': 'Messages',
+  'nav.laborMarket': 'Marché du travail',
+  'nav.workerConsole': 'Console de minage',
+  'nav.provingGround': "Terrain d'essai",
+  'nav.riskAnalytics': 'Analyse des risques',
+  'nav.insurance': 'Assurance',
+  'nav.settings': 'Paramètres',
+
+  'guide.title': 'Premiers pas',
+  'guide.progress': 'étapes terminées',
+  'guide.done': 'Terminé',
+  'guide.todo': 'À faire',
+  'guide.goto': 'Faire maintenant',
+
+  'guide.s1.title': 'Créez votre premier agent',
+  'guide.s1.cta': 'Ouvrir le tableau de bord',
+  'guide.s2.title': 'Ajoutez votre clé API Anthropic (BYOK)',
+  'guide.s2.cta': 'Ouvrir les paramètres',
+  'guide.s3.title': "Provisionnez le compte on-chain de l'agent",
+  'guide.s3.cta': 'Ouvrir le profil',
+  'guide.s4.title': 'Lancez une première tâche',
+  'guide.s4.cta': 'Lancer une tâche',
+  'guide.s5.title': 'Connectez un worker GPU local',
+  'guide.s5.cta': 'Ouvrir la console de minage',
+  'guide.s6.title': 'Activez Auto-mine',
+  'guide.s6.cta': 'Ouvrir la console de minage',
+  'guide.s7.title': 'Terminez votre premier job rémunéré',
+  'guide.s7.cta': 'Ouvrir le marché du travail',
+  'guide.s8.title': "Enregistrez l'agent dans ERC-8004",
+  'guide.s8.cta': 'Ouvrir le profil',
+
+  'guide.trust.title': 'Le principe unique derrière tout cela',
+}
+
+const de: Dict = {
+  'nav.dashboard': 'Dashboard',
+  'nav.guide': 'Anleitung',
+  'nav.agents': 'Agenten',
+  'nav.creditScores': 'Kredit-Scores',
+  'nav.transactions': 'Transaktionen',
+  'nav.messages': 'Nachrichten',
+  'nav.laborMarket': 'Arbeitsmarkt',
+  'nav.workerConsole': 'Mining-Konsole',
+  'nav.provingGround': 'Prüfstand',
+  'nav.riskAnalytics': 'Risikoanalyse',
+  'nav.insurance': 'Versicherung',
+  'nav.settings': 'Einstellungen',
+
+  'guide.title': 'Erste Schritte',
+  'guide.progress': 'Schritte abgeschlossen',
+  'guide.done': 'Erledigt',
+  'guide.todo': 'Offen',
+  'guide.goto': 'Jetzt erledigen',
+
+  'guide.s1.title': 'Erstelle deinen ersten Agenten',
+  'guide.s1.cta': 'Dashboard öffnen',
+  'guide.s2.title': 'Anthropic-API-Schlüssel hinzufügen (BYOK)',
+  'guide.s2.cta': 'Einstellungen öffnen',
+  'guide.s3.title': 'On-Chain-Konto des Agenten einrichten',
+  'guide.s3.cta': 'Profil öffnen',
+  'guide.s4.title': 'Erste Aufgabe ausführen',
+  'guide.s4.cta': 'Aufgabe ausführen',
+  'guide.s5.title': 'Lokalen GPU-Worker verbinden',
+  'guide.s5.cta': 'Mining-Konsole öffnen',
+  'guide.s6.title': 'Auto-mine aktivieren',
+  'guide.s6.cta': 'Mining-Konsole öffnen',
+  'guide.s7.title': 'Ersten bezahlten Job abschließen',
+  'guide.s7.cta': 'Arbeitsmarkt öffnen',
+  'guide.s8.title': 'In ERC-8004 registrieren',
+  'guide.s8.cta': 'Profil öffnen',
+
+  'guide.trust.title': 'Das eine Prinzip hinter allem',
+}
+
+const pt: Dict = {
+  'nav.dashboard': 'Painel',
+  'nav.guide': 'Guia',
+  'nav.agents': 'Agentes',
+  'nav.creditScores': 'Scores de crédito',
+  'nav.transactions': 'Transações',
+  'nav.messages': 'Mensagens',
+  'nav.laborMarket': 'Mercado de trabalho',
+  'nav.workerConsole': 'Console de mineração',
+  'nav.provingGround': 'Campo de provas',
+  'nav.riskAnalytics': 'Análise de risco',
+  'nav.insurance': 'Seguros',
+  'nav.settings': 'Configurações',
+
+  'guide.title': 'Primeiros passos',
+  'guide.progress': 'etapas concluídas',
+  'guide.done': 'Concluído',
+  'guide.todo': 'A fazer',
+  'guide.goto': 'Fazer agora',
+
+  'guide.s1.title': 'Crie seu primeiro agente',
+  'guide.s1.cta': 'Abrir painel',
+  'guide.s2.title': 'Adicione sua chave de API da Anthropic (BYOK)',
+  'guide.s2.cta': 'Abrir configurações',
+  'guide.s3.title': 'Provisione a conta on-chain do agente',
+  'guide.s3.cta': 'Abrir perfil',
+  'guide.s4.title': 'Execute uma primeira tarefa',
+  'guide.s4.cta': 'Executar uma tarefa',
+  'guide.s5.title': 'Conecte um worker GPU local',
+  'guide.s5.cta': 'Abrir o console de mineração',
+  'guide.s6.title': 'Ative o Auto-mine',
+  'guide.s6.cta': 'Abrir o console de mineração',
+  'guide.s7.title': 'Conclua seu primeiro trabalho pago',
+  'guide.s7.cta': 'Abrir o mercado de trabalho',
+  'guide.s8.title': 'Registre o agente no ERC-8004',
+  'guide.s8.cta': 'Abrir perfil',
+
+  'guide.trust.title': 'O único princípio por trás de tudo',
+}
+
+const ru: Dict = {
+  'nav.dashboard': 'Панель',
+  'nav.guide': 'Руководство',
+  'nav.agents': 'Агенты',
+  'nav.creditScores': 'Кредитные рейтинги',
+  'nav.transactions': 'Транзакции',
+  'nav.messages': 'Сообщения',
+  'nav.laborMarket': 'Рынок труда',
+  'nav.workerConsole': 'Консоль майнинга',
+  'nav.provingGround': 'Полигон',
+  'nav.riskAnalytics': 'Аналитика рисков',
+  'nav.insurance': 'Страхование',
+  'nav.settings': 'Настройки',
+
+  'guide.title': 'Начало работы',
+  'guide.progress': 'шагов выполнено',
+  'guide.done': 'Готово',
+  'guide.todo': 'Осталось',
+  'guide.goto': 'Сделать сейчас',
+
+  'guide.s1.title': 'Создайте первого агента',
+  'guide.s1.cta': 'Открыть панель',
+  'guide.s2.title': 'Добавьте API-ключ Anthropic (BYOK)',
+  'guide.s2.cta': 'Открыть настройки',
+  'guide.s3.title': 'Создайте ончейн-счёт агента',
+  'guide.s3.cta': 'Открыть профиль',
+  'guide.s4.title': 'Запустите первую задачу',
+  'guide.s4.cta': 'Запустить задачу',
+  'guide.s5.title': 'Подключите локальный GPU-воркер',
+  'guide.s5.cta': 'Открыть консоль майнинга',
+  'guide.s6.title': 'Включите Auto-mine',
+  'guide.s6.cta': 'Открыть консоль майнинга',
+  'guide.s7.title': 'Выполните первую оплачиваемую работу',
+  'guide.s7.cta': 'Открыть рынок труда',
+  'guide.s8.title': 'Зарегистрируйте агента в ERC-8004',
+  'guide.s8.cta': 'Открыть профиль',
+
+  'guide.trust.title': 'Единственный принцип, стоящий за всем',
+}
+
+const hi: Dict = {
+  'nav.dashboard': 'डैशबोर्ड',
+  'nav.guide': 'गाइड',
+  'nav.agents': 'एजेंट',
+  'nav.creditScores': 'क्रेडिट स्कोर',
+  'nav.transactions': 'लेन-देन',
+  'nav.messages': 'संदेश',
+  'nav.laborMarket': 'श्रम बाज़ार',
+  'nav.workerConsole': 'वर्कर कंसोल',
+  'nav.provingGround': 'परीक्षण क्षेत्र',
+  'nav.riskAnalytics': 'जोखिम विश्लेषण',
+  'nav.insurance': 'बीमा',
+  'nav.settings': 'सेटिंग्स',
+
+  'guide.title': 'शुरुआत करें',
+  'guide.progress': 'चरण पूरे हुए',
+  'guide.done': 'पूर्ण',
+  'guide.todo': 'बाक़ी',
+  'guide.goto': 'अभी करें',
+
+  'guide.s1.title': 'अपना पहला एजेंट बनाएं',
+  'guide.s1.cta': 'डैशबोर्ड खोलें',
+  'guide.s2.title': 'अपनी Anthropic API कुंजी जोड़ें (BYOK)',
+  'guide.s2.cta': 'सेटिंग्स खोलें',
+  'guide.s3.title': 'एजेंट का ऑन-चेन खाता प्रोविज़न करें',
+  'guide.s3.cta': 'प्रोफ़ाइल खोलें',
+  'guide.s4.title': 'पहला टास्क चलाएं',
+  'guide.s4.cta': 'टास्क चलाएं',
+  'guide.s5.title': 'लोकल GPU वर्कर जोड़ें',
+  'guide.s5.cta': 'वर्कर कंसोल खोलें',
+  'guide.s6.title': 'Auto-mine चालू करें',
+  'guide.s6.cta': 'वर्कर कंसोल खोलें',
+  'guide.s7.title': 'पहला सशुल्क काम पूरा करें',
+  'guide.s7.cta': 'श्रम बाज़ार खोलें',
+  'guide.s8.title': 'ERC-8004 में पंजीकरण करें',
+  'guide.s8.cta': 'प्रोफ़ाइल खोलें',
+
+  'guide.trust.title': 'इन सबके पीछे एक ही सिद्धांत',
+}
+
+const ar: Dict = {
+  'nav.dashboard': 'لوحة التحكم',
+  'nav.guide': 'الدليل',
+  'nav.agents': 'الوكلاء',
+  'nav.creditScores': 'درجات الائتمان',
+  'nav.transactions': 'المعاملات',
+  'nav.messages': 'الرسائل',
+  'nav.laborMarket': 'سوق العمل',
+  'nav.workerConsole': 'وحدة التعدين',
+  'nav.provingGround': 'ساحة الإثبات',
+  'nav.riskAnalytics': 'تحليل المخاطر',
+  'nav.insurance': 'التأمين',
+  'nav.settings': 'الإعدادات',
+
+  'guide.title': 'البدء',
+  'guide.progress': 'خطوات مكتملة',
+  'guide.done': 'تم',
+  'guide.todo': 'للإنجاز',
+  'guide.goto': 'افعلها الآن',
+
+  'guide.s1.title': 'أنشئ وكيلك الأول',
+  'guide.s1.cta': 'افتح لوحة التحكم',
+  'guide.s2.title': 'أضف مفتاح Anthropic API الخاص بك (BYOK)',
+  'guide.s2.cta': 'افتح الإعدادات',
+  'guide.s3.title': 'جهّز حساب الوكيل على السلسلة',
+  'guide.s3.cta': 'افتح الملف الشخصي',
+  'guide.s4.title': 'شغّل أول مهمة',
+  'guide.s4.cta': 'شغّل مهمة',
+  'guide.s5.title': 'اربط عامل GPU محليًا',
+  'guide.s5.cta': 'افتح وحدة التعدين',
+  'guide.s6.title': 'فعّل Auto-mine',
+  'guide.s6.cta': 'افتح وحدة التعدين',
+  'guide.s7.title': 'أكمل أول عمل مدفوع',
+  'guide.s7.cta': 'افتح سوق العمل',
+  'guide.s8.title': 'سجّل في ERC-8004',
+  'guide.s8.cta': 'افتح الملف الشخصي',
+
+  'guide.trust.title': 'المبدأ الوحيد وراء كل شيء',
+}
+
+const id: Dict = {
+  'nav.dashboard': 'Dasbor',
+  'nav.guide': 'Panduan',
+  'nav.agents': 'Agen',
+  'nav.creditScores': 'Skor Kredit',
+  'nav.transactions': 'Transaksi',
+  'nav.messages': 'Pesan',
+  'nav.laborMarket': 'Pasar Kerja',
+  'nav.workerConsole': 'Konsol Penambangan',
+  'nav.provingGround': 'Arena Pembuktian',
+  'nav.riskAnalytics': 'Analisis Risiko',
+  'nav.insurance': 'Asuransi',
+  'nav.settings': 'Pengaturan',
+
+  'guide.title': 'Mulai',
+  'guide.progress': 'langkah selesai',
+  'guide.done': 'Selesai',
+  'guide.todo': 'Belum',
+  'guide.goto': 'Lakukan sekarang',
+
+  'guide.s1.title': 'Buat agen pertama Anda',
+  'guide.s1.cta': 'Buka dasbor',
+  'guide.s2.title': 'Tambahkan kunci API Anthropic Anda (BYOK)',
+  'guide.s2.cta': 'Buka pengaturan',
+  'guide.s3.title': 'Siapkan akun on-chain agen',
+  'guide.s3.cta': 'Buka profil',
+  'guide.s4.title': 'Jalankan tugas pertama',
+  'guide.s4.cta': 'Jalankan tugas',
+  'guide.s5.title': 'Hubungkan worker GPU lokal',
+  'guide.s5.cta': 'Buka konsol penambangan',
+  'guide.s6.title': 'Aktifkan Auto-mine',
+  'guide.s6.cta': 'Buka konsol penambangan',
+  'guide.s7.title': 'Selesaikan pekerjaan berbayar pertama Anda',
+  'guide.s7.cta': 'Buka pasar kerja',
+  'guide.s8.title': 'Daftarkan di ERC-8004',
+  'guide.s8.cta': 'Buka profil',
+
+  'guide.trust.title': 'Satu prinsip di balik semuanya',
+}
+
+const vi: Dict = {
+  'nav.dashboard': 'Bảng điều khiển',
+  'nav.guide': 'Hướng dẫn',
+  'nav.agents': 'Agent',
+  'nav.creditScores': 'Điểm tín dụng',
+  'nav.transactions': 'Giao dịch',
+  'nav.messages': 'Tin nhắn',
+  'nav.laborMarket': 'Thị trường lao động',
+  'nav.workerConsole': 'Bảng điều khiển worker',
+  'nav.provingGround': 'Sân thử nghiệm',
+  'nav.riskAnalytics': 'Phân tích rủi ro',
+  'nav.insurance': 'Bảo hiểm',
+  'nav.settings': 'Cài đặt',
+
+  'guide.title': 'Bắt đầu',
+  'guide.progress': 'bước đã hoàn thành',
+  'guide.done': 'Xong',
+  'guide.todo': 'Cần làm',
+  'guide.goto': 'Làm ngay',
+
+  'guide.s1.title': 'Tạo agent đầu tiên của bạn',
+  'guide.s1.cta': 'Mở bảng điều khiển',
+  'guide.s2.title': 'Thêm khóa API Anthropic của bạn (BYOK)',
+  'guide.s2.cta': 'Mở cài đặt',
+  'guide.s3.title': 'Khởi tạo tài khoản on-chain cho agent',
+  'guide.s3.cta': 'Mở hồ sơ',
+  'guide.s4.title': 'Chạy tác vụ đầu tiên',
+  'guide.s4.cta': 'Chạy tác vụ',
+  'guide.s5.title': 'Kết nối worker GPU cục bộ',
+  'guide.s5.cta': 'Mở bảng điều khiển worker',
+  'guide.s6.title': 'Bật Auto-mine',
+  'guide.s6.cta': 'Mở bảng điều khiển worker',
+  'guide.s7.title': 'Hoàn thành công việc trả phí đầu tiên',
+  'guide.s7.cta': 'Mở thị trường lao động',
+  'guide.s8.title': 'Đăng ký vào ERC-8004',
+  'guide.s8.cta': 'Mở hồ sơ',
+
+  'guide.trust.title': 'Nguyên tắc duy nhất đằng sau tất cả',
+}
+
+export const DICTIONARIES: Record<Locale, Dict> = { en, ko, zh, ja, es, fr, de, pt, ru, hi, ar, id, vi }
