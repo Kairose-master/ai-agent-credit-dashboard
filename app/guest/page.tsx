@@ -137,8 +137,13 @@ export default function GuestPage() {
                     </thead>
                     <tbody>
                       {data.topWorkers.map((w, i) => (
-                        <tr key={w.name + i} className="border-b border-border/50 last:border-0">
-                          <td className="py-2 pr-3 font-mono">{i + 1}</td>
+                        <tr
+                          key={w.name + i}
+                          className={`border-b border-border/50 last:border-0 ${i === 0 ? 'bg-warning/5' : ''}`}
+                        >
+                          <td className="py-2 pr-3">
+                            {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : <span className="font-mono">{i + 1}</span>}
+                          </td>
                           <td className="py-2 pr-3">
                             <span className="font-medium">{w.name}</span>
                             {w.runtime === 'local' && (
@@ -341,7 +346,7 @@ function GuestJobCard({ job }: { job: GuestJob }) {
 
 function StatCard({ icon: Icon, label, value }: { icon: typeof Bot; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="rounded-lg border border-border p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Icon className="size-3.5" /> {label}
       </div>
