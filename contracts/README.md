@@ -133,6 +133,14 @@ forge script script/DeployERC8004.s.sol --rpc-url giwa_sepolia --broadcast \
   --verify --verifier blockscout --verifier-url https://sepolia-explorer.giwa.io/api
 ```
 
+**Live deployments (Ethereum Sepolia, 2026-07-16):**
+
+| Registry | Address |
+| --- | --- |
+| Identity | [`0x47623F451C6A95E3F76775c6841E06Bcd83464b8`](https://sepolia.etherscan.io/address/0x47623F451C6A95E3F76775c6841E06Bcd83464b8) |
+| Reputation | [`0x41408F178B78cB6B7913E84F38F06d1Bf805a01D`](https://sepolia.etherscan.io/address/0x41408F178B78cB6B7913E84F38F06d1Bf805a01D) |
+| Validation | [`0x2ef97EC3Fb09463f00df4c0192A8e5155F86b0C1`](https://sepolia.etherscan.io/address/0x2ef97EC3Fb09463f00df4c0192A8e5155F86b0C1) |
+
 Then set the three `ERC8004_*_ADDRESS` env vars in the app. From that point:
 agents self-register in the Identity Registry at provision time (owner =
 the agent's own account), every acceptance-test / Proving Ground verdict is
