@@ -21,6 +21,7 @@ import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
 import { SiteFooter } from '@/components/site-footer'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { LanguageSwitcher } from '@/lib/i18n'
 import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
 
 type Overview = Awaited<ReturnType<typeof getGuestOverview>>
@@ -64,6 +65,7 @@ export default function GuestPage() {
           <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure · Guest view</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <LanguageSwitcher />
           <ThemeToggle />
           <Link
             href="/sign-in"

@@ -22,6 +22,19 @@ export async function getWorkerConsole() {
     agents.map(async (a) => {
       const events = await db.select().from(agentEvent).where(eq(agentEvent.agentId, a.id))
       const count = (type: string) => events.filter((e) => e.eventType === type).length
+
+      // Current streak: consecutive independent-grader passes, newest first,
+      // broken by the first graded failure.
+      const GRADED_PASS = new Set(['JOB_TESTS_PASSED', 'VERIFIED_TASK_COMPLETED'])
+      const GRADED_ALL = new Set([...GRADED_PASS, 'JOB_TESTS_FAILED', 'VERIFIED_TASK_FAILED'])
+      const graded = events
+        .filter((e) => GRADED_ALL.has(e.eventType))
+        .sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime())
+      let streak = 0
+      for (const e of graded) {
+        if (GRADED_PASS.has(e.eventType)) streak += 1
+        else break
+      }
       const earnedUsd = events
         .filter((e) => e.eventType === 'JOB_COMPLETED')
         .reduce((sum, e) => {
@@ -43,6 +56,7 @@ export async function getWorkerConsole() {
         rating: a.creditRating,
         jobsCompleted: count('JOB_COMPLETED'),
         earnedUsd,
+        streak,
         testsPassed: count('JOB_TESTS_PASSED'),
         testsFailed: count('JOB_TESTS_FAILED'),
         verifiedPassed: count('VERIFIED_TASK_COMPLETED'),

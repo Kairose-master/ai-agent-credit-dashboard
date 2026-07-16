@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loader2, Zap } from 'lucide-react'
 import { getWorkerConsole } from '@/app/actions/worker-console'
 import { startMining, setAutoMine } from '@/app/actions/mining'
+import { Celebration } from '@/components/celebration'
 
 type Console_ = Awaited<ReturnType<typeof getWorkerConsole>>
 type Worker = Console_['workers'][number]
@@ -45,9 +46,39 @@ export default function WorkerConsolePage() {
   const [starting, setStarting] = useState(false)
   const [startResult, setStartResult] = useState<{ command: string; provisioned: boolean } | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
+  const [celebrate, setCelebrate] = useState(false)
+  const prevJobsRef = useRef<number | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const refresh = useCallback(() => getWorkerConsole().then(setData).catch(() => {}), [])
+  const refresh = useCallback(
+    () =>
+      getWorkerConsole()
+        .then((d) => {
+          // First-ever verified job → one-time celebration. Only fires on a
+          // live 0→N transition witnessed on this page, guarded by
+          // localStorage so it never repeats.
+          const totalJobs = d.workers.reduce((s, w) => s + w.jobsCompleted, 0)
+          const prev = prevJobsRef.current
+          prevJobsRef.current = totalJobs
+          let seen = true
+          try {
+            seen = localStorage.getItem('lm-first-job-celebrated') === '1'
+          } catch {
+            /* private mode */
+          }
+          if (prev === 0 && totalJobs > 0 && !seen) {
+            setCelebrate(true)
+            try {
+              localStorage.setItem('lm-first-job-celebrated', '1')
+            } catch {
+              /* private mode */
+            }
+          }
+          setData(d)
+        })
+        .catch(() => {}),
+    [],
+  )
 
   useEffect(() => {
     refresh().finally(() => setLoading(false))
@@ -79,6 +110,13 @@ export default function WorkerConsolePage() {
 
   return (
     <div className="space-y-6">
+      {celebrate && (
+        <Celebration
+          title="First verified job complete!"
+          body="Your machine did real work, an independent grader passed it, and the payout is now part of its permanent credit history. The rig is officially a worker."
+          onClose={() => setCelebrate(false)}
+        />
+      )}
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Pickaxe
@@ -224,6 +262,14 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
         >
           {tier.emoji} {tier.name}
         </span>
+        {w.streak >= 2 && (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-medium text-orange-500 dark:text-orange-400"
+            title={`${w.streak} consecutive independently-graded passes`}
+          >
+            🔥 {w.streak} streak
+          </span>
+        )}
         <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
           {w.runtime === 'local' ? 'local worker' : w.runtime}
         </span>

@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils"
 import { getShellStatus } from "@/app/actions/shell"
 import { SiteFooter } from "@/components/site-footer"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { LanguageSwitcher, useI18n } from "@/lib/i18n"
 
 type ShellStatus = Awaited<ReturnType<typeof getShellStatus>>
 
@@ -69,18 +70,18 @@ function SupportCard() {
 }
 
 const nav = [
-  { label: "Dashboard", href: "/", icon: LayoutDashboard },
-  { label: "Guide", href: "/guide", icon: BookOpen },
-  { label: "Agents", href: "/agents", icon: Bot },
-  { label: "Credit Scores", href: "/credit-scores", icon: Gauge },
-  { label: "Transactions", href: "/transactions", icon: ArrowLeftRight },
-  { label: "Messages", href: "/messages", icon: MessageSquare },
-  { label: "Labor Market", href: "/jobs", icon: Briefcase },
-  { label: "Worker Console", href: "/mine", icon: Pickaxe },
-  { label: "Proving Ground", href: "/verify", icon: FlaskConical },
-  { label: "Risk Analytics", href: "/risk", icon: ShieldAlert },
-  { label: "Insurance", href: "/insurance", icon: Umbrella },
-  { label: "Settings", href: "/settings", icon: Settings },
+  { labelKey: "nav.dashboard", href: "/", icon: LayoutDashboard },
+  { labelKey: "nav.guide", href: "/guide", icon: BookOpen },
+  { labelKey: "nav.agents", href: "/agents", icon: Bot },
+  { labelKey: "nav.creditScores", href: "/credit-scores", icon: Gauge },
+  { labelKey: "nav.transactions", href: "/transactions", icon: ArrowLeftRight },
+  { labelKey: "nav.messages", href: "/messages", icon: MessageSquare },
+  { labelKey: "nav.laborMarket", href: "/jobs", icon: Briefcase },
+  { labelKey: "nav.workerConsole", href: "/mine", icon: Pickaxe },
+  { labelKey: "nav.provingGround", href: "/verify", icon: FlaskConical },
+  { labelKey: "nav.riskAnalytics", href: "/risk", icon: ShieldAlert },
+  { labelKey: "nav.insurance", href: "/insurance", icon: Umbrella },
+  { labelKey: "nav.settings", href: "/settings", icon: Settings },
 ]
 
 function Sidebar({
@@ -92,6 +93,7 @@ function Sidebar({
   onNavigate?: () => void
   status: ShellStatus | null
 }) {
+  const { t } = useI18n()
   const initials = (status?.user?.name ?? "")
     .split(/\s+/)
     .map((w) => w[0])
@@ -130,7 +132,7 @@ function Sidebar({
               )}
             >
               <Icon className="size-4 shrink-0" />
-              {item.label}
+              {t(item.labelKey)}
               {active && <span className="ml-auto size-1.5 rounded-full bg-primary" />}
             </Link>
           )
@@ -252,6 +254,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </span>
 
           <div className="ml-auto flex items-center gap-2">
+            <LanguageSwitcher />
             <ThemeToggle />
             {status?.vaultUsd !== null && status?.vaultUsd !== undefined && (
               <span
