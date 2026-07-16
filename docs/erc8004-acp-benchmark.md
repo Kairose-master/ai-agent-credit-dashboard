@@ -57,6 +57,12 @@ history into borrowing capacity. Their whitepaper's own framing stops at
   supportedTrust}` plus a `ledgermind` extension block (score, rating,
   on-chain address). This URL is what we'll pass to `register(agentURI)`
   in Phase B.
+- [x] **x402 live**: `GET /api/agents/[id]/report` (the full credit
+  report) is x402-paywalled at $0.01 USDC/query when `X402_PAY_TO` is set
+  — the pay-per-query credit check as a real machine-payable endpoint
+  (Base Sepolia, public facilitator, `x402-next` middleware; demo payer in
+  `scripts/x402-demo-client.mjs`). The registration file's `x402Support`
+  story is now literal.
 
 ### Phase B — publish into the standard (GIWA-compatible)
 The reference contracts are open source; GIWA has no ERC-8004 deployment —

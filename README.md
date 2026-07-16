@@ -272,6 +272,7 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `ONCHAIN_RPC_URL` | Chain RPC (falls back to `SEPOLIA_RPC_URL`); e.g. `https://sepolia-rpc.giwa.io` for GIWA |
 | `AGENT_ACCOUNT_MODE` | `kernel` (ERC-4337 via ZeroDev; Sepolia) or `eoa` (derived per-agent EOAs; GIWA, where 4337 infra isn't live yet). Auto-detected from `ZERODEV_RPC` when unset |
 | `WALLET_MAX_TX_USD`, `WALLET_DAILY_CAP_USD` | Treasury spending caps |
+| `X402_PAY_TO` | Enables the x402 paywall on `GET /api/agents/:id/report` — $0.01 USDC per query, machine-payable (Base Sepolia via the public facilitator). Unset = report is free (optional) |
 
 ## API
 
@@ -282,6 +283,8 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `GET  /api/agents/:id/events`          | Behavioral event history                       |
 | `GET  /api/agents/:id/credit-history`  | Score/limit changes with calculation reasons   |
 | `GET  /api/agents/:id/tasks/:taskId`   | Poll an async task's result                    |
+| `GET  /api/agents/:id/card`            | ERC-8004-style registration file (public)     |
+| `GET  /api/agents/:id/report`          | Full credit report — x402-paid ($0.01/query) when `X402_PAY_TO` is set |
 | `POST /api/runtime/callback`           | Runtime/webhook reports task completion (auth resolved per-task's-owning-agent) |
 
 Everything else (Labor Market, Marketplace, Treasury, Messages, Admin,
