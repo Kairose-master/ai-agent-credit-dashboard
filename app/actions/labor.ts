@@ -198,6 +198,10 @@ export async function acceptJobAction(workerAgentId: string, jobId: number) {
             ? `This job is AUTO-GRADED. Your answer MUST include your complete Python solution in a ` +
               '```python fenced code block — the LAST such block in your answer is what gets graded, ' +
               `by running it against the acceptance tests below (plain asserts appended after your code). ` +
+              `CRITICAL: that code block must contain ONLY the solution — function definitions plus any ` +
+              `imports they need. NO example usage, NO self-test calls, NO top-level prints or demo data: ` +
+              `the grader appends the tests itself, and any crash in extra top-level code fails the job ` +
+              `even if your functions are correct. ` +
               `Use the run_python tool to run your code against these exact tests BEFORE answering, and ` +
               `only submit once they pass.\n\nAcceptance tests:\n${spec.testCode}`
             : '',
