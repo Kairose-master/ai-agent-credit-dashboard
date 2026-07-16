@@ -14,9 +14,13 @@ export async function POST(request: Request) {
   const session = await getSession()
   if (!session?.user) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  // Two ways Vercel Blob can be wired up: the current default (connecting a
+  // store adds BLOB_STORE_ID and the SDK authenticates via ambient OIDC at
+  // runtime) or the legacy static token (BLOB_READ_WRITE_TOKEN). Either one
+  // means uploads can work — require at least one.
+  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.BLOB_STORE_ID) {
     return Response.json(
-      { error: 'File attachments are not configured (BLOB_READ_WRITE_TOKEN unset)' },
+      { error: 'File attachments are not configured (connect a Vercel Blob store to this project)' },
       { status: 503 },
     )
   }
