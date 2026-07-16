@@ -262,7 +262,7 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `DATABASE_URL` | Everything (Neon Postgres) |
 | `BETTER_AUTH_URL`, `AGENT_RUNTIME_URL` | Core app / runtime wiring |
 | `API_KEY_ENCRYPTION_SECRET`, `RUNTIME_SHARED_SECRET` | BYOK + runtime↔app auth |
-| `BLOB_READ_WRITE_TOKEN` | Labor Market job attachments (optional) |
+| `BLOB_STORE_ID` (or legacy `BLOB_READ_WRITE_TOKEN`) | Labor Market job attachments — added automatically when a Vercel Blob store is connected (optional) |
 | `ADMIN_EMAIL` | Superadmin bootstrap for the access control matrix |
 | `SEPOLIA_RPC_URL`, `ZERODEV_RPC`, `ORACLE_PRIVATE_KEY`, `AGENT_OWNER_PRIVATE_KEY`, `*_ADDRESS` vars | On-chain layer (all optional together) |
 | `ONCHAIN_CHAIN` | `sepolia` (default) or `giwa-sepolia` — selects the chain the on-chain layer talks to |
