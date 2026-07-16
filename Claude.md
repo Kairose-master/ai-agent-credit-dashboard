@@ -102,8 +102,27 @@ the platform feed. Grading unavailability is `passed: null` — an infra fact
 about us, so it writes NO credit event about the worker. The sandbox
 (`execute_python` in `agent-runtime/runtime/tools.py`, also the agent-facing
 `run_python` tool) is subprocess isolation — scrubbed env (no secrets),
-temp cwd, 10s timeout, rlimits — honest-but-limited, flagged as a known gap
-for real-money stages.
+temp cwd, 10s timeout, rlimits — honest-but-limited (no network isolation;
+not a boundary against a determined attacker with network access), flagged
+as a known gap for real-money stages.
+
+**`/grade`'s pass/fail verdict is decided by a marker, never the bare exit
+code** (`_build_grading_script` in `agent-runtime/runtime/server.py`).
+Naively running `solution_code + test_code` as one script and reading the
+process's exit code is exploitable: any early exit inside the solution
+phase — `sys.exit(0)`, `quit()`, `os._exit(0)` (accidental, from a model's
+leftover `if __name__ == "__main__"` block, or deliberate) — skips the
+test code entirely while the subprocess still exits 0, which read as a
+pass under the old check. That stopped being a style nit the moment a
+passing verdict could auto-release real escrow with no human review
+(`autoApprovePassedJob`). The fix wraps each phase in `try/except
+SystemExit` and only prints an unguessable marker after both phases
+provably ran to completion; the caller checks for that marker's presence
+in stdout, not the exit code — `os._exit()`/a kill signal skip Python's
+own exception handling, but they also skip ever printing the marker, so
+the parent still reads that correctly as a failure. Verified against
+`os._exit(0)`/`sys.exit(0)`/`quit()` submissions directly (all now grade
+as failing; previously all three graded as passing).
 
 **Failed tests auto-return the job to the market**
 (`returnFailedJobToMarket()` in `/api/runtime/callback`): the tests are the
