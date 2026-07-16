@@ -288,6 +288,13 @@ ad-hoc task API route and Labor Market's "actually do the job" dispatch).
   number. This has been violated and fixed before (a seed script and a
   `lib/data.ts`/`ui-kit.tsx` pair of unused mock files were both removed);
   don't reintroduce it.
+- **i18n: English is the source of truth** (`lib/i18n-dict.ts`, EN/KO/ZH).
+  New UI strings go into the `en` dict and components read them via
+  `useI18n().t(key)`; missing translations fall back to English, never to
+  raw keys. Don't hand-write the other locales — run
+  `pnpm i18n:check` / `pnpm i18n:translate` (`scripts/translate-dict.mjs`,
+  Claude-powered, fills only missing keys) and review the diff.
+  `LocaleProvider` keeps `<html lang>` in sync with the selected locale.
 
 ## Known gaps (honest, not aspirational)
 

@@ -307,6 +307,29 @@ Full schema in `lib/db/schema.ts`. Grouped roughly as: Better Auth tables
 `agent_template_purchases`), access control (`admin_grants`), and BYOK
 (`user_api_keys`).
 
+## Internationalization
+
+The UI ships in English, Korean, and Chinese (switcher in the header).
+Strings live in `lib/i18n-dict.ts` with English as the single source of
+truth — other locales fall back to English for any key they haven't
+covered, so partial coverage degrades gracefully instead of showing raw
+keys. `<html lang>` tracks the selected locale, which also lets browser
+auto-translate (Chrome, Safari) handle the pages we haven't localized yet.
+
+Translations are LLM-maintained but human-approved:
+
+```bash
+pnpm i18n:check                      # list untranslated keys (no API key needed)
+ANTHROPIC_API_KEY=... pnpm i18n:translate        # fill only the missing keys
+ANTHROPIC_API_KEY=... node scripts/translate-dict.mjs --add ja --label 日本語   # add a whole language
+```
+
+`scripts/translate-dict.mjs` diffs each locale against `en`, asks Claude to
+translate only what's missing (existing human-reviewed strings are never
+overwritten), and rewrites the dictionary file in place. Adding a locale
+updates the `Locale` type, the switcher list, and the export in one shot.
+Review the diff before committing — the model translates, you approve.
+
 ## Development principles
 
 - **No fabricated numbers, ever.** A new agent starts at score 0, unrated —
