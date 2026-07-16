@@ -56,13 +56,51 @@ const SYSTEM_PROMPT =
   'Complete the task exactly as specified. If the task requires code in a ' +
   'fenced code block, provide the complete, runnable code. Be factual and concise.'
 
+/**
+ * Both model paths STREAM the response. This matters for slow/reasoning
+ * models (deepseek-r1 etc.): with stream:false the server sends nothing
+ * until generation finishes, and Node's fetch kills a connection whose
+ * headers take >5 minutes — the run dies as "fetch failed" right before
+ * the model would have answered. Streaming delivers bytes continuously,
+ * so no timeout trips no matter how long the model thinks.
+ */
+async function readStreamLines(res, onLine) {
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let idx
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim()
+      buf = buf.slice(idx + 1)
+      if (line) onLine(line)
+    }
+  }
+  if (buf.trim()) onLine(buf.trim())
+}
+
+function progressTicker() {
+  let chunks = 0
+  return () => {
+    chunks += 1
+    if (chunks % 50 === 0) process.stdout.write('▪') // heartbeat: the model is generating
+  }
+}
+
 async function askLocalModel(task) {
+  const tick = progressTicker()
+  let content = ''
+
   if (OPENAI_BASE) {
     const res = await fetch(`${OPENAI_BASE.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
       body: JSON.stringify({
         model: MODEL,
+        stream: true,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: task },
@@ -70,8 +108,21 @@ async function askLocalModel(task) {
       }),
     })
     if (!res.ok) throw new Error(`local model responded ${res.status}: ${(await res.text()).slice(0, 300)}`)
-    const body = await res.json()
-    return body.choices?.[0]?.message?.content ?? ''
+    await readStreamLines(res, (line) => {
+      if (!line.startsWith('data:')) return
+      const data = line.slice(5).trim()
+      if (data === '[DONE]') return
+      try {
+        const delta = JSON.parse(data).choices?.[0]?.delta?.content
+        if (delta) {
+          content += delta
+          tick()
+        }
+      } catch {
+        /* partial/keepalive line */
+      }
+    })
+    return content
   }
 
   const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
@@ -79,7 +130,7 @@ async function askLocalModel(task) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
-      stream: false,
+      stream: true,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: task },
@@ -87,8 +138,21 @@ async function askLocalModel(task) {
     }),
   })
   if (!res.ok) throw new Error(`Ollama responded ${res.status}: ${(await res.text()).slice(0, 300)} — is Ollama running? (ollama serve / ollama pull ${MODEL})`)
-  const body = await res.json()
-  return body.message?.content ?? ''
+  await readStreamLines(res, (line) => {
+    try {
+      const chunk = JSON.parse(line)
+      // Reasoning models may stream a separate "thinking" field — skipping it
+      // keeps chain-of-thought noise out of the submitted answer.
+      const piece = chunk.message?.content
+      if (piece) {
+        content += piece
+        tick()
+      }
+    } catch {
+      /* partial line */
+    }
+  })
+  return content
 }
 
 async function platformPost(path, payload) {
@@ -133,6 +197,7 @@ async function runOne(task) {
     error = e instanceof Error ? e.message : String(e)
   }
 
+  process.stdout.write('\n')
   const executionTime = Math.round((Date.now() - startedAt) / 1000)
   const events = [
     event(task.task_id, 'TASK_STARTED', true, { task: task.task.slice(0, 200) }),
