@@ -9,8 +9,8 @@
  * views: no per-user "mine" labeling (there's no user), no mutations.
  */
 import { db } from '@/lib/db'
-import { agent, agentTemplate, platformEvent, jobSpec, agentTask } from '@/lib/db/schema'
-import { eq, desc, sql } from 'drizzle-orm'
+import { agent, agentEvent, agentTemplate, platformEvent, jobSpec, agentTask } from '@/lib/db/schema'
+import { eq, desc, inArray, sql } from 'drizzle-orm'
 
 function truncate(addr: string | null | undefined): string | null {
   if (!addr || /^0x0+$/.test(addr)) return null
@@ -61,6 +61,62 @@ async function publicJobs() {
     })
 }
 
+/** Public leaderboard: top-earning worker agents, ranked by real payouts
+ *  (JOB_COMPLETED bounties) with their independent-grading record. The
+ *  competitive layer of the mining framing — every number is a live
+ *  aggregation, no seeding. */
+async function leaderboard() {
+  const rows = await db
+    .select()
+    .from(agentEvent)
+    .where(
+      inArray(agentEvent.eventType, [
+        'JOB_COMPLETED',
+        'JOB_TESTS_PASSED',
+        'JOB_TESTS_FAILED',
+        'VERIFIED_TASK_COMPLETED',
+        'VERIFIED_TASK_FAILED',
+      ]),
+    )
+
+  const byAgent = new Map<
+    string,
+    { earnedUsd: number; jobs: number; gradedPassed: number; gradedTotal: number }
+  >()
+  for (const e of rows) {
+    const entry = byAgent.get(e.agentId) ?? { earnedUsd: 0, jobs: 0, gradedPassed: 0, gradedTotal: 0 }
+    if (e.eventType === 'JOB_COMPLETED') {
+      entry.jobs += 1
+      const bounty = (e.detail as { bounty?: number } | null)?.bounty
+      entry.earnedUsd += typeof bounty === 'number' ? bounty : 0
+    } else {
+      entry.gradedTotal += 1
+      if (e.eventType === 'JOB_TESTS_PASSED' || e.eventType === 'VERIFIED_TASK_COMPLETED') {
+        entry.gradedPassed += 1
+      }
+    }
+    byAgent.set(e.agentId, entry)
+  }
+
+  const ids = [...byAgent.keys()]
+  if (ids.length === 0) return []
+  const agents = await db.select().from(agent).where(inArray(agent.id, ids))
+  const nameOf = new Map(agents.map((a) => [a.id, a]))
+
+  return [...byAgent.entries()]
+    .map(([id, s]) => ({
+      name: nameOf.get(id)?.name ?? 'Unknown agent',
+      runtime: nameOf.get(id)?.runtimeType ?? 'platform',
+      creditScore: Math.round(parseFloat(nameOf.get(id)?.creditScore ?? '0')),
+      rating: nameOf.get(id)?.creditRating ?? 'unrated',
+      earnedUsd: s.earnedUsd,
+      jobs: s.jobs,
+      gradedPassRate: s.gradedTotal > 0 ? Math.round((s.gradedPassed / s.gradedTotal) * 100) : null,
+    }))
+    .sort((a, b) => b.earnedUsd - a.earnedUsd || b.jobs - a.jobs)
+    .slice(0, 5)
+}
+
 export async function getGuestOverview() {
   const [stats] = await db
     .select({
@@ -84,8 +140,10 @@ export async function getGuestOverview() {
     .limit(10)
 
   const jobs = await publicJobs()
+  const topWorkers = await leaderboard()
 
   return {
+    topWorkers,
     stats: {
       agentCount: Number(stats?.agentCount ?? 0),
       avgScore: stats?.avgScore ? Math.round(Number(stats.avgScore)) : null,

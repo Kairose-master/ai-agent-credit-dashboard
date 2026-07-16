@@ -272,6 +272,10 @@ export const jobSpec = pgTable('job_specs', {
   // claimer that dies releases the job.
   claimedByAgentId: text('claimed_by_agent_id'),
   claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  // x402-posted jobs: the external payer's address (attribution only —
+  // on-chain requester is the platform's house agent, which fronted the
+  // escrow that the payer's x402 payment bought).
+  externalPoster: text('external_poster'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

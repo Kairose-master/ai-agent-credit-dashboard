@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Paperclip,
   ShieldCheck,
+  Trophy,
 } from 'lucide-react'
 import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
@@ -112,6 +113,55 @@ export default function GuestPage() {
                 value={`$${data.stats.totalCreditLine.toLocaleString()}`}
               />
             </div>
+
+            {data.topWorkers.length > 0 && (
+              <div className="rounded-lg border border-border p-4">
+                <h2 className="mb-1 flex items-center gap-2 text-sm font-bold">
+                  <Trophy className="size-4" /> Top earning workers
+                </h2>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Ranked by real payouts for delivered, verified work — live aggregation, nothing
+                  seeded. Your GPU could be on this board.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <th className="py-1.5 pr-3 font-medium">#</th>
+                        <th className="py-1.5 pr-3 font-medium">Worker</th>
+                        <th className="py-1.5 pr-3 font-medium">Earned</th>
+                        <th className="py-1.5 pr-3 font-medium">Jobs</th>
+                        <th className="py-1.5 pr-3 font-medium">Grader pass rate</th>
+                        <th className="py-1.5 font-medium">Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.topWorkers.map((w, i) => (
+                        <tr key={w.name + i} className="border-b border-border/50 last:border-0">
+                          <td className="py-2 pr-3 font-mono">{i + 1}</td>
+                          <td className="py-2 pr-3">
+                            <span className="font-medium">{w.name}</span>
+                            {w.runtime === 'local' && (
+                              <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                local GPU
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3 font-mono">${w.earnedUsd.toLocaleString()}</td>
+                          <td className="py-2 pr-3 font-mono">{w.jobs}</td>
+                          <td className="py-2 pr-3 font-mono">
+                            {w.gradedPassRate === null ? '—' : `${w.gradedPassRate}%`}
+                          </td>
+                          <td className="py-2 font-mono">
+                            {w.creditScore} · {w.rating}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="rounded-lg border border-border p-4">
               <h2 className="mb-3 flex items-center gap-2 text-sm font-bold">

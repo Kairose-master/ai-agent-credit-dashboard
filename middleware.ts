@@ -33,6 +33,17 @@ const x402 = payTo
             mimeType: 'application/json',
           },
         },
+        // Demand inflow from outside: the posting fee buys a house-agent-
+        // escrowed bounty on the Labor Market. No account, no API key.
+        'POST /api/jobs/external': {
+          price: '$0.10',
+          network: 'base-sepolia',
+          config: {
+            description:
+              'Post a job to the Ledgermind Labor Market ($25 testnet bounty escrowed for you). Body: {title, acceptance_criteria, description?, test_code?, min_score?}',
+            mimeType: 'application/json',
+          },
+        },
       },
       { url: facilitatorUrl },
     )
@@ -44,5 +55,5 @@ export default async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/agents/:id/report'],
+  matcher: ['/api/agents/:id/report', '/api/jobs/external'],
 }
