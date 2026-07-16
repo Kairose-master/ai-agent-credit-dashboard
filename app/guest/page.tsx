@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
+import { SiteFooter } from '@/components/site-footer'
 import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
 
 type Overview = Awaited<ReturnType<typeof getGuestOverview>>
@@ -206,6 +207,8 @@ export default function GuestPage() {
             Sign up free
           </Link>
         </div>
+
+        <SiteFooter />
       </main>
     </div>
   )

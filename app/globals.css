@@ -100,5 +100,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Financial UI convention: digits align in columns everywhere —
+       scores, balances, block numbers — without per-component classes. */
+    font-variant-numeric: tabular-nums;
   }
 }
