@@ -48,6 +48,8 @@ type OnchainInfo = {
   outstanding: number | null
   explorer: string
   chainName?: string
+  erc8004Configured?: boolean
+  erc8004Id?: number | null
 }
 
 type CreditState = {
@@ -586,6 +588,30 @@ export default function ProfilePage() {
                   <span className="text-xs text-warning">(read-only — bundler not configured)</span>
                 )}
               </div>
+              {onchain.erc8004Configured && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">ERC-8004 identity</span>
+                  {onchain.erc8004Id ? (
+                    <span className="rounded-md bg-success/15 px-2 py-0.5 font-mono text-xs text-success">
+                      registered · agent #{onchain.erc8004Id}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="rounded-md bg-warning/15 px-2 py-0.5 text-xs text-warning">
+                        not registered
+                      </span>
+                      <button
+                        onClick={handleProvision}
+                        disabled={creditBusy}
+                        className="rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50"
+                        title="Re-runs provisioning (same address — it's deterministic) and registers this agent in the ERC-8004 Identity Registry"
+                      >
+                        {creditBusy ? 'Registering…' : 'Register in ERC-8004'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <span className="text-muted-foreground">On-chain available</span>{' '}

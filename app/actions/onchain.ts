@@ -22,6 +22,8 @@ export async function getOnchainInfo(agentId: string) {
   const { agent: ag } = await requireOwnedAgent(agentId)
   const { isOnchainConfigured, isAgentAccountConfigured, EXPLORER_URL, CHAIN } = await import('@/lib/onchain/config')
 
+  const { isErc8004Configured } = await import('@/lib/onchain/erc8004')
+
   const info = {
     configured: isOnchainConfigured(),
     agentConfigured: isAgentAccountConfigured(),
@@ -30,6 +32,8 @@ export async function getOnchainInfo(agentId: string) {
     outstanding: null as number | null,
     explorer: EXPLORER_URL,
     chainName: CHAIN.name,
+    erc8004Configured: isErc8004Configured(),
+    erc8004Id: ag.erc8004Id ?? null,
   }
 
   if (info.configured && ag.smartAccountAddress) {
