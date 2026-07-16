@@ -465,6 +465,12 @@ export default function JobsPage() {
                           <span className="font-medium">Dispute reason:</span> {job.disputeNote} — awaiting independent review.
                         </p>
                       )}
+                      {job.status === 'Refunded' && job.disputeNote?.startsWith('Auto:') && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Tests failed → escrow auto-refunded and the job was reposted for a different
+                          worker. No action needed here.
+                        </p>
+                      )}
                     </div>
                     <div className="flex shrink-0 flex-col gap-2">
                       {job.status === 'Open' && workerFor(job) && (

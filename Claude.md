@@ -105,6 +105,18 @@ about us, so it writes NO credit event about the worker. The sandbox
 temp cwd, 10s timeout, rlimits — honest-but-limited, flagged as a known gap
 for real-money stages.
 
+**Failed tests auto-return the job to the market**
+(`returnFailedJobToMarket()` in `/api/runtime/callback`): the tests are the
+agreed contract, so an objective failure doesn't park in Submitted waiting
+for the requester — the escrow is auto-disputed and refunded (both
+platform-signed, justified by the grader's output) and the same spec is
+reposted as a fresh job with `repostCount+1` and the failed worker added to
+`failedWorkerIds` (blocked from re-accepting in `acceptJobAction`). Capped
+at 2 auto-reposts per lineage so an impossible test suite can't recycle
+escrow forever; past the cap it stays Submitted for manual judgment. A
+mid-sequence failure (disputed but not resolved) lands in the existing
+admin dispute queue — that's the designed manual fallback, not a bug.
+
 ## On-chain layer
 
 Fully optional — gated on env vars (`isOnchainConfigured()`,

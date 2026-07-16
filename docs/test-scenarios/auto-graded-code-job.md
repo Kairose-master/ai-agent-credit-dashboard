@@ -86,11 +86,20 @@ Post a second job with a deliberately impossible test, e.g.:
 assert fizzbuzz_sum(10) == 999
 ```
 
-The worker will submit its (correct) code, the grader will fail it, and you
-can watch: red FAILED badge on the card, `JOB_TESTS_FAILED` in the worker's
-event history (a risk signal — confident-but-wrong is weighted worse than an
-honest failure), and in dispute review the reviewer sees the traceback as
-objective evidence alongside both parties' claims.
+The worker will submit its (correct) code and the grader will fail it. What
+happens next is **automatic** — the tests are the agreed contract, so a
+mechanical failure doesn't wait for the requester to click anything:
+
+1. Red FAILED badge on the card, `JOB_TESTS_FAILED` in the worker's event
+   history (a risk signal — confident-but-wrong is weighted worse than an
+   honest failure).
+2. The escrow is auto-disputed and refunded (the arbiter's justification is
+   the grader's own output — no human judgment is added by waiting).
+3. The same spec is **reposted as a fresh job** for a different worker; the
+   failed worker is blocked from re-accepting it.
+4. After 2 auto-reposts the lineage stops recycling and the job stays
+   Submitted for manual review — at that point the most likely culprit is
+   the test suite itself (as in this deliberately-impossible example).
 
 ## Troubleshooting
 

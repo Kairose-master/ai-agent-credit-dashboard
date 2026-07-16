@@ -271,7 +271,83 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         `"${spec.title}" — acceptance tests ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
       )
     }
+
+    if (grade.passed === false) {
+      await returnFailedJobToMarket(spec)
+    }
   } catch (error) {
     console.error('[runtime/callback] acceptance-test grading failed:', error)
+  }
+}
+
+const MAX_AUTO_REPOSTS = 2
+
+/**
+ * Failed acceptance tests are an objective verdict — the tests ARE the
+ * agreed contract, shown to the worker before it started. So instead of
+ * parking the job in Submitted and asking the requester to click Dispute on
+ * work that already mechanically failed, return it to the market
+ * automatically: dispute → arbiter refunds the requester (the evidence is
+ * the grader's own output, so no human review adds anything) → repost the
+ * same spec as a fresh job for a DIFFERENT worker (failed workers are
+ * blocked from re-accepting the repost off-chain). Capped at
+ * MAX_AUTO_REPOSTS per spec lineage so a broken/impossible test suite can't
+ * burn escrow round-trips forever — past the cap the job stays Submitted
+ * for the requester to judge manually (their tests are the thing most
+ * likely at fault by then).
+ */
+async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promise<void> {
+  if (!spec.requesterAgentId || !spec.workerAgentId || spec.onchainJobId === null) return
+  if (spec.repostCount >= MAX_AUTO_REPOSTS) {
+    console.warn(`[runtime/callback] job ${spec.onchainJobId} failed tests but hit the auto-repost cap — leaving for manual review`)
+    return
+  }
+
+  try {
+    const { readJobs, raiseDispute, resolveDispute, postJob } = await import('@/lib/onchain/labor')
+    const jobs = await readJobs()
+    const job = jobs.find((j) => j.id === spec.onchainJobId)
+    if (!job || job.status !== 'Submitted') return
+
+    // 1. Requester's agent disputes; the arbiter refunds — both platform-
+    //    signed, justified by the objective test verdict.
+    await raiseDispute(spec.requesterAgentId, spec.onchainJobId)
+    await db
+      .update(jobSpec)
+      .set({ disputeNote: 'Auto: acceptance tests failed (independent grader) — refunded and reposted' })
+      .where(eq(jobSpec.specHash, spec.specHash))
+    await resolveDispute(spec.onchainJobId, false)
+
+    // 2. Repost the same spec as a fresh on-chain job, blocking every worker
+    //    that already failed this lineage.
+    const { keccak256, toHex } = await import('viem')
+    const newSpecHash = keccak256(
+      toHex(JSON.stringify({ title: spec.title, agent: spec.requesterAgentId, nonce: nanoid() })),
+    )
+    const failedWorkers = [...new Set([...(spec.failedWorkerIds ?? []), spec.workerAgentId])]
+    await db.insert(jobSpec).values({
+      specHash: newSpecHash,
+      title: spec.title,
+      description: spec.description,
+      acceptanceCriteria: spec.acceptanceCriteria,
+      requesterAgentId: spec.requesterAgentId,
+      attachmentUrl: spec.attachmentUrl,
+      attachmentName: spec.attachmentName,
+      testCode: spec.testCode,
+      repostCount: spec.repostCount + 1,
+      failedWorkerIds: failedWorkers,
+    })
+    const txHash = await postJob(spec.requesterAgentId, job.bounty, job.minScore, newSpecHash)
+
+    await logPlatformEvent(
+      'JOB_AUTO_REPOSTED',
+      `"${spec.title}" — tests failed, escrow auto-refunded, reposted for a different worker (attempt ${spec.repostCount + 2})`,
+    )
+    console.log(`[runtime/callback] job ${spec.onchainJobId} auto-returned to market (repost tx ${txHash})`)
+  } catch (error) {
+    // Money already partially moved is the worst case here (e.g. disputed
+    // but not resolved) — that lands in the existing admin dispute queue,
+    // which is exactly the manual fallback for this flow.
+    console.error('[runtime/callback] auto-return to market failed:', error)
   }
 }
