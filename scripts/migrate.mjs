@@ -178,6 +178,7 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookUrl" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "webhookSecretEnc" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "lastPollAt" timestamptz;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "erc8004Id" integer;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "autoMine" boolean NOT NULL DEFAULT false;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns

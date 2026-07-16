@@ -164,68 +164,8 @@ export async function acceptJobAction(workerAgentId: string, jobId: number) {
   if (!worker.smartAccountAddress) throw new Error('Provision the worker agent first')
 
   try {
-    const { acceptJob, readJobs } = await import('@/lib/onchain/labor')
-
-    // Spec lookup happens BEFORE the on-chain accept so a worker that
-    // already failed this job lineage's tests can be rejected up front
-    // (auto-reposted jobs carry the failed-worker list).
-    const jobs = await readJobs()
-    const job = jobs.find((j) => j.id === jobId)
-    const [preSpec] = job
-      ? await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
-      : []
-    if (preSpec?.failedWorkerIds?.includes(workerAgentId)) {
-      throw new Error(
-        'This agent already failed this job\'s acceptance tests — the repost is reserved for a different worker.',
-      )
-    }
-
-    const txHash = await acceptJob(workerAgentId, jobId)
-
-    if (job) {
-      const spec = preSpec
-      if (spec) {
-        const taskPrompt = [
-          spec.title,
-          spec.description,
-          spec.acceptanceCriteria ? `Acceptance criteria (what "done" means):\n${spec.acceptanceCriteria}` : '',
-          spec.attachmentUrl
-            ? `Source material for this task is attached at: ${spec.attachmentUrl}` +
-              (spec.attachmentName ? ` (original filename: ${spec.attachmentName})` : '') +
-              `\nUse the fetch_url tool to read it before doing the work — it is not summarized here.`
-            : '',
-          spec.testCode
-            ? `This job is AUTO-GRADED. Your answer MUST include your complete Python solution in a ` +
-              '```python fenced code block — the LAST such block in your answer is what gets graded, ' +
-              `by running it against the acceptance tests below (plain asserts appended after your code). ` +
-              `CRITICAL: that code block must contain ONLY the solution — function definitions plus any ` +
-              `imports they need. NO example usage, NO self-test calls, NO top-level prints or demo data: ` +
-              `the grader appends the tests itself, and any crash in extra top-level code fails the job ` +
-              `even if your functions are correct. ` +
-              `Use the run_python tool to run your code against these exact tests BEFORE answering, and ` +
-              `only submit once they pass.\n\nAcceptance tests:\n${spec.testCode}`
-            : '',
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-
-        try {
-          const { taskId } = await runAgentTask({
-            agent: worker,
-            task: taskPrompt,
-            callbackUrl: await callbackUrl(),
-          })
-          await db
-            .update(jobSpec)
-            .set({ workerAgentId, onchainJobId: jobId, agentTaskId: taskId })
-            .where(eq(jobSpec.specHash, job.specHash))
-        } catch (dispatchError) {
-          // The on-chain accept already succeeded and can't be undone here —
-          // surface the dispatch failure without pretending accept failed.
-          console.error('[acceptJobAction] accepted on-chain but failed to start the real run:', dispatchError)
-        }
-      }
-    }
+    const { acceptAndDispatchJob } = await import('@/lib/labor-dispatch')
+    const { txHash } = await acceptAndDispatchJob(worker, jobId, await callbackUrl())
 
     revalidatePath('/jobs')
     return { txHash }

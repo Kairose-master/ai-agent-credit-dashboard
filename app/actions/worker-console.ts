@@ -33,6 +33,8 @@ export async function getWorkerConsole() {
         id: a.id,
         name: a.name,
         runtime: (a.runtimeType ?? 'platform') as 'platform' | 'webhook' | 'local',
+        autoMine: a.autoMine,
+        provisioned: Boolean(a.smartAccountAddress),
         online:
           a.runtimeType === 'local' &&
           a.lastPollAt !== null &&
