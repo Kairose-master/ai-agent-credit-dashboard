@@ -8,6 +8,10 @@ export const user = pgTable('user', {
   emailVerified: boolean('emailverified').notNull().default(false),
   image: text('image'),
   password: text('password'),
+  // Pre-registered payout wallet: lets "withdraw all earnings" sweep every
+  // owned agent's USDC balance to one address with a single click instead
+  // of re-typing a recipient per agent, per withdrawal.
+  payoutAddress: text('payoutaddress'),
   createdAt: timestamp('createdat', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updatedat', { withTimezone: true }).notNull().defaultNow(),
 })

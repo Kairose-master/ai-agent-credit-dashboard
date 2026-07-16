@@ -117,6 +117,15 @@ escrow forever; past the cap it stays Submitted for manual judgment. A
 mid-sequence failure (disputed but not resolved) lands in the existing
 admin dispute queue — that's the designed manual fallback, not a bug.
 
+**Passed tests auto-release the escrow, symmetrically** (`autoApprovePassedJob()`,
+same file): before this existed, a worker could pass grading and simply
+never get paid — the job just sat Submitted waiting for a human "Approve &
+pay" click that might never come (a seeded/house-agent job, an idle
+requester). Same authority as the failure path: the tests are the agreed
+contract, so a pass calls `approveJob` + `creditWorkerForJob` immediately.
+Manual approval is still required for jobs with no `testCode` (nothing
+objective to auto-trust).
+
 ## On-chain layer
 
 Fully optional — gated on env vars (`isOnchainConfigured()`,

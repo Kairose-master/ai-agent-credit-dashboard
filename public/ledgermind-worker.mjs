@@ -2,23 +2,34 @@
 /**
  * Ledgermind local worker — sell your locally-hosted AI's labor.
  *
- * Runs on YOUR machine, next to your local model. Connects OUTBOUND to the
- * platform (polling), so there is nothing to expose: no webhook URL, no
- * ngrok, no port forwarding. Zero dependencies — Node 18+ only.
+ * Runs next to your model — local or a cloud API you already pay for.
+ * Connects OUTBOUND to the platform (polling), so there is nothing to
+ * expose: no webhook URL, no ngrok, no port forwarding. Zero dependencies —
+ * Node 18+ only.
  *
  *   node ledgermind-worker.mjs --token <TOKEN>                # Ollama (default)
  *   node ledgermind-worker.mjs --token <TOKEN> --model llama3.2
  *   node ledgermind-worker.mjs --token <TOKEN> \
  *     --openai http://localhost:1234/v1 --model qwen2.5       # LM Studio / llama.cpp / vLLM
+ *   node ledgermind-worker.mjs --token <TOKEN> \
+ *     --openai https://api.your-cloud-host.com/v1 \           # any OpenAI-compatible
+ *     --api-key sk-... --model your-model                     # cloud API — Groq, Together,
+ *                                                              # Fireworks, OpenRouter, a
+ *                                                              # custom hosted endpoint, etc.
+ *
+ * --openai isn't "local-only" — it's any OpenAI-compatible /chat/completions
+ * endpoint, on your machine or in the cloud. --api-key (or OPENAI_API_KEY)
+ * is sent as a Bearer token; omit it for endpoints that don't need one.
  *
  * Get your TOKEN from the agent's Runtime card on the dashboard
  * ("Connect a local worker"). It bundles the agent id, its secret, and the
  * platform URL — treat it like a password.
  *
- * Loop: poll for a queued task → run it on your local model → post the
- * result back. Your model's output is submitted as the agent's real work;
- * the platform's independent graders (Proving Ground answers, job
- * acceptance tests) — not your machine — decide what it's worth.
+ * Loop: warm up the model once (absorbs first-load latency before any task
+ * is at risk) → poll for a queued task → run it → post the result back.
+ * Your model's output is submitted as the agent's real work; the platform's
+ * independent graders (Proving Ground answers, job acceptance tests) — not
+ * your machine — decide what it's worth.
  */
 
 const args = process.argv.slice(2)
@@ -235,10 +246,47 @@ async function runOne(task) {
   console.log(success ? `[worker] done in ${executionTime}s — result submitted` : `[worker] FAILED: ${error}`)
 }
 
+/**
+ * A cold Ollama/LM Studio process can take a while to load a model into
+ * memory on its first request — sometimes minutes for a large model on a
+ * slow disk, or a few seconds just for the local server to finish starting
+ * up after install. Polling before the model is actually ready means the
+ * platform can hand this worker a real task while it's still loading,
+ * which fails immediately with a confusing runtime error. So: block here,
+ * retrying a trivial prompt with backoff, and only start polling once the
+ * model genuinely answers. Runs before a single task can ever be claimed.
+ */
+const WARMUP_MAX_ATTEMPTS = 8
+async function warmupModel() {
+  const label = OPENAI_BASE ? `OpenAI-compatible endpoint ${OPENAI_BASE}` : `Ollama ${OLLAMA_BASE}`
+  console.log(`[worker] warming up ${MODEL} via ${label} (first load can take a minute)…`)
+  for (let attempt = 1; attempt <= WARMUP_MAX_ATTEMPTS; attempt++) {
+    try {
+      await askLocalModel('Reply with one word: ready')
+      console.log('[worker] model is warm\n')
+      return
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (attempt === WARMUP_MAX_ATTEMPTS) {
+        console.error(`[worker] model never became ready after ${WARMUP_MAX_ATTEMPTS} attempts: ${msg}`)
+        console.error(OPENAI_BASE
+          ? '[worker] check --openai URL, --api-key, and --model are correct.'
+          : `[worker] is Ollama running? Try: ollama serve   /   ollama pull ${MODEL}`)
+        process.exit(1)
+      }
+      console.error(`[worker] still warming up (attempt ${attempt}/${WARMUP_MAX_ATTEMPTS}): ${msg}`)
+      await new Promise((r) => setTimeout(r, Math.min(3000 * attempt, 20000)))
+    }
+  }
+}
+
 console.log(`[worker] Ledgermind local worker`)
 console.log(`[worker] agent    ${AGENT_ID}`)
 console.log(`[worker] platform ${PLATFORM}`)
 console.log(`[worker] model    ${MODEL} via ${OPENAI_BASE ? `OpenAI-compatible ${OPENAI_BASE}` : `Ollama ${OLLAMA_BASE}`}`)
+
+await warmupModel()
+
 console.log(`[worker] polling every ${POLL_MS / 1000}s — Ctrl+C to stop\n`)
 
 let consecutiveErrors = 0

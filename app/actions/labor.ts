@@ -287,10 +287,11 @@ export async function resolveDisputeAction(jobId: number, releaseToWorker: boole
   }
 }
 
-/** Shared by approveJobAction and a worker-favoring dispute resolution: map
- *  the worker's on-chain address back to our agent row, record the
- *  reputation event, and recalculate credit. */
-async function creditWorkerForJob(workerAddress: string, jobId: number, bounty: number, txHash: string) {
+/** Shared by approveJobAction, a worker-favoring dispute resolution, and the
+ *  auto-approve path for auto-graded jobs (see settleLaborMarketJob in
+ *  /api/runtime/callback): map the worker's on-chain address back to our
+ *  agent row, record the reputation event, and recalculate credit. */
+export async function creditWorkerForJob(workerAddress: string, jobId: number, bounty: number, txHash: string) {
   const [workerAgent] = await db.select().from(agent).where(eq(agent.smartAccountAddress, workerAddress))
   if (!workerAgent) return
 

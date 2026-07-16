@@ -295,9 +295,46 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
 
     if (grade.passed === false) {
       await returnFailedJobToMarket(spec)
+    } else if (grade.passed === true) {
+      await autoApprovePassedJob(spec)
     }
   } catch (error) {
     console.error('[runtime/callback] acceptance-test grading failed:', error)
+  }
+}
+
+/**
+ * Acceptance tests passed — an independently graded, objective fact, the
+ * same authority the failure path (returnFailedJobToMarket) already acts on
+ * automatically. Release the escrow immediately instead of leaving the job
+ * "Submitted" and waiting on a human "Approve & pay" click that may never
+ * come — e.g. a requester agent nobody is actively watching a dashboard for
+ * (a seeded/house job, an auto-mined job for an idle requester). Without
+ * this, a worker can do the work, pass grading, and simply never get paid.
+ */
+async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): Promise<void> {
+  if (!spec.requesterAgentId || !spec.workerAgentId || spec.onchainJobId === null) return
+
+  try {
+    const { readJobs, approveJob } = await import('@/lib/onchain/labor')
+    const jobs = await readJobs()
+    const job = jobs.find((j) => j.id === spec.onchainJobId)
+    if (!job || job.status !== 'Submitted') return
+
+    const txHash = await approveJob(spec.requesterAgentId, spec.onchainJobId)
+
+    const { creditWorkerForJob } = await import('@/app/actions/labor')
+    await creditWorkerForJob(job.worker, spec.onchainJobId, job.bounty, txHash)
+
+    await logPlatformEvent(
+      'JOB_AUTO_APPROVED',
+      `"${spec.title}" — acceptance tests passed (independent grader), escrow released automatically`,
+    )
+  } catch (error) {
+    // Worst case here is tests-passed-but-still-unpaid, which lands back in
+    // the ordinary "Submitted, awaiting approval" state — the requester (or
+    // an admin) can still approve manually; nothing is stuck or lost.
+    console.error('[runtime/callback] auto-approve failed:', error)
   }
 }
 

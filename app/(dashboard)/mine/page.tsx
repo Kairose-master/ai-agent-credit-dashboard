@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loader2, Zap } from 'lucide-react'
+import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loader2, Zap, Wallet } from 'lucide-react'
 import { getWorkerConsole } from '@/app/actions/worker-console'
 import { startMining, setAutoMine } from '@/app/actions/mining'
+import { getPayoutAddress, setPayoutAddress, withdrawAllEarnings } from '@/app/actions/treasury'
 import { Celebration } from '@/components/celebration'
 import { useI18n } from '@/lib/i18n'
 
@@ -151,6 +152,8 @@ export default function WorkerConsolePage() {
         <StatCard icon={CircleDollarSign} label={t('mine.stats.earnedByAgents')} value={`$${totalEarned.toLocaleString()}`} />
       </div>
 
+      <PayoutCard hasProvisionedWorker={workers.some((w) => w.provisioned)} />
+
       {/* One-click pipeline: agent + wallet + auto-mine + connect command */}
       <div className="rounded-lg border border-border p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -227,6 +230,100 @@ function StatCard({ icon: Icon, label, value }: { icon: typeof Pickaxe; label: s
         <Icon className="size-3.5" /> {label}
       </p>
       <p className="mt-1 text-2xl font-bold">{value}</p>
+    </div>
+  )
+}
+
+/**
+ * Pre-register a payout wallet once, then settle every worker with one
+ * click — sweeps each provisioned agent's USDC balance to that address
+ * instead of typing a recipient into the Treasury card per agent, per
+ * withdrawal.
+ */
+function PayoutCard({ hasProvisionedWorker }: { hasProvisionedWorker: boolean }) {
+  const { t } = useI18n()
+  const [address, setAddress] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getPayoutAddress()
+      .then((r) => setAddress(r.payoutAddress ?? ''))
+      .catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      await setPayoutAddress(address)
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const withdraw = async () => {
+    setWithdrawing(true)
+    setError(null)
+    setResult(null)
+    try {
+      const r = await withdrawAllEarnings()
+      if (r.totalSent <= 0) {
+        setResult(t('mine.payout.noEarnings'))
+      } else {
+        setResult(t('mine.payout.resultSummary', { total: r.totalSent.toFixed(2), address: `${r.to.slice(0, 6)}…${r.to.slice(-4)}` }))
+      }
+      const failed = r.results.filter((x): x is typeof x & { error: string } => Boolean(x.error))
+      if (failed.length > 0) {
+        setError(failed.map((x) => t('mine.payout.perAgentError', { name: x.name, error: x.error })).join(' · '))
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setWithdrawing(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-6">
+      <p className="flex items-center gap-2 font-semibold">
+        <Wallet className="size-4" /> {t('mine.payout.title')}
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground">{t('mine.payout.description')}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder={t('mine.payout.placeholder')}
+          className="min-w-[280px] flex-1 rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+        />
+        <button
+          onClick={save}
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {saving ? t('mine.payout.saving') : t('mine.payout.save')}
+        </button>
+        <button
+          onClick={withdraw}
+          disabled={withdrawing || !address || !hasProvisionedWorker}
+          className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {withdrawing ? <Loader2 className="size-3.5 animate-spin" /> : <CircleDollarSign className="size-3.5" />}
+          {withdrawing ? t('mine.payout.withdrawing') : t('mine.payout.withdraw')}
+        </button>
+      </div>
+      {saved && !error && <p className="mt-2 text-sm text-success">{t('mine.payout.saved')}</p>}
+      {result && <p className="mt-2 text-sm text-success">{result}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   )
 }
