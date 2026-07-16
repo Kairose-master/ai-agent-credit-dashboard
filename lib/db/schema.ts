@@ -259,6 +259,11 @@ export const jobSpec = pgTable('job_specs', {
   // worker's submitted code by the PLATFORM runtime (grader ≠ solver).
   testCode: text('test_code'),
   testResult: jsonb('test_result').$type<{ passed: boolean | null; output: string; gradedAt: string }>(),
+  // Failed-tests auto-return: how many times this spec lineage has been
+  // auto-reposted, and which workers already failed it (blocked from
+  // re-accepting the repost).
+  repostCount: integer('repost_count').notNull().default(0),
+  failedWorkerIds: jsonb('failed_worker_ids').$type<string[]>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

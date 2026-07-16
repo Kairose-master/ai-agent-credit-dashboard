@@ -165,12 +165,25 @@ export async function acceptJobAction(workerAgentId: string, jobId: number) {
 
   try {
     const { acceptJob, readJobs } = await import('@/lib/onchain/labor')
-    const txHash = await acceptJob(workerAgentId, jobId)
 
+    // Spec lookup happens BEFORE the on-chain accept so a worker that
+    // already failed this job lineage's tests can be rejected up front
+    // (auto-reposted jobs carry the failed-worker list).
     const jobs = await readJobs()
     const job = jobs.find((j) => j.id === jobId)
+    const [preSpec] = job
+      ? await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
+      : []
+    if (preSpec?.failedWorkerIds?.includes(workerAgentId)) {
+      throw new Error(
+        'This agent already failed this job\'s acceptance tests — the repost is reserved for a different worker.',
+      )
+    }
+
+    const txHash = await acceptJob(workerAgentId, jobId)
+
     if (job) {
-      const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
+      const spec = preSpec
       if (spec) {
         const taskPrompt = [
           spec.title,
