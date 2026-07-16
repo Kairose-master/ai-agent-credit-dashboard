@@ -14,6 +14,10 @@
  *   node scripts/translate-dict.mjs --add ja --label 日本語   # add a new locale
  *
  * Requires ANTHROPIC_API_KEY (except --check).
+ *
+ * Runtime twin: lib/i18n-llm.ts + /api/admin/i18n do the same job from the
+ * admin UI with a registered (BYOK) key, writing to the i18nString table
+ * instead of this file. Keep the prompt rules in sync between the two.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'

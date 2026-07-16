@@ -330,6 +330,16 @@ overwritten), and rewrites the dictionary file in place. Adding a locale
 updates the `Locale` type, the switcher list, and the export in one shot.
 Review the diff before committing — the model translates, you approve.
 
+The same pipeline also runs **at runtime, no commit or redeploy needed**:
+Admin → Access Control → *Runtime translations* fills gaps (or adds a whole
+language) using the admin's registered API key (Settings → BYOK, falling
+back to the platform `ANTHROPIC_API_KEY`). Results land in the
+`i18nString`/`i18nLocale` tables, are served to every visitor via
+`GET /api/i18n`, and lose to the shipped dictionaries wherever both cover a
+key — so promoting a runtime translation into `lib/i18n-dict.ts` later is
+always safe. Batches of 20 keys per request keep each serverless
+invocation short; the admin UI loops until the locale is complete.
+
 ## Development principles
 
 - **No fabricated numbers, ever.** A new agent starts at score 0, unrated —
