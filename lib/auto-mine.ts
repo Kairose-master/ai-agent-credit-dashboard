@@ -19,7 +19,7 @@
 import { db } from '@/lib/db'
 import { agentTask, jobSpec, type agent as agentTable } from '@/lib/db/schema'
 import { and, eq, inArray } from 'drizzle-orm'
-import { acceptAndDispatchJob, dispatchAcceptedJob } from '@/lib/labor-dispatch'
+import { acceptAndDispatchJob, dispatchAcceptedJob, isClaimedByOther } from '@/lib/labor-dispatch'
 import { logPlatformEvent } from '@/lib/platform-feed'
 
 type AgentRow = typeof agentTable.$inferSelect
@@ -61,6 +61,7 @@ export async function autoMineTick(agent: AgentRow, callbackUrl: string): Promis
     const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, j.specHash))
     if (!spec) continue // no off-chain spec = nothing to actually do
     if (spec.failedWorkerIds?.includes(agent.id)) continue
+    if (isClaimedByOther(spec, agent.id)) continue // another rig has this work unit
 
     try {
       await acceptAndDispatchJob(agent, j.id, callbackUrl)

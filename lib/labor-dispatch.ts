@@ -6,11 +6,56 @@
  */
 import { db } from '@/lib/db'
 import { jobSpec, type agent as agentTable } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull, lt, or } from 'drizzle-orm'
 import { runAgentTask } from '@/lib/agent-tasks'
 
 type AgentRow = typeof agentTable.$inferSelect
 type SpecRow = typeof jobSpec.$inferSelect
+
+/** How long an off-chain claim holds before it's considered abandoned.
+ *  Long enough to cover an on-chain accept + dispatch (~30–60s on
+ *  Sepolia); short enough that a crashed claimer releases the job fast. */
+export const JOB_CLAIM_TTL_MS = 90_000
+
+/** Mining-pool-style work-unit claim: atomically take the spec for this
+ *  worker BEFORE touching the chain. Exactly one concurrent claimer wins
+ *  (single UPDATE ... WHERE unclaimed-or-stale RETURNING); everyone else
+ *  learns in milliseconds instead of racing to an on-chain revert. */
+export async function claimJobSpec(specHash: string, agentId: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - JOB_CLAIM_TTL_MS)
+  const won = await db
+    .update(jobSpec)
+    .set({ claimedByAgentId: agentId, claimedAt: new Date() })
+    .where(
+      and(
+        eq(jobSpec.specHash, specHash),
+        or(
+          isNull(jobSpec.claimedByAgentId),
+          eq(jobSpec.claimedByAgentId, agentId), // re-entrant for the same worker
+          lt(jobSpec.claimedAt, staleBefore),
+        ),
+      ),
+    )
+    .returning({ specHash: jobSpec.specHash })
+  return won.length > 0
+}
+
+async function releaseJobClaim(specHash: string, agentId: string): Promise<void> {
+  await db
+    .update(jobSpec)
+    .set({ claimedByAgentId: null, claimedAt: null })
+    .where(and(eq(jobSpec.specHash, specHash), eq(jobSpec.claimedByAgentId, agentId)))
+}
+
+/** True when someone else holds a live (non-stale) claim on this spec. */
+export function isClaimedByOther(spec: SpecRow, agentId: string): boolean {
+  return Boolean(
+    spec.claimedByAgentId &&
+      spec.claimedByAgentId !== agentId &&
+      spec.claimedAt &&
+      Date.now() - spec.claimedAt.getTime() < JOB_CLAIM_TTL_MS,
+  )
+}
 
 export function buildJobTaskPrompt(spec: SpecRow): string {
   return [
@@ -59,9 +104,10 @@ export async function dispatchAcceptedJob(
 }
 
 /** Accept a job on-chain as `worker` and dispatch its real run. Throws if
- *  the worker already failed this job lineage's tests. A dispatch failure
- *  after a successful on-chain accept is logged, not thrown — the accept
- *  can't be undone here, and auto-mine's self-heal will retry dispatch. */
+ *  the worker already failed this job lineage's tests, or if another
+ *  worker holds the off-chain claim (fast, no gas wasted). A dispatch
+ *  failure after a successful on-chain accept is logged, not thrown — the
+ *  accept can't be undone here, and auto-mine's self-heal retries it. */
 export async function acceptAndDispatchJob(
   worker: AgentRow,
   jobId: number,
@@ -79,7 +125,20 @@ export async function acceptAndDispatchJob(
     )
   }
 
-  const txHash = await acceptJob(worker.id, jobId)
+  // Take the off-chain work-unit claim before spending gas. Losing here is
+  // the normal contention path — cheap and instant, like a mining pool
+  // handing each work unit to exactly one rig.
+  if (spec && !(await claimJobSpec(spec.specHash, worker.id))) {
+    throw new Error('Another worker is already claiming this job — try a different one.')
+  }
+
+  let txHash: string
+  try {
+    txHash = await acceptJob(worker.id, jobId)
+  } catch (error) {
+    if (spec) await releaseJobClaim(spec.specHash, worker.id) // free it for the next rig
+    throw error
+  }
 
   if (spec) {
     try {

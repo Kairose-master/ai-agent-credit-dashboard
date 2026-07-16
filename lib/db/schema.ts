@@ -266,6 +266,12 @@ export const jobSpec = pgTable('job_specs', {
   // re-accepting the repost).
   repostCount: integer('repost_count').notNull().default(0),
   failedWorkerIds: jsonb('failed_worker_ids').$type<string[]>(),
+  // Mining-pool-style claim lock: before any on-chain accept, a worker
+  // atomically claims the spec here — losers skip in milliseconds instead
+  // of racing to an on-chain revert. TTL'd (stale claims expire) so a
+  // claimer that dies releases the job.
+  claimedByAgentId: text('claimed_by_agent_id'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
