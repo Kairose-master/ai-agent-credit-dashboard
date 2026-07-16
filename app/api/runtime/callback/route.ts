@@ -10,6 +10,24 @@ import { logPlatformEvent } from '@/lib/platform-feed'
 // Verified-task settlement runs two UserOps; allow time for bundler inclusion.
 export const maxDuration = 300
 
+/** Retries a step that runs AFTER a prior on-chain action already
+ *  succeeded and can't be undone (escrow released, refund issued) — a
+ *  transient DB/RPC failure here would otherwise permanently strand the
+ *  bookkeeping for money that already moved, since the on-chain status
+ *  guards in this file only allow one attempt per job. */
+async function retry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 500): Promise<T> {
+  let lastError: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs * (i + 1)))
+    }
+  }
+  throw lastError
+}
+
 /**
  * POST /api/runtime/callback
  * Called by the Python runtime OR a user's own BYO-agent webhook when a task
@@ -239,11 +257,13 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, agentTaskId))
   if (!spec || !spec.workerAgentId || spec.onchainJobId === null) return
 
+  let submitted = false
   try {
     const { keccak256, toHex } = await import('viem')
     const { submitWork } = await import('@/lib/onchain/labor')
     const resultHash = keccak256(toHex(output || '(empty output)'))
     await submitWork(spec.workerAgentId, spec.onchainJobId, resultHash)
+    submitted = true
     await logPlatformEvent('JOB_SUBMITTED', `"${spec.title}" — worker submitted real output for review`)
   } catch (error) {
     console.error('[runtime/callback] labor market auto-submit failed:', error)
@@ -282,15 +302,24 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         `"${spec.title}" — acceptance tests ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
       )
 
-      // Mirror the graded fact into the ERC-8004 Validation Registry
-      // (best-effort; publishValidation no-ops when unconfigured).
-      const { publishValidation } = await import('@/lib/onchain/erc8004')
-      await publishValidation(
-        spec.workerAgentId,
-        grade.passed ? 100 : 0,
-        'acceptance-tests',
-        `job-${spec.onchainJobId}`,
-      )
+      // Mirror the graded fact into the ERC-8004 Validation Registry — but
+      // only if the submission this grade is FOR actually landed on-chain
+      // via submitWork above. Otherwise this would publish an on-chain
+      // validation claim referencing a submission the chain has no record
+      // of (submitWork failures are caught and logged, not fatal, so
+      // grading still runs on the raw output — that's fine for the DB
+      // credit event below, which is genuine worker-quality signal either
+      // way, but not for an on-chain attestation tied to a specific job
+      // submission that never actually recorded).
+      if (submitted) {
+        const { publishValidation } = await import('@/lib/onchain/erc8004')
+        await publishValidation(
+          spec.workerAgentId,
+          grade.passed ? 100 : 0,
+          'acceptance-tests',
+          `job-${spec.onchainJobId}`,
+        )
+      }
     }
 
     if (grade.passed === false) {
@@ -303,6 +332,13 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
   }
 }
 
+// Bounds how much a single compromised/over-lenient grader verdict can
+// release with zero requester involvement. Above this, a passing job still
+// waits for the requester's own "Approve & pay" — auto-approve exists to
+// stop small/unwatched jobs (seed jobs, idle requesters) from stranding a
+// worker unpaid, not to hand a grader unlimited fund-release authority.
+const AUTO_APPROVE_MAX_BOUNTY_USD = Number(process.env.AUTO_APPROVE_MAX_BOUNTY_USD ?? 50)
+
 /**
  * Acceptance tests passed — an independently graded, objective fact, the
  * same authority the failure path (returnFailedJobToMarket) already acts on
@@ -311,30 +347,60 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
  * come — e.g. a requester agent nobody is actively watching a dashboard for
  * (a seeded/house job, an auto-mined job for an idle requester). Without
  * this, a worker can do the work, pass grading, and simply never get paid.
+ *
+ * This still bypasses the requester's own review for jobs under the cap —
+ * that's the deliberate trade (see AUTO_APPROVE_MAX_BOUNTY_USD above for
+ * the mitigation). It does NOT bypass authorization in the sense of forging
+ * a requester's identity: `approveJob` signs as `spec.requesterAgentId`
+ * itself, using that agent's own configured signer, exactly as the manual
+ * approval path does — there's no separate "requester consent" step to
+ * bypass, on-chain or off, for jobs that opted into mechanical grading by
+ * attaching acceptance tests in the first place.
  */
 async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): Promise<void> {
   if (!spec.requesterAgentId || !spec.workerAgentId || spec.onchainJobId === null) return
 
+  let approvedTxHash: string | null = null
   try {
     const { readJobs, approveJob } = await import('@/lib/onchain/labor')
     const jobs = await readJobs()
     const job = jobs.find((j) => j.id === spec.onchainJobId)
     if (!job || job.status !== 'Submitted') return
 
-    const txHash = await approveJob(spec.requesterAgentId, spec.onchainJobId)
+    if (Number.isFinite(AUTO_APPROVE_MAX_BOUNTY_USD) && job.bounty > AUTO_APPROVE_MAX_BOUNTY_USD) {
+      console.log(
+        `[runtime/callback] job ${spec.onchainJobId} passed tests but bounty $${job.bounty} exceeds the $${AUTO_APPROVE_MAX_BOUNTY_USD} auto-approve cap — left Submitted for the requester to approve manually`,
+      )
+      return
+    }
 
+    approvedTxHash = await approveJob(spec.requesterAgentId, spec.onchainJobId)
+
+    // approveJob just moved real funds on-chain and flipped the job to
+    // Completed — from here there's no path back to "Submitted", so a
+    // transient failure recording the credit event would otherwise strand
+    // it forever (any retry of this function would no-op on the status
+    // guard above). Retry the DB-only half before giving up.
     const { creditWorkerForJob } = await import('@/app/actions/labor')
-    await creditWorkerForJob(job.worker, spec.onchainJobId, job.bounty, txHash)
+    await retry(() => creditWorkerForJob(job.worker, spec.onchainJobId!, job.bounty, approvedTxHash!))
 
     await logPlatformEvent(
       'JOB_AUTO_APPROVED',
       `"${spec.title}" — acceptance tests passed (independent grader), escrow released automatically`,
     )
   } catch (error) {
-    // Worst case here is tests-passed-but-still-unpaid, which lands back in
-    // the ordinary "Submitted, awaiting approval" state — the requester (or
-    // an admin) can still approve manually; nothing is stuck or lost.
     console.error('[runtime/callback] auto-approve failed:', error)
+    if (approvedTxHash) {
+      // Escrow already released on-chain — the worker was paid — but
+      // recording that fact (credit event, reputation) failed even after
+      // retries. Unlike an approveJob failure (which leaves the job
+      // Submitted for a clean retry), this is unrecoverable automatically:
+      // surface it so an admin can backfill the credit event by hand.
+      await logPlatformEvent(
+        'JOB_AUTO_APPROVE_INCOMPLETE',
+        `"${spec.title}" — escrow released (tx ${approvedTxHash.slice(0, 10)}…) but credit recording failed after retries — job #${spec.onchainJobId} needs a manual credit backfill`,
+      ).catch(() => {})
+    }
   }
 }
 
@@ -361,6 +427,7 @@ async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promi
     return
   }
 
+  let refunded = false
   try {
     const { readJobs, raiseDispute, resolveDispute, postJob } = await import('@/lib/onchain/labor')
     const jobs = await readJobs()
@@ -375,9 +442,12 @@ async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promi
       .set({ disputeNote: 'Auto: acceptance tests failed (independent grader) — refunded and reposted' })
       .where(eq(jobSpec.specHash, spec.specHash))
     await resolveDispute(spec.onchainJobId, false)
+    refunded = true // irreversible from here — resolveDispute already paid out
 
     // 2. Repost the same spec as a fresh on-chain job, blocking every worker
-    //    that already failed this lineage.
+    //    that already failed this lineage. Retry: the refund above can't be
+    //    undone, so a transient failure here shouldn't silently strand the
+    //    job with no replacement and no payout for anyone.
     const { keccak256, toHex } = await import('viem')
     const newSpecHash = keccak256(
       toHex(JSON.stringify({ title: spec.title, agent: spec.requesterAgentId, nonce: nanoid() })),
@@ -395,7 +465,7 @@ async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promi
       repostCount: spec.repostCount + 1,
       failedWorkerIds: failedWorkers,
     })
-    const txHash = await postJob(spec.requesterAgentId, job.bounty, job.minScore, newSpecHash)
+    const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
 
     await logPlatformEvent(
       'JOB_AUTO_REPOSTED',
@@ -403,9 +473,17 @@ async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promi
     )
     console.log(`[runtime/callback] job ${spec.onchainJobId} auto-returned to market (repost tx ${txHash})`)
   } catch (error) {
-    // Money already partially moved is the worst case here (e.g. disputed
-    // but not resolved) — that lands in the existing admin dispute queue,
-    // which is exactly the manual fallback for this flow.
     console.error('[runtime/callback] auto-return to market failed:', error)
+    if (refunded) {
+      // The refund already completed on-chain and is irreversible, but the
+      // replacement job failed to post even after retries — this does NOT
+      // land in the admin dispute queue (the dispute is already Refunded,
+      // not Disputed, so there's nothing left there to review). Surfaced
+      // here instead so an admin can manually repost the spec.
+      await logPlatformEvent(
+        'JOB_REPOST_FAILED',
+        `"${spec.title}" — refund completed but repost failed after retries — job #${spec.onchainJobId} needs a manual repost`,
+      ).catch(() => {})
+    }
   }
 }

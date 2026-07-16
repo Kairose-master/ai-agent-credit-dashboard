@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import { user, session as sessionTable } from '@/lib/db/schema'
 import { eq, and, ne } from 'drizzle-orm'
 import { asActionError } from '@/lib/action-error'
+import { SAFE_USER_COLUMNS } from '@/lib/db/safe-select'
 
 async function requireUser() {
   const session = await getSession()
@@ -41,7 +42,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
   if (newPassword.length < 8) throw new Error('New password must be at least 8 characters')
 
   try {
-    const [row] = await db.select().from(user).where(eq(user.id, session.user.id))
+    const [row] = await db.select(SAFE_USER_COLUMNS).from(user).where(eq(user.id, session.user.id))
     if (!row?.password) throw new Error('Account has no password set')
     const ok = await bcrypt.compare(currentPassword, row.password)
     if (!ok) throw new Error('Current password is incorrect')

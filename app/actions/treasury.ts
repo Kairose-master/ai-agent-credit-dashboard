@@ -139,6 +139,14 @@ export async function withdrawAllEarnings() {
       if (balance <= 0) continue
 
       const spent = await spentLast24h(ag.id)
+      // Guard against a misconfigured WALLET_MAX_TX_USD/WALLET_DAILY_CAP_USD
+      // (a non-numeric env value produces NaN, which every `<= 0`/`>` cap
+      // check below silently treats as false rather than as "invalid") —
+      // fail with a clear per-agent error instead of passing NaN downstream.
+      if (!Number.isFinite(WALLET_MAX_TX_USD) || !Number.isFinite(WALLET_DAILY_CAP_USD) || !Number.isFinite(spent)) {
+        results.push({ agentId: ag.id, name: ag.name, sent: 0, error: 'Spending cap misconfigured — contact the operator' })
+        continue
+      }
       const remainingCap = Math.max(0, Math.min(WALLET_MAX_TX_USD, WALLET_DAILY_CAP_USD - spent))
       const amount = Math.min(balance, remainingCap)
       if (amount <= 0) {
@@ -147,10 +155,14 @@ export async function withdrawAllEarnings() {
       }
 
       const txHash = await doTransfer(ag.id, ag.smartAccountAddress!, to, amount, 'Withdraw all earnings')
-      results.push({ agentId: ag.id, name: ag.name, sent: amount, txHash })
-      if (amount < balance) {
-        results[results.length - 1].error = `Only $${amount.toFixed(2)} of $${balance.toFixed(2)} sent (cap) — rest available tomorrow`
-      }
+      const capped = amount < balance
+      results.push({
+        agentId: ag.id,
+        name: ag.name,
+        sent: amount,
+        txHash,
+        ...(capped ? { error: `Only $${amount.toFixed(2)} of $${balance.toFixed(2)} sent (cap) — rest available tomorrow` } : {}),
+      })
     } catch (error) {
       results.push({
         agentId: ag.id,

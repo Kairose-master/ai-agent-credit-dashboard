@@ -6,6 +6,7 @@ import { dmThread, dmMessage, user } from '@/lib/db/schema'
 import { and, desc, eq, or } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { revalidatePath } from 'next/cache'
+import { SAFE_USER_COLUMNS } from '@/lib/db/safe-select'
 
 async function requireUser() {
   const session = await getSession()
@@ -32,7 +33,7 @@ export async function startConversationByEmail(email: string) {
   const trimmed = email.trim().toLowerCase()
   if (!trimmed) throw new Error('Email required')
 
-  const [other] = await db.select().from(user).where(eq(user.email, trimmed))
+  const [other] = await db.select(SAFE_USER_COLUMNS).from(user).where(eq(user.email, trimmed))
   if (!other) throw new Error('No user found with that email')
   if (other.id === me.id) throw new Error("That's you")
 
@@ -69,7 +70,7 @@ export async function getThreads() {
   return Promise.all(
     threads.map(async (t) => {
       const otherId = t.userAId === me.id ? t.userBId : t.userAId
-      const [other] = await db.select().from(user).where(eq(user.id, otherId))
+      const [other] = await db.select(SAFE_USER_COLUMNS).from(user).where(eq(user.id, otherId))
       const [last] = await db
         .select()
         .from(dmMessage)
