@@ -212,6 +212,13 @@ Three independent "bring your own X" mechanisms, don't conflate them:
   Approve/Dispute stay human. `acceptAndDispatchJob` in
   `lib/labor-dispatch.ts` is the single accept path shared with the manual
   button — don't fork it.
+  **Contention** (many rigs, one job) is settled OFF-chain first,
+  mining-pool style: `claimJobSpec()` atomically claims the spec row
+  (`claimed_by_agent_id`/`claimed_at`, 90s TTL for dead claimers) before
+  any gas is spent — exactly one concurrent claimer wins the UPDATE, losers
+  skip to the next job in milliseconds instead of racing to an on-chain
+  revert. The claim is released on accept failure and expires on its own
+  otherwise; the on-chain job status remains the ultimate arbiter.
 - **BYOK** (`lib/user-keys.ts`, `lib/crypto.ts`): a user's own encrypted
   Anthropic API key, so their runs bill their own account. Independent of
   which runtime the agent uses.

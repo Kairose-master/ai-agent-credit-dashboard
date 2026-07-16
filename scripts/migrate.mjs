@@ -262,6 +262,8 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS test_code text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS test_result jsonb;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS repost_count integer NOT NULL DEFAULT 0;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS failed_worker_ids jsonb;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS claimed_by_agent_id text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 
 -- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
 CREATE TABLE IF NOT EXISTS verifiable_tasks (
