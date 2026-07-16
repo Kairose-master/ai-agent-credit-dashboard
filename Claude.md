@@ -212,7 +212,9 @@ ad-hoc task API route and Labor Market's "actually do the job" dispatch).
   heartbeat/retry exists, so this is opportunistic: called from every read
   path that surfaces task status (`GET /api/agents/:id/tasks/:taskId`,
   `getJobs()`), it's a single `UPDATE ... WHERE status IN (...) AND
-  updatedAt < now() - 10m` that fails anything stuck past the timeout. A
+  updatedAt < now() - 30m` that fails anything stuck past the timeout
+  (30m, sized for slow local reasoning models, not just the platform
+  runtime). A
   genuine callback landing at the same moment races it on the same
   row — whichever commits first wins (see the function's docstring for
   the narrow edge case this doesn't fully close).
