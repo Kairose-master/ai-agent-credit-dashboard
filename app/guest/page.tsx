@@ -19,6 +19,7 @@ import {
 import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
 import { SiteFooter } from '@/components/site-footer'
+import { ThemeToggle } from '@/components/theme-toggle'
 import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
 
 type Overview = Awaited<ReturnType<typeof getGuestOverview>>
@@ -55,14 +56,14 @@ export default function GuestPage() {
   return (
     <div className="min-h-svh bg-background">
       <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md md:px-6">
-        <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <span className="font-mono text-sm font-bold">L</span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.svg" alt="Ledgermind" className="size-8 shrink-0" />
         <div className="leading-tight">
           <p className="text-sm font-semibold tracking-tight">Ledgermind</p>
-          <p className="text-[11px] text-muted-foreground">Agent Credit Layer · Guest view</p>
+          <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure · Guest view</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
           <Link
             href="/sign-in"
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-secondary"

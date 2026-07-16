@@ -26,6 +26,7 @@ import {
 import { cn } from "@/lib/utils"
 import { getShellStatus } from "@/app/actions/shell"
 import { SiteFooter } from "@/components/site-footer"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 type ShellStatus = Awaited<ReturnType<typeof getShellStatus>>
 
@@ -99,9 +100,8 @@ function Sidebar({
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
-        <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <span className="font-mono text-sm font-bold">L</span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.svg" alt="Ledgermind" className="size-8 shrink-0" />
         <div className="leading-tight">
           <p className="text-sm font-semibold tracking-tight text-sidebar-foreground">Ledgermind</p>
           <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure</p>
@@ -250,6 +250,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </span>
 
           <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             {status?.vaultUsd !== null && status?.vaultUsd !== undefined && (
               <span
                 className="hidden items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1.5 text-xs font-medium tabular-nums text-muted-foreground sm:flex"
