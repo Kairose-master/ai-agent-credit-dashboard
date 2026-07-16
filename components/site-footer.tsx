@@ -51,6 +51,9 @@ export function SiteFooter() {
           >
             {t('footer.knownGaps')}
           </a>
+          <a className="hover:text-foreground hover:underline" href="/llms.txt" target="_blank" rel="noopener noreferrer">
+            {t('footer.forAgents')}
+          </a>
         </nav>
       </div>
       <p className="mt-3 leading-relaxed">
