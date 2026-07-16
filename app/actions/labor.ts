@@ -109,6 +109,16 @@ export async function postJobAction(input: {
    *  worker's submitted code block is run against these on the platform
    *  runtime (grader ≠ solver) and the result recorded as evidence. */
   testCode?: string
+  /** Only meaningful alongside testCode: release escrow the instant the
+   *  platform grader reports a pass, with no separate "Approve & pay"
+   *  click. This is the requester's own explicit choice, made right now
+   *  in this authenticated call — NOT inferred later from testCode's mere
+   *  presence — because it's the actual authorization the automatic
+   *  release in autoApprovePassedJob checks before moving funds. Defaults
+   *  true (matches a bot/house requester that never comes back to click
+   *  approve); a real human posting a job can opt out and keep manual
+   *  review even on a passing verdict. */
+  autoApprove?: boolean
 }) {
   const userId = await requireUser()
   const ag = await requireOwnedAgent(input.requesterAgentId, userId)
@@ -138,6 +148,7 @@ export async function postJobAction(input: {
       attachmentUrl: input.attachmentUrl || null,
       attachmentName: input.attachmentName || null,
       testCode: input.testCode?.trim() || null,
+      autoApprove: input.autoApprove ?? true,
     })
 
     const { postJob } = await import('@/lib/onchain/labor')

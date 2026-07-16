@@ -107,6 +107,7 @@ export async function POST(request: Request) {
       requesterAgentId: houseAgentId,
       testCode: testCode || null,
       externalPoster,
+      autoApprove: true, // the house agent has no owner who'll ever click Approve
     })
 
     const { postJob } = await import('@/lib/onchain/labor')

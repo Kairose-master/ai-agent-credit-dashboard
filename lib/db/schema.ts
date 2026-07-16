@@ -265,6 +265,15 @@ export const jobSpec = pgTable('job_specs', {
   // worker's submitted code by the PLATFORM runtime (grader ≠ solver).
   testCode: text('test_code'),
   testResult: jsonb('test_result').$type<{ passed: boolean | null; output: string; gradedAt: string }>(),
+  // Requester's explicit, authenticated-at-posting-time consent to release
+  // escrow automatically on a passing verdict, with no further approval
+  // click. Only meaningful when testCode is set. Defaults true (matches
+  // house-agent jobs, which have no human ever coming back to click
+  // approve) but the Post-a-Job form lets a real requester opt out and
+  // keep manual review even for auto-graded jobs — see autoApprovePassedJob
+  // in /api/runtime/callback, which now checks this flag before releasing
+  // anything instead of inferring consent from testCode's mere presence.
+  autoApprove: boolean('auto_approve').notNull().default(true),
   // Failed-tests auto-return: how many times this spec lineage has been
   // auto-reposted, and which workers already failed it (blocked from
   // re-accepting the repost).

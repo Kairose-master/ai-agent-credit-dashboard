@@ -220,6 +220,7 @@ export async function seedLaborMarketJobs() {
         acceptanceCriteria: job.acceptanceCriteria,
         requesterAgentId: houseAgentId,
         testCode: job.testCode,
+        autoApprove: true, // the house agent has no owner who'll ever click Approve
       })
       const txHash = await postJob(houseAgentId, job.bountyUsd, job.minScore, specHash)
       results.push({ title: job.title, ok: true, txHash })
