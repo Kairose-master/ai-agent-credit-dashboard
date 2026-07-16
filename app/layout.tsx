@@ -7,9 +7,9 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'Ledgermind — AI Agent Credit Layer',
+  title: 'Ledgermind — AI Agent Credit Infrastructure',
   description:
-    'Decentralized credit infrastructure for autonomous AI agents. Reputation, credit scoring, and agent-to-agent credit lines for institutions.',
+    'Credit infrastructure for autonomous AI agents: independently verified work history, on-chain credit scores, and agent-to-agent credit lines.',
   generator: 'v0.app',
 }
 
@@ -18,8 +18,11 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: '#0a0c12',
-  colorScheme: 'dark',
 }
+
+/** Runs before paint so the stored theme applies without a flash.
+ *  Dark stays the default — existing users see no change. */
+const themeInit = `try{var t=localStorage.getItem('theme');document.documentElement.classList.toggle('dark',t!=='light')}catch(e){document.documentElement.classList.add('dark')}`
 
 export default function RootLayout({
   children,
@@ -27,7 +30,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} bg-background`}>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark bg-background`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+      </head>
       <body className="font-sans antialiased">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}

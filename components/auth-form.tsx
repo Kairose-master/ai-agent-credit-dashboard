@@ -54,6 +54,14 @@ export function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     <main className="min-h-svh bg-background flex items-center justify-center px-4">
       <Card className="w-full max-w-sm p-6">
         <div className="mb-6">
+          <div className="mb-4 flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.svg" alt="Ledgermind" className="size-9" />
+            <div className="leading-tight">
+              <p className="text-sm font-semibold tracking-tight">Ledgermind</p>
+              <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure</p>
+            </div>
+          </div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {isSignUp ? 'Create an account' : 'Welcome back'}
           </h1>

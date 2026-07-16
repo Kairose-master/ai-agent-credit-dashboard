@@ -53,7 +53,52 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Light theme — "ledger paper": warm near-white ground, ink foreground,
+   the same brand hues re-weighted for contrast on light. */
 :root {
+  color-scheme: light;
+  --background: oklch(0.98 0.003 85);
+  --foreground: oklch(0.22 0.012 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.012 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.012 260);
+  --primary: oklch(0.52 0.14 235);
+  --primary-foreground: oklch(0.99 0.002 260);
+  --secondary: oklch(0.94 0.004 85);
+  --secondary-foreground: oklch(0.25 0.012 260);
+  --muted: oklch(0.95 0.004 85);
+  --muted-foreground: oklch(0.5 0.014 260);
+  --accent: oklch(0.92 0.02 235);
+  --accent-foreground: oklch(0.25 0.012 260);
+  --destructive: oklch(0.55 0.2 22);
+  --destructive-foreground: oklch(0.99 0.002 260);
+  --success: oklch(0.55 0.14 155);
+  --success-foreground: oklch(0.99 0.002 260);
+  --warning: oklch(0.6 0.13 75);
+  --warning-foreground: oklch(0.99 0.002 260);
+  --border: oklch(0.89 0.006 85);
+  --input: oklch(0.89 0.006 85);
+  --ring: oklch(0.52 0.14 235);
+  --chart-1: oklch(0.52 0.14 235);
+  --chart-2: oklch(0.55 0.14 155);
+  --chart-3: oklch(0.6 0.13 75);
+  --chart-4: oklch(0.55 0.2 22);
+  --chart-5: oklch(0.5 0.1 300);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.965 0.004 85);
+  --sidebar-foreground: oklch(0.28 0.012 260);
+  --sidebar-primary: oklch(0.52 0.14 235);
+  --sidebar-primary-foreground: oklch(0.99 0.002 260);
+  --sidebar-accent: oklch(0.92 0.005 85);
+  --sidebar-accent-foreground: oklch(0.22 0.012 260);
+  --sidebar-border: oklch(0.89 0.006 85);
+  --sidebar-ring: oklch(0.52 0.14 235);
+}
+
+/* Dark theme — the original look, now opt-in via the .dark class
+   (default for existing users; the toggle persists the choice). */
+.dark {
   color-scheme: dark;
   --background: oklch(0.16 0.008 260);
   --foreground: oklch(0.96 0.003 260);
