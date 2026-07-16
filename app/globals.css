@@ -150,3 +150,22 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Playful layer — used on the mining/market surfaces only; the financial
+   pages (profile, credit) deliberately stay sober. */
+@keyframes lm-swing {
+  0%, 100% { transform: rotate(-14deg); }
+  50% { transform: rotate(18deg); }
+}
+.animate-swing {
+  animation: lm-swing 0.9s ease-in-out infinite;
+  transform-origin: 70% 80%;
+}
+@keyframes lm-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.tier-shimmer {
+  background-size: 200% 100%;
+  animation: lm-shimmer 3.5s linear infinite;
+}

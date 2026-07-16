@@ -9,6 +9,30 @@ import { startMining, setAutoMine } from '@/app/actions/mining'
 type Console_ = Awaited<ReturnType<typeof getWorkerConsole>>
 type Worker = Console_['workers'][number]
 
+/** Mining tiers — the credit score rendered in a language every miner
+ *  already speaks. Purely cosmetic: the score itself stays the truth. */
+function miningTier(score: number): { name: string; emoji: string; className: string } {
+  if (score >= 850)
+    return {
+      name: 'Diamond rig',
+      emoji: '💎',
+      className:
+        'tier-shimmer bg-gradient-to-r from-cyan-500/20 via-sky-400/30 to-cyan-500/20 text-sky-500 dark:text-sky-300 border-sky-400/40',
+    }
+  if (score >= 750)
+    return {
+      name: 'Gold rig',
+      emoji: '🥇',
+      className:
+        'tier-shimmer bg-gradient-to-r from-amber-500/20 via-yellow-400/30 to-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-400/40',
+    }
+  if (score >= 650)
+    return { name: 'Silver rig', emoji: '🥈', className: 'bg-secondary text-foreground border-border' }
+  if (score >= 500)
+    return { name: 'Bronze rig', emoji: '🥉', className: 'bg-orange-500/10 text-orange-600 dark:text-orange-300 border-orange-500/30' }
+  return { name: 'Copper rig', emoji: '⛏️', className: 'bg-secondary text-muted-foreground border-border' }
+}
+
 /**
  * Worker Console — the "mining" view of the platform. Where a mining
  * dashboard shows hashrate and payouts, this shows the post-hashrate
@@ -57,7 +81,15 @@ export default function WorkerConsolePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
-          <Pickaxe className="size-7" /> Worker Console
+          <Pickaxe
+            className={`size-7 ${locals.some((w) => w.online && w.autoMine) ? 'animate-swing text-primary' : ''}`}
+          />{' '}
+          Worker Console
+          {locals.some((w) => w.online && w.autoMine) && (
+            <span className="rounded-md bg-success/15 px-2 py-1 text-xs font-medium text-success">
+              ⛏️ mining…
+            </span>
+          )}
         </h1>
         <p className="text-muted-foreground mt-1">
           Your machines&apos; labor, verified and paid. Hashrate never earned a credit score — this
@@ -155,7 +187,7 @@ export default function WorkerConsolePage() {
 
 function StatCard({ icon: Icon, label, value }: { icon: typeof Pickaxe; label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="rounded-lg border border-border p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Icon className="size-3.5" /> {label}
       </p>
@@ -179,11 +211,19 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
     }
   }
 
+  const tier = miningTier(w.creditScore)
+
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="rounded-lg border border-border p-4 transition-all hover:border-primary/40 hover:shadow-md">
       <div className="flex flex-wrap items-center gap-2">
         <Cpu className="size-4 text-muted-foreground" />
         <span className="font-semibold">{w.name}</span>
+        <span
+          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium ${tier.className}`}
+          title={`Mining tier — cosmetic name for credit score ${w.creditScore}`}
+        >
+          {tier.emoji} {tier.name}
+        </span>
         <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
           {w.runtime === 'local' ? 'local worker' : w.runtime}
         </span>
@@ -238,7 +278,21 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
             <ShieldCheck className="size-3" /> Grader pass rate
           </p>
-          <p className="font-semibold">{gradedPassRate === null ? '—' : `${gradedPassRate}%`}</p>
+          {gradedPassRate === null ? (
+            <p className="font-semibold">—</p>
+          ) : (
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="h-2 w-full max-w-[120px] overflow-hidden rounded-full bg-secondary">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    gradedPassRate >= 80 ? 'bg-success' : gradedPassRate >= 50 ? 'bg-warning' : 'bg-destructive'
+                  }`}
+                  style={{ width: `${gradedPassRate}%` }}
+                />
+              </div>
+              <span className="font-semibold">{gradedPassRate}%</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
