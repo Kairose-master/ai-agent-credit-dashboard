@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { getTransactions, approveTransaction, rejectTransaction } from '@/app/actions/transactions'
+import { useI18n } from '@/lib/i18n'
 
 export default function TransactionsPage() {
+  const { t } = useI18n()
   const [transactions, setTransactions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -39,13 +41,13 @@ export default function TransactionsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading transactions...</div>
+  if (loading) return <div className="p-8">{t('tx.loading')}</div>
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Credit Transactions</h1>
-        <p className="text-muted-foreground">Agent-to-agent credit requests and settlements</p>
+        <h1 className="text-3xl font-bold">{t('tx.title')}</h1>
+        <p className="text-muted-foreground">{t('tx.subtitle')}</p>
       </div>
 
       <div className="border border-border rounded-lg overflow-hidden">
@@ -53,11 +55,11 @@ export default function TransactionsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Type</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Amount</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Description</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Action</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t('tx.th.type')}</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t('tx.th.amount')}</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t('tx.th.status')}</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">{t('tx.th.description')}</th>
+                <th className="px-4 py-3 text-right font-medium text-muted-foreground">{t('tx.th.action')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -83,13 +85,13 @@ export default function TransactionsPage() {
                           onClick={() => handleApprove(tx.id)}
                           className="text-xs px-2 py-1 rounded bg-success/15 text-success hover:bg-success/25"
                         >
-                          Approve
+                          {t('tx.approve')}
                         </button>
                         <button
                           onClick={() => handleReject(tx.id)}
                           className="text-xs px-2 py-1 rounded bg-destructive/15 text-destructive hover:bg-destructive/25"
                         >
-                          Reject
+                          {t('tx.reject')}
                         </button>
                       </>
                     )}

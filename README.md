@@ -309,12 +309,17 @@ Full schema in `lib/db/schema.ts`. Grouped roughly as: Better Auth tables
 
 ## Internationalization
 
-The UI ships in English, Korean, and Chinese (switcher in the header).
-Strings live in `lib/i18n-dict.ts` with English as the single source of
-truth — other locales fall back to English for any key they haven't
-covered, so partial coverage degrades gracefully instead of showing raw
-keys. `<html lang>` tracks the selected locale, which also lets browser
-auto-translate (Chrome, Safari) handle the pages we haven't localized yet.
+The switcher (top-right) lists 13 languages: English, Korean, and Chinese
+ship with full coverage of the app (~430 keys — every page, not just
+navigation); Japanese, Spanish, French, German, Portuguese, Russian,
+Hindi, Arabic, Indonesian, and Vietnamese ship with navigation and the
+onboarding guide hand-reviewed, falling back to English for the rest
+until the runtime pipeline below fills them in. Strings live in
+`lib/i18n-dict.ts` with English as the single source of truth — any
+locale falls back to English for a key it hasn't covered, so partial
+coverage degrades gracefully instead of showing raw keys. `<html lang>`
+tracks the selected locale, which also lets browser auto-translate
+(Chrome, Safari) handle whatever we haven't localized yet.
 
 Translations are LLM-maintained but human-approved:
 

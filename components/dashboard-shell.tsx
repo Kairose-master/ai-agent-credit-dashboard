@@ -35,6 +35,7 @@ type ShellStatus = Awaited<ReturnType<typeof getShellStatus>>
 const DONATION_ADDRESS = "0xe274231b7d91dDa77cdbD150B7b5E4fA6F5140ae"
 
 function SupportCard() {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -47,16 +48,15 @@ function SupportCard() {
     <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3">
       <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
         <Heart className="size-3.5 text-primary" />
-        Support this project
+        {t('shell.supportProject')}
       </div>
       <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-        Ledgermind is a solo, open-source build. If it's been useful to you and you'd like to
-        help keep it going, donations are welcome at:
+        {t('shell.supportBody')}
       </p>
       <button
         onClick={handleCopy}
         className="mt-2 flex w-full items-center gap-1.5 rounded-md border border-sidebar-border bg-background px-2 py-1.5 text-left font-mono text-[10px] text-sidebar-foreground hover:bg-sidebar-accent/50"
-        title="Copy address"
+        title={t('shell.copyAddress')}
       >
         <span className="min-w-0 flex-1 truncate">{DONATION_ADDRESS}</span>
         {copied ? (
@@ -108,13 +108,13 @@ function Sidebar({
         <img src="/logo.svg" alt="Ledgermind" className="size-8 shrink-0" />
         <div className="leading-tight">
           <p className="text-sm font-semibold tracking-tight text-sidebar-foreground">Ledgermind</p>
-          <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure</p>
+          <p className="text-[11px] text-muted-foreground">{t('shell.tagline')}</p>
         </div>
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-3">
         <p className="px-3 pb-1.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Platform
+          {t('shell.platform')}
         </p>
         {nav.map((item) => {
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
@@ -144,14 +144,14 @@ function Sidebar({
             honest "off-chain mode" label. Never a made-up number. */}
         <div className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-muted-foreground">Network</span>
+            <span className="text-[11px] font-medium text-muted-foreground">{t('shell.network')}</span>
             {status?.chain ? (
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-success">
-                <span className="size-1.5 rounded-full bg-success" /> Testnet · live
+                <span className="size-1.5 rounded-full bg-success" /> {t('shell.testnetLive')}
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                <span className="size-1.5 rounded-full bg-muted-foreground" /> Off-chain mode
+                <span className="size-1.5 rounded-full bg-muted-foreground" /> {t('shell.offchainMode')}
               </span>
             )}
           </div>
@@ -181,6 +181,7 @@ function Sidebar({
 }
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n()
   const pathname = usePathname()
   const router = useRouter()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -228,7 +229,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             <button
               onClick={() => setMobileOpen(false)}
               className="absolute right-3 top-4 flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent"
-              aria-label="Close navigation"
+              aria-label={t('shell.closeNav')}
             >
               <X className="size-4" />
             </button>
@@ -242,7 +243,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => setMobileOpen(true)}
             className="flex size-9 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-secondary lg:hidden"
-            aria-label="Open navigation"
+            aria-label={t('shell.openNav')}
           >
             <Menu className="size-4" />
           </button>
@@ -250,7 +251,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           {/* Environment disclosure — every credible financial UI labels
               its environment. Everything on this deployment is testnet. */}
           <span className="rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-warning">
-            Testnet
+            {t('shell.testnetBadge')}
           </span>
 
           <div className="ml-auto flex items-center gap-2">
@@ -259,10 +260,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             {status?.vaultUsd !== null && status?.vaultUsd !== undefined && (
               <span
                 className="hidden items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1.5 text-xs font-medium tabular-nums text-muted-foreground sm:flex"
-                title="Live USDC balance of the credit vault contract"
+                title={t('shell.vaultTooltip')}
               >
-                <span className="size-1.5 rounded-full bg-success" /> Vault liquidity: $
-                {status.vaultUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <span className="size-1.5 rounded-full bg-success" />{' '}
+                {t('shell.vaultLiquidity', { amount: status.vaultUsd.toLocaleString(undefined, { maximumFractionDigits: 0 }) })}
               </span>
             )}
             <div className="relative">
@@ -279,7 +280,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                     className="flex w-full items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-secondary"
                   >
                     <LogOut className="size-4" />
-                    Sign out
+                    {t('shell.signOut')}
                   </button>
                 </div>
               )}

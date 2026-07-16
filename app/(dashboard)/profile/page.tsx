@@ -37,6 +37,7 @@ import {
   repayOnchain,
 } from '@/app/actions/onchain'
 import { getBalanceSheet, type BalanceSheet } from '@/app/actions/balance-sheet'
+import { useI18n } from '@/lib/i18n'
 import { CreditEvolutionChart } from '@/components/charts'
 import { LiveTaskProgress } from '@/components/live-task-progress'
 
@@ -119,17 +120,17 @@ type TaskResult = {
 type Draw = { id: string; amount: string; description: string | null; createdAt: string }
 
 const EVENT_META: Record<string, { label: string; Icon: typeof Play }> = {
-  TASK_STARTED: { label: 'Task started', Icon: Play },
-  PLAN_CREATED: { label: 'Execution plan created', Icon: ListChecks },
-  TOOL_EXECUTED: { label: 'Tool executed', Icon: Wrench },
-  TASK_COMPLETED: { label: 'Task completed', Icon: CheckCircle2 },
-  TASK_FAILED: { label: 'Task failed', Icon: XCircle },
-  ACHIEVEMENT_VERIFIED: { label: 'Achievement verified', Icon: Sparkles },
-  REPAYMENT_COMPLETED: { label: 'Credit repaid', Icon: HandCoins },
-  VERIFIED_TASK_COMPLETED: { label: 'Verified task passed', Icon: CheckCircle2 },
-  VERIFIED_TASK_FAILED: { label: 'Verified task failed', Icon: XCircle },
-  WALLET_TRANSFER: { label: 'Wallet transfer', Icon: Send },
-  WALLET_MINT: { label: 'Test USDC minted', Icon: Coins },
+  TASK_STARTED: { label: 'profile.events.taskStarted', Icon: Play },
+  PLAN_CREATED: { label: 'profile.events.planCreated', Icon: ListChecks },
+  TOOL_EXECUTED: { label: 'profile.events.toolExecuted', Icon: Wrench },
+  TASK_COMPLETED: { label: 'profile.events.taskCompleted', Icon: CheckCircle2 },
+  TASK_FAILED: { label: 'profile.events.taskFailed', Icon: XCircle },
+  ACHIEVEMENT_VERIFIED: { label: 'profile.events.achievementVerified', Icon: Sparkles },
+  REPAYMENT_COMPLETED: { label: 'profile.events.repaymentCompleted', Icon: HandCoins },
+  VERIFIED_TASK_COMPLETED: { label: 'profile.events.verifiedTaskCompleted', Icon: CheckCircle2 },
+  VERIFIED_TASK_FAILED: { label: 'profile.events.verifiedTaskFailed', Icon: XCircle },
+  WALLET_TRANSFER: { label: 'profile.events.walletTransfer', Icon: Send },
+  WALLET_MINT: { label: 'profile.events.walletMint', Icon: Coins },
 }
 
 type Treasury = {
@@ -142,6 +143,7 @@ type Treasury = {
 }
 
 export default function ProfilePage() {
+  const { t } = useI18n()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -198,7 +200,7 @@ export default function ProfilePage() {
     setTreasuryMsg(null)
     try {
       const { txHash } = await sendFromTreasury(agentId, sendTo.trim(), parseFloat(sendAmount))
-      setTreasuryMsg(`Sent — tx ${txHash.slice(0, 14)}…`)
+      setTreasuryMsg(t('profile.treasury.sentMsg', { tx: txHash.slice(0, 14) }))
       setSendTo('')
       setSendAmount('')
       await refresh(agentId)
@@ -218,7 +220,7 @@ export default function ProfilePage() {
     setTreasuryMsg(null)
     try {
       const { txHash } = await mintTestUsdc(agentId, parseFloat(mintAmount))
-      setTreasuryMsg(`Minted ${mintAmount} test USDC — tx ${txHash.slice(0, 14)}…`)
+      setTreasuryMsg(t('profile.treasury.mintedMsg', { amount: mintAmount, tx: txHash.slice(0, 14) }))
       await refresh(agentId)
     } catch (error) {
       setTreasuryMsg(error instanceof Error ? error.message : String(error))
@@ -365,8 +367,8 @@ export default function ProfilePage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>
-  if (!agentId || !profile) return <div className="p-8">No agent found</div>
+  if (loading) return <div className="p-8">{t('profile.loading')}</div>
+  if (!agentId || !profile) return <div className="p-8">{t('profile.noAgentFound')}</div>
 
   const { identity, performance, credit } = profile
   const evolution = [...history]
@@ -381,9 +383,9 @@ export default function ProfilePage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Agent Credit Profile</h1>
+          <h1 className="text-3xl font-bold mb-2">{t('profile.title')}</h1>
           <p className="text-muted-foreground">
-            Identity → Behavior → Reputation → Credit Score → Credit Capacity
+            {t('profile.subtitle')}
           </p>
         </div>
         {allAgents.length > 1 && (
@@ -427,51 +429,51 @@ export default function ProfilePage() {
           </div>
           {credit.rating === 'unrated' ? (
             <div className="rounded-lg border border-dashed border-border px-6 py-4 text-center">
-              <p className="text-sm font-medium">No credit history yet</p>
+              <p className="text-sm font-medium">{t('profile.noCreditHistory')}</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                Run a task below (or draw and repay credit) to generate the agent&apos;s first score.
+                {t('profile.noCreditHistoryHint')}
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
               <div>
                 <p className="text-3xl font-bold font-mono">{credit.score}</p>
-                <p className="text-xs text-muted-foreground mt-1">Credit Score</p>
+                <p className="text-xs text-muted-foreground mt-1">{t('profile.creditScore')}</p>
               </div>
               <div>
                 <p className="text-3xl font-bold">{credit.rating}</p>
-                <p className="text-xs text-muted-foreground mt-1">Credit Rating</p>
+                <p className="text-xs text-muted-foreground mt-1">{t('profile.creditRating')}</p>
               </div>
               <div>
                 <p className="text-3xl font-bold font-mono">${credit.creditLimit.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground mt-1">Credit Limit</p>
+                <p className="text-xs text-muted-foreground mt-1">{t('profile.creditLimit')}</p>
               </div>
               <div>
                 <p className="text-3xl font-bold">{credit.riskLevel}</p>
-                <p className="text-xs text-muted-foreground mt-1">Risk Level</p>
+                <p className="text-xs text-muted-foreground mt-1">{t('profile.riskLevel')}</p>
               </div>
             </div>
           )}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-4 border-t border-border text-sm">
           <div>
-            <span className="text-muted-foreground">Tasks completed</span>{' '}
+            <span className="text-muted-foreground">{t('profile.tasksCompleted')}</span>{' '}
             <span className="font-mono font-semibold">{performance.completedTasks}</span>
           </div>
           <div>
-            <span className="text-muted-foreground">Success rate</span>{' '}
+            <span className="text-muted-foreground">{t('profile.successRate')}</span>{' '}
             <span className="font-mono font-semibold">
               {performance.successRate === null ? '—' : `${(performance.successRate * 100).toFixed(1)}%`}
             </span>
           </div>
           <div>
-            <span className="text-muted-foreground">Avg quality</span>{' '}
+            <span className="text-muted-foreground">{t('profile.avgQuality')}</span>{' '}
             <span className="font-mono font-semibold">
               {performance.avgQuality === null ? '—' : `${(performance.avgQuality * 100).toFixed(0)}%`}
             </span>
           </div>
           <div>
-            <span className="text-muted-foreground">Token cost</span>{' '}
+            <span className="text-muted-foreground">{t('profile.tokenCost')}</span>{' '}
             <span className="font-mono font-semibold">{performance.totalTokenCost.toLocaleString()}</span>
           </div>
         </div>
@@ -485,15 +487,14 @@ export default function ProfilePage() {
 
       {/* Task runner — the entry point of the vertical slice */}
       <div className="border border-border rounded-lg p-6">
-        <h3 className="font-bold text-lg mb-1">Run a Task</h3>
+        <h3 className="font-bold text-lg mb-1">{t('profile.task.title')}</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          The Claude-powered research agent executes the task; its behavior is recorded as events
-          and the credit score is recalculated automatically.
+          {t('profile.task.subtitle')}
         </p>
         <textarea
           value={task}
           onChange={(e) => setTask(e.target.value)}
-          placeholder="e.g. Research the main differences between optimistic and ZK rollups and summarize them."
+          placeholder={t('profile.task.placeholder')}
           rows={3}
           className="w-full rounded-md border border-border bg-background p-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           disabled={running}
@@ -502,8 +503,8 @@ export default function ProfilePage() {
           <p className="text-xs text-muted-foreground">
             {running
               ? lastRun?.status === 'processing'
-                ? 'Recording events and recalculating credit…'
-                : 'Agent is planning, executing tools, and self-evaluating…'
+                ? t('profile.task.recording')
+                : t('profile.task.working')
               : ' '}
           </p>
           <button
@@ -512,7 +513,7 @@ export default function ProfilePage() {
             className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
             {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-            {running ? 'Running…' : 'Execute Task'}
+            {running ? t('profile.task.running') : t('profile.task.execute')}
           </button>
         </div>
 
@@ -533,11 +534,14 @@ export default function ProfilePage() {
                 ) : (
                   <XCircle className="size-4 text-destructive" />
                 )}
-                {lastRun.result?.success ? 'Task completed' : 'Task failed'}
+                {lastRun.result?.success ? t('profile.task.completed') : t('profile.task.failed')}
                 {lastRun.result && (
                   <span className="text-xs font-normal text-muted-foreground font-mono">
-                    {lastRun.result.executionTime}s · {lastRun.result.tokenCost.toLocaleString()} tokens ·
-                    quality {(lastRun.result.qualityScore * 100).toFixed(0)}%
+                    {t('profile.task.resultMeta', {
+                      time: lastRun.result.executionTime,
+                      tokens: lastRun.result.tokenCost.toLocaleString(),
+                      quality: (lastRun.result.qualityScore * 100).toFixed(0),
+                    })}
                   </span>
                 )}
               </div>
@@ -545,12 +549,15 @@ export default function ProfilePage() {
             </div>
             {lastRun.credit && (
               <div className="rounded-md border border-border p-4 text-sm">
-                <p className="font-semibold mb-1">Credit update</p>
+                <p className="font-semibold mb-1">{t('profile.task.creditUpdate')}</p>
                 <p className="font-mono text-lg">
                   {lastRun.credit.previousScore ?? '—'} → {lastRun.credit.score}{' '}
                   <span className="text-sm">
-                    ({lastRun.credit.rating} · ${lastRun.credit.creditLimit.toLocaleString()} limit ·{' '}
-                    {lastRun.credit.riskLevel} risk)
+                    {t('profile.task.creditSummary', {
+                      rating: lastRun.credit.rating,
+                      limit: lastRun.credit.creditLimit.toLocaleString(),
+                      risk: lastRun.credit.riskLevel,
+                    })}
                   </span>
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">{lastRun.credit.calculationReason}</p>
@@ -564,17 +571,16 @@ export default function ProfilePage() {
       {onchain?.configured && (
         <div className="border border-border rounded-lg p-6">
           <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-            <Link2 className="size-5" /> On-Chain ({onchain.chainName ?? 'Sepolia'})
+            <Link2 className="size-5" /> {t('profile.onchain.title', { chain: onchain.chainName ?? 'Sepolia' })}
           </h3>
           <p className="text-sm text-muted-foreground mb-4">
-            The credit limit is published to the on-chain registry and attested via EAS; draws and
-            repayments settle as real USDC through the agent&apos;s own on-chain account.
+            {t('profile.onchain.subtitle')}
           </p>
 
           {onchain.smartAccountAddress ? (
             <div className="space-y-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-muted-foreground">Smart account</span>
+                <span className="text-muted-foreground">{t('profile.onchain.smartAccount')}</span>
                 <a
                   href={`${onchain.explorer}/address/${onchain.smartAccountAddress}`}
                   target="_blank"
@@ -585,28 +591,28 @@ export default function ProfilePage() {
                   <ExternalLink className="size-3" />
                 </a>
                 {!onchain.agentConfigured && (
-                  <span className="text-xs text-warning">(read-only — bundler not configured)</span>
+                  <span className="text-xs text-warning">{t('profile.onchain.readOnly')}</span>
                 )}
               </div>
               {onchain.erc8004Configured && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-muted-foreground">ERC-8004 identity</span>
+                  <span className="text-muted-foreground">{t('profile.onchain.identity')}</span>
                   {onchain.erc8004Id ? (
                     <span className="rounded-md bg-success/15 px-2 py-0.5 font-mono text-xs text-success">
-                      registered · agent #{onchain.erc8004Id}
+                      {t('profile.onchain.registered', { id: onchain.erc8004Id })}
                     </span>
                   ) : (
                     <>
                       <span className="rounded-md bg-warning/15 px-2 py-0.5 text-xs text-warning">
-                        not registered
+                        {t('profile.onchain.notRegistered')}
                       </span>
                       <button
                         onClick={handleProvision}
                         disabled={creditBusy}
                         className="rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50"
-                        title="Re-runs provisioning (same address — it's deterministic) and registers this agent in the ERC-8004 Identity Registry"
+                        title={t('profile.onchain.registerTooltip')}
                       >
-                        {creditBusy ? 'Registering…' : 'Register in ERC-8004'}
+                        {creditBusy ? t('profile.onchain.registering') : t('profile.onchain.register')}
                       </button>
                     </>
                   )}
@@ -614,13 +620,13 @@ export default function ProfilePage() {
               )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <span className="text-muted-foreground">On-chain available</span>{' '}
+                  <span className="text-muted-foreground">{t('profile.onchain.available')}</span>{' '}
                   <span className="font-mono font-semibold text-success">
                     {onchain.available === null ? '—' : `$${Math.round(onchain.available).toLocaleString()}`}
                   </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">On-chain outstanding</span>{' '}
+                  <span className="text-muted-foreground">{t('profile.onchain.outstanding')}</span>{' '}
                   <span className="font-mono font-semibold">
                     {onchain.outstanding === null ? '—' : `$${Math.round(onchain.outstanding).toLocaleString()}`}
                   </span>
@@ -628,14 +634,14 @@ export default function ProfilePage() {
               </div>
               {onchainReady && (
                 <p className="text-xs text-success">
-                  Draws & repayments below execute on-chain as USDC UserOps.
+                  {t('profile.onchain.userOpsNote')}
                 </p>
               )}
             </div>
           ) : (
             <div className="flex flex-col gap-3">
               <p className="text-sm text-muted-foreground">
-                This agent has no smart account yet.
+                {t('profile.onchain.noSmartAccount')}
               </p>
               <button
                 onClick={handleProvision}
@@ -643,11 +649,11 @@ export default function ProfilePage() {
                 className="inline-flex w-fit items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 {creditBusy ? <Loader2 className="size-4 animate-spin" /> : <Link2 className="size-4" />}
-                Provision smart account
+                {t('profile.onchain.provision')}
               </button>
               {!onchain.agentConfigured && (
                 <p className="text-xs text-warning">
-                  Set ZERODEV_RPC and AGENT_OWNER_PRIVATE_KEY to enable provisioning.
+                  {t('profile.onchain.envHint')}
                 </p>
               )}
             </div>
@@ -660,7 +666,7 @@ export default function ProfilePage() {
               rel="noopener noreferrer"
               className="mt-4 inline-flex items-center gap-1 text-xs text-primary hover:underline"
             >
-              Latest tx: {lastTxHash.slice(0, 14)}… <ExternalLink className="size-3" />
+              {t('profile.onchain.latestTx', { tx: lastTxHash.slice(0, 14) })} <ExternalLink className="size-3" />
             </a>
           )}
         </div>
@@ -669,26 +675,25 @@ export default function ProfilePage() {
       {/* Credit line — borrow and repay against the earned limit */}
       <div className="border border-border rounded-lg p-6">
         <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-          <Banknote className="size-5" /> Credit Line
-          {onchainReady && <span className="text-xs font-normal text-success">· on-chain</span>}
+          <Banknote className="size-5" /> {t('profile.creditLine.title')}
+          {onchainReady && <span className="text-xs font-normal text-success">{t('profile.creditLine.onchainBadge')}</span>}
         </h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Draw against the credit the agent has earned, then repay it — on-time repayment raises the
-          score and unlocks a higher limit.
+          {t('profile.creditLine.subtitle')}
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 text-sm">
           <div>
-            <span className="text-muted-foreground">Available</span>{' '}
+            <span className="text-muted-foreground">{t('profile.creditLine.available')}</span>{' '}
             <span className="font-mono font-semibold text-success">
               ${Math.round(credit.availableCredit).toLocaleString()}
             </span>
           </div>
           <div>
-            <span className="text-muted-foreground">Outstanding</span>{' '}
+            <span className="text-muted-foreground">{t('profile.creditLine.outstanding')}</span>{' '}
             <span className="font-mono font-semibold">${Math.round(outstanding).toLocaleString()}</span>
           </div>
           <div>
-            <span className="text-muted-foreground">Limit</span>{' '}
+            <span className="text-muted-foreground">{t('profile.creditLine.limit')}</span>{' '}
             <span className="font-mono font-semibold">${credit.creditLimit.toLocaleString()}</span>
           </div>
         </div>
@@ -699,7 +704,7 @@ export default function ProfilePage() {
             min="0"
             value={drawAmount}
             onChange={(e) => setDrawAmount(e.target.value)}
-            placeholder="Amount"
+            placeholder={t('profile.creditLine.amountPlaceholder')}
             className="h-9 w-40 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             disabled={creditBusy}
           />
@@ -709,7 +714,7 @@ export default function ProfilePage() {
             className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
           >
             {creditBusy ? <Loader2 className="size-4 animate-spin" /> : <HandCoins className="size-4" />}
-            Draw credit
+            {t('profile.creditLine.draw')}
           </button>
         </div>
 
@@ -722,7 +727,7 @@ export default function ProfilePage() {
         {draws.length > 0 && (
           <div className="mt-4 space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Active draws
+              {t('profile.creditLine.activeDraws')}
             </p>
             {draws.map((d) => (
               <div
@@ -742,7 +747,7 @@ export default function ProfilePage() {
                   disabled={creditBusy}
                   className="rounded bg-success/15 px-3 py-1 text-xs font-medium text-success hover:bg-success/25 disabled:opacity-50"
                 >
-                  Repay
+                  {t('profile.creditLine.repay')}
                 </button>
               </div>
             ))}
@@ -754,26 +759,25 @@ export default function ProfilePage() {
       {treasury?.configured && (
         <div className="border border-border rounded-lg p-6">
           <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-            <Send className="size-5" /> Treasury
+            <Send className="size-5" /> {t('profile.treasury.title')}
           </h3>
           <p className="text-sm text-muted-foreground mb-4">
-            The agent&apos;s on-chain wallet. Deposit by sending USDC to the address below; the agent
-            can also pay external addresses itself mid-task (send_usdc tool), within spending caps.
+            {t('profile.treasury.subtitle')}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-4">
             <div>
-              <span className="text-muted-foreground">USDC balance</span>{' '}
+              <span className="text-muted-foreground">{t('profile.treasury.usdcBalance')}</span>{' '}
               <span className="font-mono font-semibold">
                 {treasury.usdc === null ? '—' : `$${treasury.usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
               </span>
             </div>
             <div>
-              <span className="text-muted-foreground">Spent (24h)</span>{' '}
+              <span className="text-muted-foreground">{t('profile.treasury.spent24h')}</span>{' '}
               <span className="font-mono font-semibold">${treasury.spent24h.toFixed(2)}</span>
             </div>
             <div>
-              <span className="text-muted-foreground">Caps</span>{' '}
+              <span className="text-muted-foreground">{t('profile.treasury.caps')}</span>{' '}
               <span className="font-mono font-semibold">
                 ${treasury.maxPerTx}/tx · ${treasury.dailyCap}/day
               </span>
@@ -781,12 +785,12 @@ export default function ProfilePage() {
           </div>
 
           <div className="flex items-center gap-2 mb-4 text-xs">
-            <span className="text-muted-foreground">Deposit address</span>
+            <span className="text-muted-foreground">{t('profile.treasury.depositAddress')}</span>
             <code className="rounded bg-secondary px-2 py-1 font-mono">{treasury.address}</code>
             <button
               onClick={() => navigator.clipboard?.writeText(treasury.address ?? '')}
               className="rounded border border-border p-1 hover:bg-secondary"
-              aria-label="Copy address"
+              aria-label={t('profile.treasury.copyAddress')}
             >
               <Copy className="size-3.5" />
             </button>
@@ -794,7 +798,7 @@ export default function ProfilePage() {
 
           <div className="mb-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-              Get test USDC ({onchain?.chainName ?? 'Sepolia'} testnet — free, not real money)
+              {t('profile.treasury.getTestUsdc', { chain: onchain?.chainName ?? 'Sepolia' })}
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <input
@@ -812,19 +816,19 @@ export default function ProfilePage() {
                 className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
               >
                 {mintBusy ? <Loader2 className="size-4 animate-spin" /> : <Coins className="size-4" />}
-                Mint test USDC
+                {t('profile.treasury.mint')}
               </button>
             </div>
           </div>
 
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-            Send USDC
+            {t('profile.treasury.send')}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <input
               value={sendTo}
               onChange={(e) => setSendTo(e.target.value)}
-              placeholder="Recipient 0x…"
+              placeholder={t('profile.treasury.recipientPlaceholder')}
               className="h-9 w-72 rounded-md border border-border bg-background px-3 font-mono text-sm"
               disabled={treasuryBusy}
             />
@@ -843,7 +847,7 @@ export default function ProfilePage() {
               className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
             >
               {treasuryBusy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-              Send USDC
+              {t('profile.treasury.send')}
             </button>
           </div>
           {treasuryMsg && <p className="mt-3 text-sm text-muted-foreground">{treasuryMsg}</p>}
@@ -853,12 +857,12 @@ export default function ProfilePage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Credit evolution */}
         <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-4">Credit Evolution</h3>
+          <h3 className="font-bold text-lg mb-4">{t('profile.evolution.title')}</h3>
           {evolution.length > 1 ? (
             <CreditEvolutionChart data={evolution} />
           ) : (
             <p className="text-sm text-muted-foreground">
-              Run at least two tasks to see the score evolve.
+              {t('profile.evolution.empty')}
             </p>
           )}
           <div className="mt-4 space-y-2 max-h-48 overflow-y-auto">
@@ -877,10 +881,10 @@ export default function ProfilePage() {
 
         {/* Activity timeline */}
         <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-4">Agent Activity Timeline</h3>
+          <h3 className="font-bold text-lg mb-4">{t('profile.timeline.title')}</h3>
           {events.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No activity yet — run a task to generate behavioral events.
+              {t('profile.timeline.empty')}
             </p>
           ) : (
             <ul className="space-y-3 max-h-[420px] overflow-y-auto">
@@ -899,19 +903,19 @@ export default function ProfilePage() {
                     />
                     <div className="min-w-0">
                       <p className="font-medium">
-                        {meta.label}
+                        {t(meta.label)}
                         {event.eventType === 'TOOL_EXECUTED' && event.detail?.tool ? (
                           <span className="font-mono text-xs text-muted-foreground"> · {String(event.detail.tool)}</span>
                         ) : null}
                         {event.qualityScore !== null && event.eventType !== 'REPAYMENT_COMPLETED' && (
                           <span className="font-mono text-xs text-muted-foreground">
-                            {' '}· quality {(event.qualityScore * 100).toFixed(0)}%
+                            {' '}· {t('profile.timeline.quality', { quality: (event.qualityScore * 100).toFixed(0) })}
                           </span>
                         )}
                       </p>
                       <p className="text-xs text-muted-foreground font-mono">
                         {event.taskId} · {new Date(event.createdAt).toLocaleString()}
-                        {event.tokenCost > 0 && ` · ${event.tokenCost.toLocaleString()} tokens`}
+                        {event.tokenCost > 0 && ` · ${t('profile.timeline.tokens', { count: event.tokenCost.toLocaleString() })}`}
                       </p>
                     </div>
                   </li>
@@ -935,6 +939,7 @@ export default function ProfilePage() {
  * double-counted against the agent.
  */
 function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
+  const { t } = useI18n()
   const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`
   const assetsTotal = sheet.assets.usdc + sheet.assets.creditLine + sheet.assets.receivables
 
@@ -942,10 +947,10 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
     return (
       <div className="border border-border rounded-lg p-6">
         <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-          <Scale className="size-5" /> Financial Statement
+          <Scale className="size-5" /> {t('profile.balance.title')}
         </h3>
         <p className="text-sm text-muted-foreground">
-          Provision this agent&apos;s smart account to see its balance sheet.
+          {t('profile.balance.provisionHint')}
         </p>
       </div>
     )
@@ -954,48 +959,48 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
   return (
     <div className="border border-border rounded-lg p-6">
       <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-        <Scale className="size-5" /> Financial Statement
+        <Scale className="size-5" /> {t('profile.balance.title')}
       </h3>
       <p className="text-sm text-muted-foreground mb-4">
-        The agent evaluated the way a company would be — assets, liabilities, and what&apos;s left over.
+        {t('profile.balance.subtitle')}
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Assets</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{t('profile.balance.assets')}</p>
           <dl className="space-y-1.5 text-sm">
             <div className="flex items-center justify-between">
               <dt className="text-muted-foreground">USDC</dt>
               <dd className="font-mono font-semibold">{fmt(sheet.assets.usdc)}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-muted-foreground">Credit Line (undrawn)</dt>
+              <dt className="text-muted-foreground">{t('profile.balance.creditLineUndrawn')}</dt>
               <dd className="font-mono font-semibold">{fmt(sheet.assets.creditLine)}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-muted-foreground">Receivables</dt>
+              <dt className="text-muted-foreground">{t('profile.balance.receivables')}</dt>
               <dd className="font-mono font-semibold">{fmt(sheet.assets.receivables)}</dd>
             </div>
             <div className="flex items-center justify-between border-t border-border pt-1.5 mt-1.5">
-              <dt className="font-medium">Total Assets</dt>
+              <dt className="font-medium">{t('profile.balance.totalAssets')}</dt>
               <dd className="font-mono font-bold">{fmt(assetsTotal)}</dd>
             </div>
           </dl>
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Liabilities</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{t('profile.balance.liabilities')}</p>
           <dl className="space-y-1.5 text-sm">
             <div className="flex items-center justify-between">
-              <dt className="text-muted-foreground">Outstanding Debt</dt>
+              <dt className="text-muted-foreground">{t('profile.balance.outstandingDebt')}</dt>
               <dd className="font-mono font-semibold text-destructive">{fmt(sheet.liabilities.outstandingDebt)}</dd>
             </div>
             <div className="flex items-center justify-between">
-              <dt className="text-muted-foreground">Borrowed Credit (lifetime)</dt>
+              <dt className="text-muted-foreground">{t('profile.balance.borrowedLifetime')}</dt>
               <dd className="font-mono text-muted-foreground">{fmt(sheet.liabilities.borrowedLifetime)}</dd>
             </div>
             <div className="flex items-center justify-between border-t border-border pt-1.5 mt-1.5">
-              <dt className="font-medium">Total Liabilities</dt>
+              <dt className="font-medium">{t('profile.balance.totalLiabilities')}</dt>
               <dd className="font-mono font-bold text-destructive">{fmt(sheet.liabilities.outstandingDebt)}</dd>
             </div>
           </dl>
@@ -1003,14 +1008,13 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
       </div>
 
       <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
-        <span className="font-semibold">Net Worth</span>
+        <span className="font-semibold">{t('profile.balance.netWorth')}</span>
         <span className={`font-mono text-xl font-bold ${sheet.netWorth >= 0 ? 'text-success' : 'text-destructive'}`}>
           {fmt(sheet.netWorth)}
         </span>
       </div>
       <p className="text-[11px] text-muted-foreground mt-1">
-        Assets − Outstanding Debt. Borrowed Credit is informational (lifetime drawn, including repaid
-        amounts) and isn&apos;t subtracted separately.
+        {t('profile.balance.footnote')}
       </p>
     </div>
   )
@@ -1023,6 +1027,7 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
  * format our own runtime uses. See the Guide for the exact contract.
  */
 function RuntimeCard({ agentId }: { agentId: string }) {
+  const { t } = useI18n()
   const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook' | 'local'>('platform')
   const [webhookUrl, setWebhookUrlState] = useState('')
   const [hasSecret, setHasSecret] = useState(false)
@@ -1066,7 +1071,7 @@ function RuntimeCard({ agentId }: { agentId: string }) {
       await setWebhookUrl(agentId, urlInput)
       await load()
       setEditing(false)
-      setMsg('Saved.')
+      setMsg(t('profile.runtime.saved'))
     } catch (error) {
       setMsg(error instanceof Error ? error.message : String(error))
     } finally {
@@ -1118,19 +1123,15 @@ function RuntimeCard({ agentId }: { agentId: string }) {
   return (
     <div className="border border-border rounded-lg p-6">
       <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-        <Webhook className="size-5" /> Runtime
+        <Webhook className="size-5" /> {t('profile.runtime.title')}
       </h3>
       <p className="text-sm text-muted-foreground mb-4">
-        By default this agent runs on the platform&apos;s Claude runtime. Two ways to run it on YOUR
-        infrastructure instead: connect a <strong>local worker</strong> (one command; your machine
-        polls us — works behind any firewall, no tunnel, perfect for Ollama/LM Studio), or point it
-        at a <strong>webhook</strong> you host. Either way, no code of yours ever runs on our
-        servers — and grading stays independent regardless of who runs the work.
+        {t('profile.runtime.subtitle')}
       </p>
 
       <div className="flex items-center gap-2 mb-3 text-sm">
         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${runtimeType !== 'platform' ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>
-          {runtimeType === 'webhook' ? 'Bring-your-own webhook' : runtimeType === 'local' ? 'Local worker (polling)' : 'Platform runtime'}
+          {runtimeType === 'webhook' ? t('profile.runtime.byoWebhook') : runtimeType === 'local' ? t('profile.runtime.localWorker') : t('profile.runtime.platform')}
         </span>
         {runtimeType === 'webhook' && webhookUrl && (
           <code className="text-xs text-muted-foreground truncate max-w-xs">{webhookUrl}</code>
@@ -1138,7 +1139,7 @@ function RuntimeCard({ agentId }: { agentId: string }) {
         {runtimeType === 'local' && (
           <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium ${workerOnline ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
             <span className={`size-1.5 rounded-full ${workerOnline ? 'bg-success' : 'bg-warning'}`} />
-            {workerOnline ? 'worker online' : 'worker offline — run the connect command'}
+            {workerOnline ? t('profile.runtime.workerOnline') : t('profile.runtime.workerOffline')}
           </span>
         )}
       </div>
@@ -1146,19 +1147,19 @@ function RuntimeCard({ agentId }: { agentId: string }) {
       {runtimeType === 'webhook' && !editing ? (
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setEditing(true)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
-            Edit URL
+            {t('profile.runtime.editUrl')}
           </button>
           <button onClick={switchToPlatform} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
-            Switch back to platform runtime
+            {t('profile.runtime.switchBack')}
           </button>
         </div>
       ) : runtimeType === 'local' ? (
         <div className="flex flex-wrap gap-2">
           <button onClick={connectLocal} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
-            Regenerate connect command
+            {t('profile.runtime.regenerateCommand')}
           </button>
           <button onClick={switchToPlatform} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
-            Switch back to platform runtime
+            {t('profile.runtime.switchBack')}
           </button>
         </div>
       ) : (
@@ -1172,9 +1173,9 @@ function RuntimeCard({ agentId }: { agentId: string }) {
                   className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
-                  Connect a local worker (one command)
+                  {t('profile.runtime.connectLocal')}
                 </button>
-                <span className="text-xs text-muted-foreground">Ollama / LM Studio / any OpenAI-compatible local model</span>
+                <span className="text-xs text-muted-foreground">{t('profile.runtime.localModelsHint')}</span>
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
@@ -1191,11 +1192,11 @@ function RuntimeCard({ agentId }: { agentId: string }) {
                 className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
               >
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
-                Use this webhook
+                {t('profile.runtime.useWebhook')}
               </button>
               {editing && (
                 <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
-                  Cancel
+                  {t('profile.runtime.cancel')}
                 </button>
               )}
             </div>
@@ -1217,16 +1218,16 @@ function RuntimeCard({ agentId }: { agentId: string }) {
       {runtimeType === 'webhook' && (
         <div className="mt-4 pt-4 border-t border-border">
           <div className="flex items-center gap-2">
-            <span className="text-sm">Callback secret</span>
+            <span className="text-sm">{t('profile.runtime.callbackSecret')}</span>
             <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${hasSecret ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
-              {hasSecret ? 'configured' : 'not set — callbacks will be rejected'}
+              {hasSecret ? t('profile.runtime.secretConfigured') : t('profile.runtime.secretNotSet')}
             </span>
             <button
               onClick={rotateSecret}
               disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50"
             >
-              <RefreshCw className="size-3.5" /> {hasSecret ? 'Rotate' : 'Generate'}
+              <RefreshCw className="size-3.5" /> {hasSecret ? t('profile.runtime.rotate') : t('profile.runtime.generate')}
             </button>
           </div>
           {revealedSecret && (

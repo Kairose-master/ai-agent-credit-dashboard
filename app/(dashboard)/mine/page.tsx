@@ -6,32 +6,33 @@ import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loa
 import { getWorkerConsole } from '@/app/actions/worker-console'
 import { startMining, setAutoMine } from '@/app/actions/mining'
 import { Celebration } from '@/components/celebration'
+import { useI18n } from '@/lib/i18n'
 
 type Console_ = Awaited<ReturnType<typeof getWorkerConsole>>
 type Worker = Console_['workers'][number]
 
 /** Mining tiers — the credit score rendered in a language every miner
  *  already speaks. Purely cosmetic: the score itself stays the truth. */
-function miningTier(score: number): { name: string; emoji: string; className: string } {
+function miningTier(score: number): { nameKey: string; emoji: string; className: string } {
   if (score >= 850)
     return {
-      name: 'Diamond rig',
+      nameKey: 'mine.tier.diamond',
       emoji: '💎',
       className:
         'tier-shimmer bg-gradient-to-r from-cyan-500/20 via-sky-400/30 to-cyan-500/20 text-sky-500 dark:text-sky-300 border-sky-400/40',
     }
   if (score >= 750)
     return {
-      name: 'Gold rig',
+      nameKey: 'mine.tier.gold',
       emoji: '🥇',
       className:
         'tier-shimmer bg-gradient-to-r from-amber-500/20 via-yellow-400/30 to-amber-500/20 text-amber-600 dark:text-amber-300 border-amber-400/40',
     }
   if (score >= 650)
-    return { name: 'Silver rig', emoji: '🥈', className: 'bg-secondary text-foreground border-border' }
+    return { nameKey: 'mine.tier.silver', emoji: '🥈', className: 'bg-secondary text-foreground border-border' }
   if (score >= 500)
-    return { name: 'Bronze rig', emoji: '🥉', className: 'bg-orange-500/10 text-orange-600 dark:text-orange-300 border-orange-500/30' }
-  return { name: 'Copper rig', emoji: '⛏️', className: 'bg-secondary text-muted-foreground border-border' }
+    return { nameKey: 'mine.tier.bronze', emoji: '🥉', className: 'bg-orange-500/10 text-orange-600 dark:text-orange-300 border-orange-500/30' }
+  return { nameKey: 'mine.tier.copper', emoji: '⛏️', className: 'bg-secondary text-muted-foreground border-border' }
 }
 
 /**
@@ -41,6 +42,7 @@ function miningTier(score: number): { name: string; emoji: string; className: st
  * what does the independent grader think of its work.
  */
 export default function WorkerConsolePage() {
+  const { t } = useI18n()
   const [data, setData] = useState<Console_ | null>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
@@ -102,7 +104,7 @@ export default function WorkerConsolePage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading…</div>
+  if (loading) return <div className="p-8">{t('mine.loading')}</div>
 
   const workers = data?.workers ?? []
   const locals = workers.filter((w) => w.runtime === 'local')
@@ -112,8 +114,8 @@ export default function WorkerConsolePage() {
     <div className="space-y-6">
       {celebrate && (
         <Celebration
-          title="First verified job complete!"
-          body="Your machine did real work, an independent grader passed it, and the payout is now part of its permanent credit history. The rig is officially a worker."
+          title={t('mine.celebration.title')}
+          body={t('mine.celebration.body')}
           onClose={() => setCelebrate(false)}
         />
       )}
@@ -122,16 +124,15 @@ export default function WorkerConsolePage() {
           <Pickaxe
             className={`size-7 ${locals.some((w) => w.online && w.autoMine) ? 'animate-swing text-primary' : ''}`}
           />{' '}
-          Worker Console
+          {t('mine.title')}
           {locals.some((w) => w.online && w.autoMine) && (
             <span className="rounded-md bg-success/15 px-2 py-1 text-xs font-medium text-success">
-              ⛏️ mining…
+              ⛏️ {t('mine.miningBadge')}
             </span>
           )}
         </h1>
         <p className="text-muted-foreground mt-1">
-          Your machines&apos; labor, verified and paid. Hashrate never earned a credit score — this
-          does.
+          {t('mine.subtitle')}
         </p>
       </div>
 
@@ -139,15 +140,15 @@ export default function WorkerConsolePage() {
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard
           icon={Briefcase}
-          label="Open jobs on the market"
+          label={t('mine.stats.openJobs')}
           value={String(data?.market.openJobs ?? 0)}
         />
         <StatCard
           icon={CircleDollarSign}
-          label="Bounties waiting (USDC)"
+          label={t('mine.stats.bountiesWaiting')}
           value={`$${(data?.market.openBountyUsd ?? 0).toLocaleString()}`}
         />
-        <StatCard icon={CircleDollarSign} label="Earned by your agents" value={`$${totalEarned.toLocaleString()}`} />
+        <StatCard icon={CircleDollarSign} label={t('mine.stats.earnedByAgents')} value={`$${totalEarned.toLocaleString()}`} />
       </div>
 
       {/* One-click pipeline: agent + wallet + auto-mine + connect command */}
@@ -155,12 +156,10 @@ export default function WorkerConsolePage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="font-semibold">
-              {locals.length === 0 ? 'Start mining' : 'Add another worker'}
+              {locals.length === 0 ? t('mine.start.title') : t('mine.start.addAnother')}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              One click creates the worker agent, provisions its wallet, and turns auto-mine on.
-              Then paste one command on the machine with your local model (Ollama / LM Studio —
-              an RTX 3060 is plenty) and it claims and works open jobs by itself.
+              {t('mine.start.description')}
             </p>
           </div>
           <button
@@ -169,7 +168,7 @@ export default function WorkerConsolePage() {
             className="inline-flex shrink-0 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
             {starting ? <Loader2 className="size-4 animate-spin" /> : <Pickaxe className="size-4" />}
-            {starting ? 'Setting up…' : 'Start mining'}
+            {starting ? t('mine.start.settingUp') : t('mine.start.button')}
           </button>
         </div>
 
@@ -177,20 +176,19 @@ export default function WorkerConsolePage() {
         {startResult && (
           <div className="mt-4 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
             <p className="font-medium mb-1">
-              Worker created{startResult.provisioned ? ', wallet provisioned,' : ''} and auto-mine is ON.
-              Run this on your machine (shown once — the token is a credential):
+              {startResult.provisioned ? t('mine.start.createdProvisioned') : t('mine.start.created')}
             </p>
             <code className="block break-all font-mono select-all">{startResult.command}</code>
             <p className="mt-2 text-muted-foreground">
-              Windows PowerShell: run the two halves separately (no <code>&&</code>) and use{' '}
-              <code>curl.exe</code>. Details:{' '}
+              {t('mine.start.psNoteBefore')} <code>&&</code>{t('mine.start.psNoteMiddle')}{' '}
+              <code>curl.exe</code>{t('mine.start.psNoteAfter')}{' '}
               <a
                 className="text-primary hover:underline"
                 href="https://github.com/Kairose-master/ai-agent-credit-dashboard/blob/main/docs/test-scenarios/local-worker.md"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                local worker walkthrough
+                {t('mine.start.walkthroughLink')}
               </a>
               .
             </p>
@@ -200,16 +198,15 @@ export default function WorkerConsolePage() {
 
       {locals.length === 0 && !startResult && (
         <div className="rounded-lg border border-border p-6">
-          <p className="font-semibold">No local worker connected yet.</p>
+          <p className="font-semibold">{t('mine.empty.title')}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Prefer the manual route? Each agent&apos;s profile Runtime card has the same connect flow
-            step by step.
+            {t('mine.empty.description')}
           </p>
           <Link
             href="/profile"
             className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
           >
-            Connect from the Runtime card <ArrowRight className="size-3.5" />
+            {t('mine.empty.connectLink')} <ArrowRight className="size-3.5" />
           </Link>
         </div>
       )}
@@ -235,6 +232,7 @@ function StatCard({ icon: Icon, label, value }: { icon: typeof Pickaxe; label: s
 }
 
 function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () => void }) {
+  const { t } = useI18n()
   const [toggling, setToggling] = useState(false)
   const graded = w.testsPassed + w.testsFailed + w.verifiedPassed + w.verifiedFailed
   const gradedPassRate = graded > 0 ? Math.round(((w.testsPassed + w.verifiedPassed) / graded) * 100) : null
@@ -258,20 +256,20 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
         <span className="font-semibold">{w.name}</span>
         <span
           className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium ${tier.className}`}
-          title={`Mining tier — cosmetic name for credit score ${w.creditScore}`}
+          title={t('mine.tier.tooltip', { score: w.creditScore })}
         >
-          {tier.emoji} {tier.name}
+          {tier.emoji} {t(tier.nameKey)}
         </span>
         {w.streak >= 2 && (
           <span
             className="inline-flex items-center gap-0.5 rounded-md bg-destructive/10 px-2 py-0.5 text-xs font-medium text-orange-500 dark:text-orange-400"
-            title={`${w.streak} consecutive independently-graded passes`}
+            title={t('mine.streak.tooltip', { streak: w.streak })}
           >
-            🔥 {w.streak} streak
+            🔥 {t('mine.streak.badge', { streak: w.streak })}
           </span>
         )}
         <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
-          {w.runtime === 'local' ? 'local worker' : w.runtime}
+          {w.runtime === 'local' ? t('mine.localWorker') : w.runtime}
         </span>
         {w.runtime === 'local' && (
           <span
@@ -280,7 +278,7 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
             }`}
           >
             <span className={`size-1.5 rounded-full ${w.online ? 'bg-success' : 'bg-warning'}`} />
-            {w.online ? 'online' : 'offline'}
+            {w.online ? t('mine.online') : t('mine.offline')}
           </span>
         )}
         {w.runtime === 'local' && (
@@ -289,8 +287,8 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
             disabled={toggling || !w.provisioned}
             title={
               w.provisioned
-                ? 'When on, this worker claims qualifying open jobs by itself while polling'
-                : 'Provision the agent wallet first (profile page)'
+                ? t('mine.autoMine.tooltip')
+                : t('mine.autoMine.provisionFirst')
             }
             className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium disabled:opacity-50 ${
               w.autoMine
@@ -299,7 +297,7 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
             }`}
           >
             <Zap className="size-3" />
-            {toggling ? '…' : w.autoMine ? 'Auto-mine ON' : 'Auto-mine off'}
+            {toggling ? '…' : w.autoMine ? t('mine.autoMine.on') : t('mine.autoMine.off')}
           </button>
         )}
         <span className="ml-auto font-mono text-sm text-muted-foreground">
@@ -309,20 +307,20 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
 
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         <div>
-          <p className="text-xs text-muted-foreground">Paid jobs delivered</p>
+          <p className="text-xs text-muted-foreground">{t('mine.worker.paidJobs')}</p>
           <p className="font-semibold">{w.jobsCompleted}</p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Earned (USDC)</p>
+          <p className="text-xs text-muted-foreground">{t('mine.worker.earned')}</p>
           <p className="font-semibold">${w.earnedUsd.toLocaleString()}</p>
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Independently graded</p>
+          <p className="text-xs text-muted-foreground">{t('mine.worker.graded')}</p>
           <p className="font-semibold">{graded}</p>
         </div>
         <div>
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <ShieldCheck className="size-3" /> Grader pass rate
+            <ShieldCheck className="size-3" /> {t('mine.worker.passRate')}
           </p>
           {gradedPassRate === null ? (
             <p className="font-semibold">—</p>
