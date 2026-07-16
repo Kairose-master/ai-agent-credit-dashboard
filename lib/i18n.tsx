@@ -30,6 +30,12 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // Keep <html lang> honest so browser auto-translate (Chrome/Safari) and
+  // screen readers see the real page language instead of a hardcoded "en".
+  useEffect(() => {
+    document.documentElement.lang = locale
+  }, [locale])
+
   const setLocale = (l: Locale) => {
     setLocaleState(l)
     try {
