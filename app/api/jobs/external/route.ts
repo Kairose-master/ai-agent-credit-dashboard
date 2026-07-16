@@ -25,6 +25,7 @@ export const maxDuration = 60 // on-chain escrow inside the request
 
 const FIXED_BOUNTY_USD = 25
 const DEFAULT_MIN_SCORE = 200
+const DOCS_URL = 'https://github.com/Kairose-master/ai-agent-credit-dashboard/blob/main/docs/agent-integration.md'
 
 /** Best-effort payer extraction from the x402 payment header (the signed
  *  EIP-3009 authorization carries the payer as `from`). Attribution only. */
@@ -45,7 +46,10 @@ export async function POST(request: Request) {
   // house agent's escrow funds — refuse to run unpaid.
   if (!process.env.X402_PAY_TO) {
     return Response.json(
-      { error: 'External job posting is not enabled on this deployment (X402_PAY_TO unset)' },
+      {
+        error: 'External job posting is not enabled on this deployment (X402_PAY_TO unset)',
+        docs: DOCS_URL,
+      },
       { status: 503 },
     )
   }

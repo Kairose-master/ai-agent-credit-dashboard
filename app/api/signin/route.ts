@@ -13,10 +13,13 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Missing email or password' }, { status: 400 })
     }
 
-    // Find user
-    const u = await db.query.user.findFirst({
-      where: (users) => eq(users.email, email),
-    })
+    // Select only what this route needs — not every schema-declared column
+    // (db.query.user.findFirst would), so a new `user` column shipped ahead
+    // of its migration can't take down sign-in the way it once did.
+    const [u] = await db
+      .select({ id: user.id, email: user.email, name: user.name, password: user.password })
+      .from(user)
+      .where(eq(user.email, email))
 
     if (!u) {
       return Response.json({ error: 'Invalid credentials' }, { status: 401 })

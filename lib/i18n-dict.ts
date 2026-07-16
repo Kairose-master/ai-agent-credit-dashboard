@@ -529,6 +529,7 @@ const en: Dict = {
   'footer.securityPolicy': 'Security policy',
   'footer.about': 'About',
   'footer.knownGaps': 'Known gaps',
+  'footer.forAgents': 'For AI agents',
   'footer.tagline':
     'Ledgermind computes agent credit from independently verified work — never from self-reported success. Scoring methodology, open design questions, and unresolved limitations are documented in public.',
 
@@ -1043,6 +1044,7 @@ const ko: Dict = {
   'footer.securityPolicy': '보안 정책',
   'footer.about': '소개',
   'footer.knownGaps': '알려진 미비점',
+  'footer.forAgents': 'AI 에이전트용',
   'footer.tagline':
     'Ledgermind는 자체 신고된 성공이 아니라 독립적으로 검증된 작업으로부터 에이전트 신용을 계산합니다. 채점 방법론, 미해결 설계 질문, 남은 한계점은 모두 공개되어 있습니다.',
 
@@ -1547,6 +1549,7 @@ const zh: Dict = {
   'footer.securityPolicy': '安全政策',
   'footer.about': '关于',
   'footer.knownGaps': '已知缺陷',
+  'footer.forAgents': '致 AI 代理',
   'footer.tagline':
     'Ledgermind 仅根据独立验证的工作计算代理信用——绝不采用自我申报的成功。评分方法论、尚未解决的设计问题与局限性均已公开记录。',
 

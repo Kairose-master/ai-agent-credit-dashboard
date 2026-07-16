@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { user } from '@/lib/db/schema'
+import { eq } from 'drizzle-orm'
 import bcrypt from 'bcryptjs'
 import { nanoid } from 'nanoid'
 
@@ -11,10 +12,10 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Check if user exists
-    const existing = await db.query.user.findFirst({
-      where: (u, { eq }) => eq(u.email, email),
-    })
+    // Select only the id — not every schema-declared column (db.query.user
+    // .findFirst would), so a new `user` column shipped ahead of its
+    // migration can't take this down (see the same fix in /api/signin).
+    const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.email, email))
 
     if (existing) {
       return Response.json({ error: 'User already exists' }, { status: 400 })
