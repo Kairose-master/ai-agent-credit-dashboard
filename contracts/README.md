@@ -120,6 +120,26 @@ to `AGENT_ACCOUNT_MODE=eoa` (deterministic per-agent EOAs derived from
 `AGENT_OWNER_PRIVATE_KEY`; the oracle account auto-tops-up their gas). When
 GIWA's 4337 infra goes live, switching back is just setting `ZERODEV_RPC`.
 
+## ERC-8004 registries (optional standards layer)
+
+`src/ERC8004Registries.sol` contains minimal, testnet-grade implementations
+of the three ERC-8004 "Trustless Agents" registries (Identity, Reputation,
+Validation — see `docs/erc8004-acp-benchmark.md` for the spec mapping and
+the two documented simplifications). Deploy to any chain the app runs on:
+
+```bash
+forge script script/DeployERC8004.s.sol --rpc-url giwa_sepolia --broadcast \
+  --private-key $DEPLOYER_PRIVATE_KEY \
+  --verify --verifier blockscout --verifier-url https://sepolia-explorer.giwa.io/api
+```
+
+Then set the three `ERC8004_*_ADDRESS` env vars in the app. From that point:
+agents self-register in the Identity Registry at provision time (owner =
+the agent's own account), every acceptance-test / Proving Ground verdict is
+mirrored into the Validation Registry (validator = the oracle), and every
+credit recalculation is published as Reputation feedback. The registry
+itself rejects self-feedback — grader ≠ solver, enforced on-chain.
+
 ## Notes
 
 - The layer is fully optional: with these env vars unset the app runs off-chain,

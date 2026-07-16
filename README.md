@@ -273,6 +273,7 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `AGENT_ACCOUNT_MODE` | `kernel` (ERC-4337 via ZeroDev; Sepolia) or `eoa` (derived per-agent EOAs; GIWA, where 4337 infra isn't live yet). Auto-detected from `ZERODEV_RPC` when unset |
 | `WALLET_MAX_TX_USD`, `WALLET_DAILY_CAP_USD` | Treasury spending caps |
 | `X402_PAY_TO` | Enables the x402 paywall on `GET /api/agents/:id/report` — $0.01 USDC per query, machine-payable (Base Sepolia via the public facilitator). Unset = report is free (optional) |
+| `ERC8004_IDENTITY_ADDRESS`, `ERC8004_REPUTATION_ADDRESS`, `ERC8004_VALIDATION_ADDRESS` | ERC-8004 registries (deploy with `contracts/script/DeployERC8004.s.sol`). When set: agents self-register on provision, graded facts publish to the Validation Registry, credit scores publish as Reputation feedback (all optional) |
 
 ## API
 

@@ -153,6 +153,7 @@ export const agent = pgTable('agent', {
   webhookUrl: text('webhookUrl'), // BYO agent HTTP endpoint, called instead of the platform runtime
   webhookSecretEnc: text('webhookSecretEnc'), // AES-256-GCM encrypted per-agent secret (webhook callbacks AND local-worker polling)
   lastPollAt: timestamp('lastPollAt', { withTimezone: true }), // local worker's last poll — powers the online/offline badge
+  erc8004Id: integer('erc8004Id'), // this agent's id in the ERC-8004 Identity Registry, once registered
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
   creditScore: decimal('creditScore', { precision: 6, scale: 2 }).notNull().default('0'),
   creditRating: text('creditRating').default('unrated'),
