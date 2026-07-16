@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { MessageSquare, Send, Loader2, UserPlus } from 'lucide-react'
 import { getThreads, getMessages, sendMessage, startConversationByEmail, startConversationByUserId } from '@/app/actions/messages'
+import { useI18n } from '@/lib/i18n'
 
 type Thread = {
   id: string
@@ -15,6 +16,7 @@ type Thread = {
 type Msg = { id: string; body: string; mine: boolean; createdAt: string | Date }
 
 export default function MessagesPage() {
+  const { t } = useI18n()
   const searchParams = useSearchParams()
   const [threads, setThreads] = useState<Thread[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -124,7 +126,7 @@ export default function MessagesPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading…</div>
+  if (loading) return <div className="p-8">{t('msg.loading')}</div>
 
   const active = threads.find((t) => t.id === activeId)
 
@@ -132,9 +134,9 @@ export default function MessagesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
-          <MessageSquare className="size-7" /> Messages
+          <MessageSquare className="size-7" /> {t('msg.title')}
         </h1>
-        <p className="text-muted-foreground mt-1">Direct messages with other users on the platform.</p>
+        <p className="text-muted-foreground mt-1">{t('msg.subtitle')}</p>
       </div>
 
       {error && (
@@ -151,7 +153,7 @@ export default function MessagesPage() {
               value={startEmail}
               onChange={(e) => setStartEmail(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && startNew()}
-              placeholder="user@email.com"
+              placeholder={t('msg.emailPlaceholder')}
               className="h-9 flex-1 min-w-0 rounded-md border border-border bg-background px-2 text-xs"
               disabled={startBusy}
             />
@@ -159,7 +161,7 @@ export default function MessagesPage() {
               onClick={startNew}
               disabled={startBusy || !startEmail.trim()}
               className="shrink-0 rounded-md border border-border p-2 hover:bg-secondary disabled:opacity-50"
-              aria-label="Start conversation"
+              aria-label={t('msg.startConversation')}
             >
               {startBusy ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
             </button>
@@ -167,20 +169,24 @@ export default function MessagesPage() {
           <div className="flex-1 overflow-y-auto">
             {threads.length === 0 && (
               <p className="p-4 text-sm text-muted-foreground">
-                No conversations yet. Enter an email above to start one.
+                {t('msg.noConversations')}
               </p>
             )}
-            {threads.map((t) => (
+            {threads.map((th) => (
               <button
-                key={t.id}
-                onClick={() => openThread(t.id)}
+                key={th.id}
+                onClick={() => openThread(th.id)}
                 className={`w-full text-left p-3 border-b border-border hover:bg-secondary/50 ${
-                  t.id === activeId ? 'bg-secondary' : ''
+                  th.id === activeId ? 'bg-secondary' : ''
                 }`}
               >
-                <p className="text-sm font-medium truncate">{t.otherUser.name || t.otherUser.email}</p>
+                <p className="text-sm font-medium truncate">{th.otherUser.name || th.otherUser.email}</p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {t.lastMessage ? `${t.lastMessage.mine ? 'You: ' : ''}${t.lastMessage.body}` : 'No messages yet'}
+                  {th.lastMessage
+                    ? th.lastMessage.mine
+                      ? t('msg.youPrefix', { body: th.lastMessage.body })
+                      : th.lastMessage.body
+                    : t('msg.noMessagesYet')}
                 </p>
               </button>
             ))}
@@ -191,7 +197,7 @@ export default function MessagesPage() {
         <div className="md:col-span-2 border border-border rounded-lg flex flex-col overflow-hidden">
           {!active ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-              Select a conversation
+              {t('msg.selectConversation')}
             </div>
           ) : (
             <>
@@ -220,7 +226,7 @@ export default function MessagesPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && send()}
-                  placeholder="Type a message…"
+                  placeholder={t('msg.typeMessage')}
                   className="h-9 flex-1 rounded-md border border-border bg-background px-3 text-sm"
                   disabled={sending}
                 />

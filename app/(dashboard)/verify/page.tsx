@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, FlaskConical, Play, CheckCircle2, XCircle } from 'lucide-react'
 import { getVerifiedTasks, startVerifiedTask, reclaimVerifiedTask } from '@/app/actions/verified'
+import { useI18n } from '@/lib/i18n'
 
 type Task = {
   id: string
@@ -34,6 +35,7 @@ const STATUS_STYLE: Record<string, string> = {
 }
 
 export default function VerifyPage() {
+  const { t } = useI18n()
   const [configured, setConfigured] = useState(true)
   const [explorer, setExplorer] = useState('https://sepolia.etherscan.io')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -123,18 +125,16 @@ export default function VerifyPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading…</div>
+  if (loading) return <div className="p-8">{t('verify.loading')}</div>
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
-          <FlaskConical className="size-7" /> Proving Ground
+          <FlaskConical className="size-7" /> {t('verify.title')}
         </h1>
         <p className="text-muted-foreground mt-1">
-          Ground-truth-verified tasks: the server generates a problem with a hidden answer, the agent
-          solves it, and a correct answer settles the on-chain escrow automatically — measured
-          capability, not self-graded opinion.
+          {t('verify.subtitle')}
         </p>
       </div>
 
@@ -145,94 +145,94 @@ export default function VerifyPage() {
       )}
 
       <div className="rounded-lg border border-border p-6">
-        <h2 className="font-bold text-lg mb-3">Run a Verified Task</h2>
+        <h2 className="font-bold text-lg mb-3">{t('verify.runTask')}</h2>
         {!configured ? (
           <p className="text-sm text-muted-foreground">
-            Deploy the contracts and set <code className="rounded bg-secondary px-1">VERIFIED_TASK_ESCROW_ADDRESS</code>{' '}
-            (plus the on-chain env) to enable. See <code>contracts/README.md</code>.
+            {t('verify.notConfiguredDeploy')} <code className="rounded bg-secondary px-1">VERIFIED_TASK_ESCROW_ADDRESS</code>{' '}
+            {t('verify.notConfiguredEnable')} <code>contracts/README.md</code>.
           </p>
         ) : provisioned.length < 2 ? (
           <p className="text-sm text-muted-foreground">
-            Provision smart accounts for at least two agents (solver + requester) on their profiles.
+            {t('verify.provisionHint')}
           </p>
         ) : (
           <div className="grid gap-3 md:grid-cols-4">
             <select value={solverId} onChange={(e) => setSolverId(e.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm">
               {provisioned.map((a) => (
-                <option key={a.id} value={a.id}>solver: {a.name}</option>
+                <option key={a.id} value={a.id}>{t('verify.solverOption', { name: a.name })}</option>
               ))}
             </select>
             <select value={requesterId} onChange={(e) => setRequesterId(e.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm">
               {provisioned.map((a) => (
-                <option key={a.id} value={a.id}>requester: {a.name}</option>
+                <option key={a.id} value={a.id}>{t('verify.requesterOption', { name: a.name })}</option>
               ))}
             </select>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm">
               {[1, 2, 3, 4, 5].map((d) => (
-                <option key={d} value={d}>difficulty {d}</option>
+                <option key={d} value={d}>{t('verify.difficultyOption', { level: d })}</option>
               ))}
             </select>
-            <input value={bounty} onChange={(e) => setBounty(e.target.value)} type="number" min="1" placeholder="Bounty (USDC)" className="h-9 rounded-md border border-border bg-background px-3 text-sm" />
+            <input value={bounty} onChange={(e) => setBounty(e.target.value)} type="number" min="1" placeholder={t('verify.bountyPlaceholder')} className="h-9 rounded-md border border-border bg-background px-3 text-sm" />
             <button
               onClick={start}
               disabled={busy || !solverId || !requesterId || solverId === requesterId || !bounty}
               className="md:col-span-4 inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-              Escrow bounty & solve
+              {t('verify.escrowAndSolve')}
             </button>
             {solverId === requesterId && (
-              <p className="md:col-span-4 text-xs text-warning">Solver and requester must be different agents.</p>
+              <p className="md:col-span-4 text-xs text-warning">{t('verify.differentAgents')}</p>
             )}
           </div>
         )}
       </div>
 
       <div className="space-y-3">
-        {tasks.length === 0 && <p className="text-sm text-muted-foreground">No verified tasks yet.</p>}
-        {tasks.map((t) => (
-          <div key={t.id} className="rounded-lg border border-border p-4">
+        {tasks.length === 0 && <p className="text-sm text-muted-foreground">{t('verify.noTasks')}</p>}
+        {tasks.map((task) => (
+          <div key={task.id} className="rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  {t.status === 'completed' ? (
+                  {task.status === 'completed' ? (
                     <CheckCircle2 className="size-4 text-success" />
-                  ) : t.status === 'failed' || t.status === 'error' ? (
+                  ) : task.status === 'failed' || task.status === 'error' ? (
                     <XCircle className="size-4 text-destructive" />
                   ) : (
                     <Loader2 className="size-4 animate-spin text-muted-foreground" />
                   )}
-                  <span className="font-medium">{t.problem}</span>
-                  <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[t.status] ?? ''}`}>
-                    {t.status}
+                  <span className="font-medium">{task.problem}</span>
+                  <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[task.status] ?? ''}`}>
+                    {task.status}
                   </span>
                 </div>
                 <p className="mt-1.5 text-xs text-muted-foreground font-mono">
-                  d{t.difficulty} · ${t.bountyUsd.toLocaleString()} · solver {t.solver} · by {t.requester}
-                  {t.submittedAnswer !== null && ` · submitted ${t.submittedAnswer}`}
-                  {t.answer !== null && ` · truth ${t.answer}`}
+                  {t('verify.metaLine', { difficulty: task.difficulty, bounty: task.bountyUsd.toLocaleString(), solver: task.solver, requester: task.requester })}
+                  {task.submittedAnswer !== null && ` ${t('verify.metaSubmitted', { answer: task.submittedAnswer })}`}
+                  {task.answer !== null && ` ${t('verify.metaTruth', { answer: task.answer })}`}
                 </p>
-                {t.error && <p className="mt-1 text-xs text-destructive">{t.error}</p>}
+                {task.error && <p className="mt-1 text-xs text-destructive">{task.error}</p>}
                 <p className="mt-1 flex gap-3 text-xs">
-                  {t.postTxHash && (
-                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${t.postTxHash}`}>
-                      escrow tx
+                  {task.postTxHash && (
+                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${task.postTxHash}`}>
+                      {t('verify.escrowTx')}
                     </a>
                   )}
-                  {t.settleTxHash && (
-                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${t.settleTxHash}`}>
-                      payout tx
+                  {task.settleTxHash && (
+                    <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${task.settleTxHash}`}>
+                      {t('verify.payoutTx')}
                     </a>
                   )}
                 </p>
               </div>
-              {t.status === 'failed' && (
+              {task.status === 'failed' && (
                 <button
-                  onClick={() => reclaim(t.id)}
+                  onClick={() => reclaim(task.id)}
                   disabled={busy}
                   className="shrink-0 rounded bg-secondary px-3 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
                 >
-                  Reclaim escrow
+                  {t('verify.reclaimEscrow')}
                 </button>
               )}
             </div>

@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import { getApiKeyStatus, saveAnthropicKey, removeAnthropicKey } from '@/app/actions/settings'
 import { updateDisplayName, changePassword } from '@/app/actions/account'
+import { useI18n } from '@/lib/i18n'
 
 export default function SettingsPage() {
+  const { t } = useI18n()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -36,7 +38,7 @@ export default function SettingsPage() {
       const { hint } = await saveAnthropicKey(keyInput)
       setKeyHint(hint)
       setKeyInput('')
-      setKeyMsg('Saved. Your agent runs now bill your own Anthropic account.')
+      setKeyMsg(t('settings.byok.savedMsg'))
     } catch (e) {
       setKeyMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -50,7 +52,7 @@ export default function SettingsPage() {
     try {
       await removeAnthropicKey()
       setKeyHint(null)
-      setKeyMsg('Key removed.')
+      setKeyMsg(t('settings.byok.removedMsg'))
     } catch (e) {
       setKeyMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -58,39 +60,38 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Loading...</div>
+  if (loading) return <div className="p-8">{t('settings.loading')}</div>
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">Account and platform preferences</p>
+        <h1 className="text-3xl font-bold">{t('settings.title')}</h1>
+        <p className="text-muted-foreground">{t('settings.subtitle')}</p>
       </div>
 
       <AccountCard initialName={user?.name ?? ''} email={user?.email ?? ''} />
 
       <div className="border border-border rounded-lg p-6">
-        <h3 className="font-bold text-lg mb-1">Anthropic API Key (BYOK)</h3>
+        <h3 className="font-bold text-lg mb-1">{t('settings.byok.title')}</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Your agents run on Claude. Add your own API key from{' '}
+          {t('settings.byok.descBeforeLink')}{' '}
           <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
             console.anthropic.com
           </a>{' '}
-          and every task you run bills your account, not the platform&apos;s. The key is encrypted at
-          rest and never shown again — only its last 4 characters.
+          {t('settings.byok.descAfterLink')}
         </p>
 
         {keyHint ? (
           <div className="flex flex-wrap items-center gap-3">
             <span className="rounded-md bg-success/15 px-3 py-1.5 text-sm font-mono text-success">
-              sk-ant-…{keyHint} active
+              {t('settings.byok.activeKey', { hint: keyHint })}
             </span>
             <button
               onClick={removeKey}
               disabled={keyBusy}
               className="rounded border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50"
             >
-              Remove key
+              {t('settings.byok.removeKey')}
             </button>
           </div>
         ) : (
@@ -108,7 +109,7 @@ export default function SettingsPage() {
               disabled={keyBusy || !keyInput.trim()}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
-              {keyBusy ? 'Saving…' : 'Save key'}
+              {keyBusy ? t('settings.byok.saving') : t('settings.byok.saveKey')}
             </button>
           </div>
         )}
@@ -119,6 +120,7 @@ export default function SettingsPage() {
 }
 
 function AccountCard({ initialName, email }: { initialName: string; email: string }) {
+  const { t } = useI18n()
   const [name, setName] = useState(initialName)
   const [savedName, setSavedName] = useState(initialName)
   const [nameBusy, setNameBusy] = useState(false)
@@ -140,7 +142,7 @@ function AccountCard({ initialName, email }: { initialName: string; email: strin
     try {
       const { name: saved } = await updateDisplayName(name)
       setSavedName(saved)
-      setNameMsg('Saved.')
+      setNameMsg(t('settings.account.savedMsg'))
     } catch (e) {
       setNameMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -155,7 +157,7 @@ function AccountCard({ initialName, email }: { initialName: string; email: strin
       await changePassword(currentPw, newPw)
       setCurrentPw('')
       setNewPw('')
-      setPwMsg('Password changed. Other signed-in sessions were signed out.')
+      setPwMsg(t('settings.account.passwordChangedMsg'))
     } catch (e) {
       setPwMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -165,10 +167,10 @@ function AccountCard({ initialName, email }: { initialName: string; email: strin
 
   return (
     <div className="border border-border rounded-lg p-6">
-      <h3 className="font-bold text-lg mb-4">Account</h3>
+      <h3 className="font-bold text-lg mb-4">{t('settings.account.title')}</h3>
       <div className="space-y-6">
         <div>
-          <p className="text-sm text-muted-foreground mb-1">Display name</p>
+          <p className="text-sm text-muted-foreground mb-1">{t('settings.account.displayName')}</p>
           <div className="flex flex-wrap items-center gap-2">
             <input
               value={name}
@@ -181,25 +183,25 @@ function AccountCard({ initialName, email }: { initialName: string; email: strin
               disabled={nameBusy || !name.trim() || name.trim() === savedName}
               className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50"
             >
-              {nameBusy ? 'Saving…' : 'Save'}
+              {nameBusy ? t('settings.account.saving') : t('settings.account.save')}
             </button>
             {nameMsg && <span className="text-sm text-muted-foreground">{nameMsg}</span>}
           </div>
         </div>
 
         <div>
-          <p className="text-sm text-muted-foreground mb-1">Email (login id — not changeable)</p>
+          <p className="text-sm text-muted-foreground mb-1">{t('settings.account.emailLabel')}</p>
           <p className="font-mono text-sm">{email}</p>
         </div>
 
         <div>
-          <p className="text-sm text-muted-foreground mb-2">Change password</p>
+          <p className="text-sm text-muted-foreground mb-2">{t('settings.account.changePassword')}</p>
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="password"
               value={currentPw}
               onChange={(e) => setCurrentPw(e.target.value)}
-              placeholder="Current password"
+              placeholder={t('settings.account.currentPasswordPlaceholder')}
               autoComplete="current-password"
               className="h-9 w-full max-w-[200px] rounded-md border border-border bg-background px-3 text-sm"
             />
@@ -207,7 +209,7 @@ function AccountCard({ initialName, email }: { initialName: string; email: strin
               type="password"
               value={newPw}
               onChange={(e) => setNewPw(e.target.value)}
-              placeholder="New password (8+ chars)"
+              placeholder={t('settings.account.newPasswordPlaceholder')}
               autoComplete="new-password"
               className="h-9 w-full max-w-[200px] rounded-md border border-border bg-background px-3 text-sm"
             />
@@ -216,7 +218,7 @@ function AccountCard({ initialName, email }: { initialName: string; email: strin
               disabled={pwBusy || !currentPw || newPw.length < 8}
               className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
-              {pwBusy ? 'Changing…' : 'Change password'}
+              {pwBusy ? t('settings.account.changing') : t('settings.account.changePassword')}
             </button>
           </div>
           {pwMsg && <p className="mt-2 text-sm text-muted-foreground">{pwMsg}</p>}

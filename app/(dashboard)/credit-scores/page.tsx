@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
+import { useI18n } from '@/lib/i18n'
 
 type Breakdown = {
   performance: number
@@ -24,6 +25,7 @@ type AgentRow = {
 }
 
 export default function CreditScoresPage() {
+  const { t } = useI18n()
   const [agents, setAgents] = useState<AgentRow[]>([])
   const [breakdowns, setBreakdowns] = useState<Record<string, Breakdown | null>>({})
   const [loading, setLoading] = useState(true)
@@ -52,13 +54,13 @@ export default function CreditScoresPage() {
     load()
   }, [])
 
-  if (loading) return <div className="p-8">Loading...</div>
+  if (loading) return <div className="p-8">{t('scores.loading')}</div>
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Credit Scores</h1>
-        <p className="text-muted-foreground">How creditworthiness is calculated from weighted behavioral factors</p>
+        <h1 className="text-3xl font-bold">{t('scores.title')}</h1>
+        <p className="text-muted-foreground">{t('scores.subtitle')}</p>
       </div>
 
       <div className="space-y-4">
@@ -76,31 +78,30 @@ export default function CreditScoresPage() {
                   <p className="font-mono text-4xl font-bold">
                     {unrated ? '—' : Math.round(parseFloat(agent.creditScore))}
                   </p>
-                  <p className="text-xs text-muted-foreground">{unrated ? 'unrated' : '/ 990'}</p>
+                  <p className="text-xs text-muted-foreground">{unrated ? t('scores.unrated') : '/ 990'}</p>
                 </div>
               </div>
 
               {breakdown ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                  <Factor label="Performance" value={breakdown.performance.toFixed(1)} weight="40%" />
-                  <Factor label="Reliability" value={breakdown.reliability.toFixed(1)} weight="30%" />
-                  <Factor label="Reputation" value={breakdown.reputation.toFixed(1)} weight="20%" />
-                  <Factor label="Risk" value={breakdown.risk.toFixed(1)} weight="10%" />
+                  <Factor label={t('scores.factor.performance')} value={breakdown.performance.toFixed(1)} weight="40%" />
+                  <Factor label={t('scores.factor.reliability')} value={breakdown.reliability.toFixed(1)} weight="30%" />
+                  <Factor label={t('scores.factor.reputation')} value={breakdown.reputation.toFixed(1)} weight="20%" />
+                  <Factor label={t('scores.factor.risk')} value={breakdown.risk.toFixed(1)} weight="10%" />
                 </div>
               ) : (
                 <div className="mb-6 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                  No behavioral history yet. Factors populate after this agent completes its first task,
-                  repayment, or job.{' '}
+                  {t('scores.noHistory')}{' '}
                   <Link href="/profile" className="text-primary hover:underline">
-                    Run a task →
+                    {t('scores.runTask')}
                   </Link>
                 </div>
               )}
 
               <div className="border-t border-border pt-4">
-                <p className="text-sm font-medium mb-2">Assessment</p>
+                <p className="text-sm font-medium mb-2">{t('scores.assessment')}</p>
                 <div className="flex items-center justify-between">
-                  <p className="text-sm text-muted-foreground">Risk Rating</p>
+                  <p className="text-sm text-muted-foreground">{t('scores.riskRating')}</p>
                   <span className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-primary/15 text-primary font-medium text-sm">
                     {agent.riskRating}
                   </span>
@@ -116,7 +117,7 @@ export default function CreditScoresPage() {
           href="/transactions"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 font-medium"
         >
-          Open Credit Line <ArrowUpRight className="size-4" />
+          {t('scores.openCreditLine')} <ArrowUpRight className="size-4" />
         </Link>
       )}
     </div>

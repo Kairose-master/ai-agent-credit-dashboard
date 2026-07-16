@@ -288,10 +288,15 @@ ad-hoc task API route and Labor Market's "actually do the job" dispatch).
   number. This has been violated and fixed before (a seed script and a
   `lib/data.ts`/`ui-kit.tsx` pair of unused mock files were both removed);
   don't reintroduce it.
-- **i18n: English is the source of truth** (`lib/i18n-dict.ts`, EN/KO/ZH).
-  New UI strings go into the `en` dict and components read them via
-  `useI18n().t(key)`; missing translations fall back to English, never to
-  raw keys. Don't hand-write the other locales — two Claude-powered paths
+- **i18n: English is the source of truth** (`lib/i18n-dict.ts`, 13
+  locales — EN/KO/ZH fully covered, the other 10 cover nav + guide only
+  and fall back to English elsewhere until translated). New UI strings go
+  into the `en` dict and components read them via `useI18n().t(key)`, with
+  `t(key, {token: value})` for interpolation — `{token}` placeholders in
+  the English source survive translation verbatim, so params are applied
+  after lookup in every language; missing translations fall back to
+  English, never to raw keys. Don't hand-write the other locales — two
+  Claude-powered paths
   fill them: build-time `pnpm i18n:check` / `pnpm i18n:translate`
   (`scripts/translate-dict.mjs`, edits the dict file, review the diff) and
   runtime Admin → Access Control → Runtime translations
