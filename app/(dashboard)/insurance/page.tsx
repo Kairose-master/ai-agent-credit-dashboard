@@ -1,7 +1,19 @@
 'use client'
 
+import Link from 'next/link'
+import { ArrowRight, ShieldCheck } from 'lucide-react'
 import { useI18n } from '@/lib/i18n'
 
+/**
+ * Not a real product yet — the previous version of this page showed a
+ * fabricated capital pool, underwriter count, and coverage numbers, which
+ * violates this project's own "no fabricated numbers" principle
+ * (`insurancePolicy` exists in the schema, but nothing reads or writes it
+ * from real logic; see Claude.md's known-gaps list). Honest placeholder
+ * instead: what this will become once built, and why it isn't yet —
+ * pricing coverage needs real portfolio risk data, which /risk now
+ * actually computes.
+ */
 export default function InsurancePage() {
   const { t } = useI18n()
   return (
@@ -11,37 +23,30 @@ export default function InsurancePage() {
         <p className="text-muted-foreground">{t('ins.subtitle')}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-2">{t('ins.poolTitle')}</h3>
-          <div className="space-y-2 text-sm">
-            <p><span className="text-muted-foreground">{t('ins.capital')}</span> $8.4M</p>
-            <p><span className="text-muted-foreground">{t('ins.utilization')}</span> 42%</p>
-            <p><span className="text-muted-foreground">{t('ins.apy')}</span> 9.2%</p>
-            <p><span className="text-muted-foreground">{t('ins.underwriters')}</span> 214</p>
-          </div>
-        </div>
-
-        <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-2">{t('ins.yourCoverage')}</h3>
-          <div className="space-y-2 text-sm">
-            <p><span className="text-muted-foreground">{t('ins.coverageAmount')}</span> $500K</p>
-            <p><span className="text-muted-foreground">{t('ins.premium')}</span> {t('ins.premiumValue', { amount: '$4,200' })}</p>
-            <p><span className="text-muted-foreground">{t('ins.status')}</span> <span className="text-success">{t('ins.active')}</span></p>
-            <p><span className="text-muted-foreground">{t('ins.renewal')}</span> Dec 31, 2024</p>
-          </div>
-        </div>
+      <div className="rounded-lg border border-border p-6">
+        <p className="flex items-center gap-2 font-semibold">
+          <ShieldCheck className="size-4 text-muted-foreground" /> {t('ins.notBuiltTitle')}
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{t('ins.notBuiltBody')}</p>
+        <Link
+          href="/risk"
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+        >
+          {t('ins.viewRisk')} <ArrowRight className="size-3.5" />
+        </Link>
       </div>
 
-      <div className="border border-border rounded-lg p-6">
-        <h3 className="font-bold text-lg mb-4">{t('ins.productsTitle')}</h3>
-        <div className="space-y-3">
-          {['ins.productDefaultCoverage', 'ins.productOperationalRisk', 'ins.productLiquidationProtection', 'ins.productSmartContractInsurance'].map((product) => (
-            <div key={product} className="flex items-center justify-between p-3 bg-secondary/50 rounded">
-              <span className="font-medium">{t(product)}</span>
-              <button className="text-xs px-3 py-1 rounded border border-border hover:bg-secondary">
-                {t('ins.learnMore')}
-              </button>
+      <div className="rounded-lg border border-border p-6">
+        <h3 className="font-bold text-lg mb-3">{t('ins.plannedTitle')}</h3>
+        <div className="space-y-2">
+          {[
+            'ins.productDefaultCoverage',
+            'ins.productOperationalRisk',
+            'ins.productLiquidationProtection',
+            'ins.productSmartContractInsurance',
+          ].map((product) => (
+            <div key={product} className="rounded bg-secondary/50 p-3 text-sm font-medium text-muted-foreground">
+              {t(product)}
             </div>
           ))}
         </div>

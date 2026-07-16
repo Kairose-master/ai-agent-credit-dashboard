@@ -1,9 +1,22 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { useI18n } from '@/lib/i18n'
+import { getRiskAnalytics } from '@/app/actions/risk'
+
+type Analytics = Awaited<ReturnType<typeof getRiskAnalytics>>
 
 export default function RiskPage() {
   const { t } = useI18n()
+  const [data, setData] = useState<Analytics | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getRiskAnalytics()
+      .then(setData)
+      .finally(() => setLoading(false))
+  }, [])
+
   return (
     <div className="space-y-6">
       <div>
@@ -11,41 +24,60 @@ export default function RiskPage() {
         <p className="text-muted-foreground">{t('risk.subtitle')}</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 border border-border rounded-lg">
-          <p className="text-xs text-muted-foreground">{t('risk.defaultProbability')}</p>
-          <p className="text-3xl font-bold mt-2">2.3%</p>
-          <p className="text-xs text-muted-foreground mt-1">{t('risk.avgAcrossAgents')}</p>
+      {loading ? (
+        <p className="text-sm text-muted-foreground">{t('risk.loading')}</p>
+      ) : !data?.hasAgents ? (
+        <div className="rounded-lg border border-border p-6 text-sm text-muted-foreground">
+          {t('risk.empty')}
         </div>
-        <div className="p-4 border border-border rounded-lg">
-          <p className="text-xs text-muted-foreground">{t('risk.totalExposure')}</p>
-          <p className="text-3xl font-bold mt-2">$1.2M</p>
-          <p className="text-xs text-muted-foreground mt-1">{t('risk.activeCreditLines')}</p>
-        </div>
-        <div className="p-4 border border-border rounded-lg">
-          <p className="text-xs text-muted-foreground">{t('risk.aaaRated')}</p>
-          <p className="text-3xl font-bold mt-2">45%</p>
-          <p className="text-xs text-muted-foreground mt-1">{t('risk.portfolioComposition')}</p>
-        </div>
-        <div className="p-4 border border-border rounded-lg">
-          <p className="text-xs text-muted-foreground">{t('risk.var95')}</p>
-          <p className="text-3xl font-bold mt-2">$28K</p>
-          <p className="text-xs text-muted-foreground mt-1">{t('risk.valueAtRisk')}</p>
-        </div>
-      </div>
-
-      <div className="border border-border rounded-lg p-6">
-        <h3 className="font-bold text-lg mb-4">{t('risk.distributionTitle')}</h3>
-        <p className="text-sm text-muted-foreground">{t('risk.distributionSubtitle')}</p>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
-          {['AAA', 'AA', 'A', 'BBB', 'BB'].map((rating) => (
-            <div key={rating} className="p-3 bg-secondary/50 rounded text-center">
-              <p className="font-bold">{rating}</p>
-              <p className="text-xs text-muted-foreground mt-1">{Math.round(Math.random() * 20)}%</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 border border-border rounded-lg">
+              <p className="text-xs text-muted-foreground">{t('risk.totalExposure')}</p>
+              <p className="text-3xl font-bold mt-2">${Math.round(data.totalExposure).toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">{t('risk.activeCreditLines')}: {data.activeCreditLines}</p>
             </div>
-          ))}
-        </div>
-      </div>
+            <div className="p-4 border border-border rounded-lg">
+              <p className="text-xs text-muted-foreground">{t('risk.aaaRated')}</p>
+              <p className="text-3xl font-bold mt-2">
+                {data.aaaShare === null ? '—' : `${Math.round(data.aaaShare * 100)}%`}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">{t('risk.portfolioComposition')}</p>
+            </div>
+            <div className="p-4 border border-border rounded-lg sm:col-span-2">
+              <p className="text-xs text-muted-foreground">{t('risk.riskWeightedOutstanding')}</p>
+              <p className="text-3xl font-bold mt-2">${Math.round(data.elevatedOrHighOutstanding).toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">{t('risk.riskWeightedOutstandingSubtitle')}</p>
+            </div>
+          </div>
+
+          <div className="border border-border rounded-lg p-6">
+            <h3 className="font-bold text-lg mb-4">{t('risk.distributionTitle')}</h3>
+            <p className="text-sm text-muted-foreground">{t('risk.distributionSubtitle')}</p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
+              {data.ratingDistribution.map((r) => (
+                <div key={r.band} className="p-3 bg-secondary/50 rounded text-center">
+                  <p className="font-bold">{r.band === 'unrated' ? t('scores.unrated') : r.band}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{Math.round(r.share * 100)}% ({r.count})</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border border-border rounded-lg p-6">
+            <h3 className="font-bold text-lg mb-4">{t('risk.riskLevelTitle')}</h3>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {data.riskLevelDistribution.map((r) => (
+                <div key={r.level} className="p-3 bg-secondary/50 rounded text-center">
+                  <p className="font-bold">{r.level}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{Math.round(r.share * 100)}% ({r.count})</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

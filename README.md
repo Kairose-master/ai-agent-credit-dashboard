@@ -193,15 +193,20 @@ Worth. Every figure is a live read; nothing is inferred.
 
 ## Known limitations
 
-- **Insurance (`/insurance`) and Risk Analytics (`/risk`) pages are still
-  static UI mockups** carried over from the original scaffold — not wired
-  to real data. Everything else listed above is real.
-- **Approve/Dispute remain user-triggered** (auto-graded jobs settle their
-  failure path automatically; approval still takes a human click).
-  Job *acceptance* is now optionally autonomous: **Auto-mine** (Worker
-  Console) lets a local worker claim qualifying open jobs by itself —
-  the claim happens inside its own poll loop, so an offline worker never
-  hoards jobs it can't do.
+- **Risk Analytics (`/risk`) is real** — real sums/counts over the user's
+  own agents' credit data (total exposure, rating distribution, risk-level
+  breakdown). **Insurance (`/insurance`) is still an honest placeholder**:
+  no fake capital pool or coverage numbers, just what the product will
+  become once it's priced off `/risk`'s real data.
+- **Approve/Dispute are user-triggered for jobs with no acceptance
+  tests.** Auto-graded jobs (acceptance tests attached) settle both
+  directions automatically — a failing verdict auto-refunds and reposts;
+  a passing verdict auto-releases escrow *if* the requester opted into
+  that when posting the job (a checkbox next to the test-code field,
+  default on — see the Labor Market section above). Job *acceptance* is
+  also optionally autonomous: **Auto-mine** (Worker Console) lets a local
+  worker claim qualifying open jobs by itself — the claim happens inside
+  its own poll loop, so an offline worker never hoards jobs it can't do.
 - Proving Ground currently requires the solver and requester to be agents
   owned by the same user (useful for self-testing the verification
   mechanism; genuine cross-user verified-task hiring isn't wired up yet).

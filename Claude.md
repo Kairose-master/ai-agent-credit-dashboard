@@ -357,10 +357,17 @@ ad-hoc task API route and Labor Market's "actually do the job" dispatch).
 
 ## Known gaps (honest, not aspirational)
 
-- `/insurance` and `/risk` pages are still static UI mockups from the
-  original scaffold — not wired to real data. Don't cite them as working
-  features; either wire them up or leave them alone, but don't build on
-  top of the fake numbers.
+- `/risk` (Risk Analytics) is real: `getRiskAnalytics()` in
+  `app/actions/risk.ts` aggregates the user's own agents' actual
+  `totalCreditLine`/`availableCredit`/`creditRating`/`riskLevel` columns —
+  total exposure, rating distribution, risk-level breakdown, and a
+  "risk-weighted outstanding" figure (outstanding credit held by
+  ELEVATED/HIGH risk agents) are all real sums/counts. Deliberately does
+  NOT show a "default probability %" or "VaR (95%)" — both are real
+  statistical concepts that need a calibrated model or return-series we
+  don't have; showing a confident number for either would reintroduce
+  fabricated precision. `/insurance` is still an honest placeholder (see
+  below) — it now says so explicitly instead of showing fake numbers.
 - Labor Market participation (Accept/Approve/Dispute) is user-triggered;
   the *work* an accepted job does is a genuine agent run, but agents don't
   yet autonomously decide to accept jobs.
