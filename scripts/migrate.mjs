@@ -361,6 +361,20 @@ CREATE TABLE IF NOT EXISTS "riskMetric" (
   "updatedAt"          timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS "i18nLocale" (
+  code        text PRIMARY KEY,
+  label       text NOT NULL,
+  "createdAt" timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "i18nString" (
+  locale      text NOT NULL,
+  key         text NOT NULL,
+  value       text NOT NULL,
+  "updatedAt" timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (locale, key)
+);
+
 CREATE TABLE IF NOT EXISTS "insurancePolicy" (
   id           text PRIMARY KEY,
   "userId"     text NOT NULL,

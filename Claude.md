@@ -291,9 +291,15 @@ ad-hoc task API route and Labor Market's "actually do the job" dispatch).
 - **i18n: English is the source of truth** (`lib/i18n-dict.ts`, EN/KO/ZH).
   New UI strings go into the `en` dict and components read them via
   `useI18n().t(key)`; missing translations fall back to English, never to
-  raw keys. Don't hand-write the other locales — run
-  `pnpm i18n:check` / `pnpm i18n:translate` (`scripts/translate-dict.mjs`,
-  Claude-powered, fills only missing keys) and review the diff.
+  raw keys. Don't hand-write the other locales — two Claude-powered paths
+  fill them: build-time `pnpm i18n:check` / `pnpm i18n:translate`
+  (`scripts/translate-dict.mjs`, edits the dict file, review the diff) and
+  runtime Admin → Access Control → Runtime translations
+  (`/api/admin/i18n` + `lib/i18n-llm.ts`, BYOK-key-powered, writes
+  `i18nString`/`i18nLocale` rows served via public `GET /api/i18n`).
+  Precedence in `t()`: static dict > runtime row > English > raw key —
+  shipped human-reviewed strings always beat runtime LLM output. Keep the
+  prompt rules in `lib/i18n-llm.ts` and the script in sync.
   `LocaleProvider` keeps `<html lang>` in sync with the selected locale.
 
 ## Known gaps (honest, not aspirational)

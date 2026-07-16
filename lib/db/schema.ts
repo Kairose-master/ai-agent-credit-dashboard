@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, decimal, integer, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, decimal, integer, jsonb, primaryKey } from 'drizzle-orm/pg-core'
 
 // Better Auth Tables
 export const user = pgTable('user', {
@@ -385,6 +385,28 @@ export const riskMetric = pgTable('riskMetric', {
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Runtime i18n: locales added from the admin UI (static LOCALES in
+// lib/i18n-dict.ts stay the shipped baseline) …
+export const i18nLocale = pgTable('i18nLocale', {
+  code: text('code').primaryKey(),
+  label: text('label').notNull(),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// … and LLM-translated strings filled in at runtime with a registered API
+// key. Static dictionaries (human-reviewed, shipped in the bundle) always
+// win over these rows; rows only cover keys the bundle doesn't.
+export const i18nString = pgTable(
+  'i18nString',
+  {
+    locale: text('locale').notNull(),
+    key: text('key').notNull(),
+    value: text('value').notNull(),
+    updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.locale, t.key] })],
+)
 
 export const insurancePolicy = pgTable('insurancePolicy', {
   id: text('id').primaryKey(),
