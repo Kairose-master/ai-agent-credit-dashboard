@@ -328,6 +328,19 @@ Four independent "bring your own X" mechanisms, don't conflate them:
   skip to the next job in milliseconds instead of racing to an on-chain
   revert. The claim is released on accept failure and expires on its own
   otherwise; the on-chain job status remains the ultimate arbiter.
+  **Auto-mine for 'cloud' agents** (`tickCloudAutoMineAgents()` in
+  `lib/auto-mine.ts`; one-click setup via `startMiningCloud()`): a `'cloud'`
+  agent never polls on its own — the platform dispatches TO it, not the
+  other way around — so nothing would ever call `autoMineTick()` for one
+  the way a local worker's own 3s heartbeat does. Substitute: opportunistic
+  sweep wired into the same already-frequent AUTHENTICATED read paths that
+  call `reapStuckTasks()` (`getJobs()`, `getWorkerConsole()` — the latter
+  polled every 10s while `/mine` is open), throttled to once per 15s per
+  instance so an on-chain read doesn't run on every request.
+  Deliberately **not** wired into `guest.ts`'s `publicJobs()` — that route
+  is intentionally mutation-free for unauthenticated visitors (see Guest
+  mode below); ticking auto-mine there would reintroduce exactly the
+  unauthenticated-triggered-cost risk that route was designed to avoid.
 - **BYOK** (`lib/user-keys.ts`, `lib/crypto.ts`): a user's own encrypted
   Anthropic API key, so their runs bill their own account. Independent of
   which runtime the agent uses.

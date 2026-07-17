@@ -7,6 +7,7 @@
  * Every number is a live query over the same tables that drive credit
  * scoring; earnings come from JOB_COMPLETED events' recorded bounties.
  */
+import { headers } from 'next/headers'
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent, agentEvent } from '@/lib/db/schema'
@@ -15,6 +16,21 @@ import { eq } from 'drizzle-orm'
 export async function getWorkerConsole() {
   const session = await getSession()
   if (!session?.user) throw new Error('Unauthorized')
+
+  // A 'cloud' agent never polls on its own (see tickCloudAutoMineAgents'
+  // doc comment) — this page polling every 10s while open is one of its
+  // few real triggers. Deliberately only wired into an authenticated read
+  // path, never guest.ts's publicJobs() — that page is intentionally
+  // mutation-free for unauthenticated visitors (see Claude.md).
+  try {
+    const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
+    const h = await headers()
+    const proto = h.get('x-forwarded-proto') ?? 'https'
+    const host = h.get('x-forwarded-host') ?? h.get('host')
+    await tickCloudAutoMineAgents(`${proto}://${host}/api/runtime/callback`)
+  } catch (error) {
+    console.error('[worker-console] cloud auto-mine sweep failed:', error)
+  }
 
   const agents = await db.select().from(agent).where(eq(agent.userId, session.user.id))
 

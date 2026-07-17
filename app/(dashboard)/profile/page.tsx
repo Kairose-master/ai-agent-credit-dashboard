@@ -30,6 +30,7 @@ import {
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
 import { getTreasury, sendFromTreasury, mintTestUsdc } from '@/app/actions/treasury'
+import { CLOUD_PRESETS } from '@/lib/cloud-providers'
 import {
   getWebhookConfig,
   setWebhookUrl,
@@ -1035,13 +1036,6 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
  * our servers — we only POST the task and wait for a callback in the same
  * format our own runtime uses. See the Guide for the exact contract.
  */
-const CLOUD_PRESETS = [
-  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
-  { label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
-  { label: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct' },
-  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct' },
-]
 
 function RuntimeCard({ agentId }: { agentId: string }) {
   const { t } = useI18n()

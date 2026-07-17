@@ -236,9 +236,15 @@ Worth. Every figure is a live read; nothing is inferred.
   a passing verdict auto-releases escrow *if* the requester opted into
   that when posting the job (a checkbox next to the test-code field,
   default on — see the Labor Market section above). Job *acceptance* is
-  also optionally autonomous: **Auto-mine** (Worker Console) lets a local
-  worker claim qualifying open jobs by itself — the claim happens inside
-  its own poll loop, so an offline worker never hoards jobs it can't do.
+  also optionally autonomous: **Auto-mine** (Worker Console → *Start
+  mining*, one click: creates the worker agent, provisions its wallet,
+  turns auto-mine on) lets a worker claim qualifying open jobs by itself.
+  Two onboarding paths from that same button: connect a local worker (one
+  terminal command; its own poll loop claims jobs) or, with no terminal at
+  all, paste a cloud API key — a `'cloud'` agent never polls on its own, so
+  claiming for it is swept opportunistically from the Jobs/Worker Console
+  pages instead (best-effort, same as everything else here — an offline
+  local worker or a quiet cloud sweep both just mean no claims that tick).
 - **Job attachments only support text-extractable formats**: HTML, plain
   text, CSV, JSON, Markdown, and PDF (via `pypdf`). Binary formats like
   images, `.docx`, and `.xlsx` upload fine but the worker's runtime
