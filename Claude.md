@@ -88,6 +88,29 @@ route to an independent admin rather than trusting the requester's word
 alone — a requester saying "this is bad work" isn't a verified signal
 either.
 
+**Cross-user Proving Ground** (a solver and requester owned by different
+users) works via a propose/accept split, not a direct dispatch. The reason
+it can't be a direct dispatch: kicking off a solve means inserting an
+`agentTask` row and calling the runtime *as* the solver, billed (on BYOK)
+to the solver owner's own Anthropic key — doing that unilaterally on
+someone else's agent is commanding it without consent, not a limitation of
+grader≠solver itself (the hidden answer holds regardless of who owns what).
+So `startVerifiedTask()` checks `solver.userId !== requester's userId`: same
+owner still dispatches immediately (unchanged); different owners escrows
+the bounty (the requester's own money — no permission issue there) and
+sends a `verified_task_proposal` agent message (see "Agent-to-agent
+negotiation" below) instead, landing the task in `awaiting_solver`. The
+solver's own owner calls `acceptVerifiedTaskProposal()` — which is what
+actually inserts the `agentTask` row and dispatches, now under their own
+session/BYOK — or `rejectVerifiedTaskProposal()`, which cancels the
+still-on-chain-Open escrow immediately rather than leaving the requester's
+money locked until they notice and reclaim it manually.
+`dispatchSolve()` is the one shared helper both the same-owner path and
+`acceptVerifiedTaskProposal()` call, so they can't drift. `getVerifiedTasks()`
+returns tasks where the caller owns either side (`iAmSolver`/`iAmRequester`),
+not just requester-owned ones, so a solver sees proposals addressed to them
+on `/verify` itself, not only in their message inbox.
+
 **Auto-graded code jobs** extend this to the Labor Market: a job may carry
 requester-authored Python acceptance tests (`jobSpec.testCode`). At
 submission, `settleLaborMarketJob` (in `/api/runtime/callback`) extracts the
@@ -458,8 +481,6 @@ core so the guardrails can't be skipped from one and not the other:
 - Labor Market participation (Accept/Approve/Dispute) is user-triggered;
   the *work* an accepted job does is a genuine agent run, but agents don't
   yet autonomously decide to accept jobs.
-- Proving Ground currently requires solver and requester to be owned by
-  the same user — real cross-user verified-task hiring isn't wired up.
 - No formal audit of the Solidity contracts. Testnet only.
 - Job attachments only work for text-extractable formats (HTML, plain
   text, CSV, JSON, Markdown, PDF). Binary formats (images, `.docx`,
@@ -482,8 +503,6 @@ rework:
   existing `postJobAction`), and there's no autonomy loop that decides
   *when* to go negotiate in the first place — an agent only messages
   another agent if the task it's given leads it there.
-- **Cross-user Proving Ground** — verified tasks between agents owned by
-  different users.
 
 Do not scaffold these speculatively; build them when there's a concrete
 reason to, following the conventions above.

@@ -578,6 +578,16 @@ function AgentNegotiations() {
                           )}
                         </dl>
                       )}
+                      {m.type === 'verified_task_proposal' && m.payload.verifiable_task_id != null && (
+                        <a
+                          href="/verify"
+                          className={`mt-2 block text-xs font-medium underline underline-offset-2 ${
+                            m.mine ? 'text-primary-foreground' : 'text-primary'
+                          }`}
+                        >
+                          {t('agentMsg.viewInProvingGround')}
+                        </a>
+                      )}
                       <p className={`text-[10px] mt-1 ${m.mine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
                         {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>

@@ -1,14 +1,22 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, FlaskConical, Play, CheckCircle2, XCircle } from 'lucide-react'
-import { getVerifiedTasks, startVerifiedTask, reclaimVerifiedTask } from '@/app/actions/verified'
+import { Loader2, FlaskConical, Play, CheckCircle2, XCircle, Check, X } from 'lucide-react'
+import {
+  getVerifiedTasks,
+  startVerifiedTask,
+  reclaimVerifiedTask,
+  acceptVerifiedTaskProposal,
+  rejectVerifiedTaskProposal,
+} from '@/app/actions/verified'
 import { useI18n } from '@/lib/i18n'
 
 type Task = {
   id: string
   solver: string
   requester: string
+  iAmSolver: boolean
+  iAmRequester: boolean
   difficulty: number
   problem: string
   bountyUsd: number
@@ -23,14 +31,16 @@ type Task = {
 
 type MyAgent = { id: string; name: string; provisioned: boolean }
 
-const ACTIVE = new Set(['posting', 'solving', 'settling'])
+const ACTIVE = new Set(['posting', 'awaiting_solver', 'solving', 'settling'])
 
 const STATUS_STYLE: Record<string, string> = {
   posting: 'bg-warning/15 text-warning',
+  awaiting_solver: 'bg-warning/15 text-warning',
   solving: 'bg-primary/15 text-primary',
   settling: 'bg-chart-2/15 text-chart-2',
   completed: 'bg-success/15 text-success',
   failed: 'bg-destructive/15 text-destructive',
+  declined: 'bg-muted text-muted-foreground',
   error: 'bg-muted text-muted-foreground',
 }
 
@@ -112,6 +122,32 @@ export default function VerifyPage() {
     }
   }
 
+  const accept = async (id: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await acceptVerifiedTaskProposal(id)
+      schedulePoll(await refresh())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const decline = async (id: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await rejectVerifiedTaskProposal(id)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const reclaim = async (id: string) => {
     setBusy(true)
     setError(null)
@@ -151,17 +187,27 @@ export default function VerifyPage() {
             {t('verify.notConfiguredDeploy')} <code className="rounded bg-secondary px-1">VERIFIED_TASK_ESCROW_ADDRESS</code>{' '}
             {t('verify.notConfiguredEnable')} <code>contracts/README.md</code>.
           </p>
-        ) : provisioned.length < 2 ? (
+        ) : provisioned.length < 1 ? (
           <p className="text-sm text-muted-foreground">
             {t('verify.provisionHint')}
           </p>
         ) : (
           <div className="grid gap-3 md:grid-cols-4">
-            <select value={solverId} onChange={(e) => setSolverId(e.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm">
-              {provisioned.map((a) => (
-                <option key={a.id} value={a.id}>{t('verify.solverOption', { name: a.name })}</option>
-              ))}
-            </select>
+            <div>
+              <input
+                list="verify-solver-agents"
+                value={solverId}
+                onChange={(e) => setSolverId(e.target.value)}
+                placeholder={t('verify.solverIdPlaceholder')}
+                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              />
+              <datalist id="verify-solver-agents">
+                {provisioned.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </datalist>
+              <p className="mt-1 text-[11px] text-muted-foreground">{t('verify.crossUserHint')}</p>
+            </div>
             <select value={requesterId} onChange={(e) => setRequesterId(e.target.value)} className="h-9 rounded-md border border-border bg-background px-3 text-sm">
               {provisioned.map((a) => (
                 <option key={a.id} value={a.id}>{t('verify.requesterOption', { name: a.name })}</option>
@@ -197,7 +243,7 @@ export default function VerifyPage() {
                 <div className="flex items-center gap-2">
                   {task.status === 'completed' ? (
                     <CheckCircle2 className="size-4 text-success" />
-                  ) : task.status === 'failed' || task.status === 'error' ? (
+                  ) : task.status === 'failed' || task.status === 'error' || task.status === 'declined' ? (
                     <XCircle className="size-4 text-destructive" />
                   ) : (
                     <Loader2 className="size-4 animate-spin text-muted-foreground" />
@@ -213,6 +259,9 @@ export default function VerifyPage() {
                   {task.answer !== null && ` ${t('verify.metaTruth', { answer: task.answer })}`}
                 </p>
                 {task.error && <p className="mt-1 text-xs text-destructive">{task.error}</p>}
+                {task.status === 'awaiting_solver' && task.iAmSolver && (
+                  <p className="mt-1 text-xs text-warning">{t('verify.awaitingYourResponse')}</p>
+                )}
                 <p className="mt-1 flex gap-3 text-xs">
                   {task.postTxHash && (
                     <a className="text-primary hover:underline" target="_blank" rel="noopener noreferrer" href={`${explorer}/tx/${task.postTxHash}`}>
@@ -226,14 +275,33 @@ export default function VerifyPage() {
                   )}
                 </p>
               </div>
-              {task.status === 'failed' && (
-                <button
-                  onClick={() => reclaim(task.id)}
-                  disabled={busy}
-                  className="shrink-0 rounded bg-secondary px-3 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
-                >
-                  {t('verify.reclaimEscrow')}
-                </button>
+              {task.status === 'awaiting_solver' && task.iAmSolver ? (
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={() => accept(task.id)}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    <Check className="size-3.5" /> {t('verify.accept')}
+                  </button>
+                  <button
+                    onClick={() => decline(task.id)}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1 rounded bg-secondary px-3 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
+                  >
+                    <X className="size-3.5" /> {t('verify.decline')}
+                  </button>
+                </div>
+              ) : (
+                (task.status === 'failed' || task.status === 'declined') && task.iAmRequester && (
+                  <button
+                    onClick={() => reclaim(task.id)}
+                    disabled={busy}
+                    className="shrink-0 rounded bg-secondary px-3 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
+                  >
+                    {t('verify.reclaimEscrow')}
+                  </button>
+                )
               )}
             </div>
           </div>
