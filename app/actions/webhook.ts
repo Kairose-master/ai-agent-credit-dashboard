@@ -7,6 +7,7 @@ import { agent } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { generateWebhookSecret, encryptWebhookSecret } from '@/lib/webhook'
+import { encryptSecret } from '@/lib/crypto'
 
 async function requireOwnedAgent(agentId: string) {
   const session = await getSession()
@@ -23,6 +24,9 @@ export async function getWebhookConfig(agentId: string) {
     webhookUrl: ag.webhookUrl,
     hasSecret: Boolean(ag.webhookSecretEnc),
     lastPollAt: ag.lastPollAt ? ag.lastPollAt.toISOString() : null,
+    cloudBaseUrl: ag.cloudBaseUrl,
+    cloudModel: ag.cloudModel,
+    hasCloudKey: Boolean(ag.cloudApiKeyEnc),
   }
 }
 
@@ -84,6 +88,62 @@ export async function connectLocalWorker(agentId: string) {
 
   revalidatePath('/profile')
   return { command }
+}
+
+/**
+ * "Paste an API key, no terminal" worker onboarding: switches the agent to
+ * 'cloud' mode, where WE call the owner's own OpenAI-compatible cloud
+ * endpoint server-side whenever this agent is dispatched a task (see
+ * dispatchToCloudApi in lib/agent-tasks.ts) — no process to keep running,
+ * no local machine, no CORS concern (the call never happens in a browser).
+ * The key is encrypted at rest with the same AES-256-GCM helper as every
+ * other stored secret in this app and is only ever decrypted server-side
+ * at dispatch time.
+ */
+export async function setCloudApiWorker(
+  agentId: string,
+  input: { baseUrl: string; apiKey: string; model: string },
+) {
+  await requireOwnedAgent(agentId)
+
+  const baseUrl = input.baseUrl.trim().replace(/\/+$/, '')
+  const model = input.model.trim()
+  const apiKey = input.apiKey.trim()
+  if (!/^https:\/\//.test(baseUrl)) throw new Error('Base URL must start with https://')
+  if (!model) throw new Error('Model name required')
+  if (!apiKey) throw new Error('API key required')
+
+  const secret = generateWebhookSecret() // callback auth, same mechanism as 'local'/'webhook'
+  await db
+    .update(agent)
+    .set({
+      runtimeType: 'cloud',
+      cloudBaseUrl: baseUrl,
+      cloudModel: model,
+      cloudApiKeyEnc: encryptSecret(apiKey),
+      webhookSecretEnc: encryptWebhookSecret(secret),
+      updatedAt: new Date(),
+    })
+    .where(eq(agent.id, agentId))
+
+  revalidatePath('/profile')
+  revalidatePath('/mine')
+}
+
+export async function disconnectCloudApiWorker(agentId: string) {
+  await requireOwnedAgent(agentId)
+  await db
+    .update(agent)
+    .set({
+      runtimeType: 'platform',
+      cloudBaseUrl: null,
+      cloudModel: null,
+      cloudApiKeyEnc: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(agent.id, agentId))
+  revalidatePath('/profile')
+  revalidatePath('/mine')
 }
 
 /** Generates (or rotates) this agent's callback secret. Returned ONCE in

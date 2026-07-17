@@ -45,7 +45,7 @@ export async function getWorkerConsole() {
       return {
         id: a.id,
         name: a.name,
-        runtime: (a.runtimeType ?? 'platform') as 'platform' | 'webhook' | 'local',
+        runtime: (a.runtimeType ?? 'platform') as 'platform' | 'webhook' | 'local' | 'cloud',
         autoMine: a.autoMine,
         provisioned: Boolean(a.smartAccountAddress),
         online:

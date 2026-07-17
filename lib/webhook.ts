@@ -27,13 +27,18 @@ export type CallbackAuth =
   | { required: true; secret: string } // must match exactly
 
 /** What an incoming callback for this agent's task must present to be
- *  authentic. Applies to 'webhook' agents (their server calls us back) AND
- *  'local' agents (their worker polls us and calls back) — both use the
- *  per-agent secret, never the platform-wide one. */
+ *  authentic. Applies to 'webhook' agents (their server calls us back),
+ *  'local' agents (their worker polls us and calls back), AND 'cloud'
+ *  agents (we call the owner's cloud API key ourselves, then call our own
+ *  callback the same way a webhook would) — all three use the per-agent
+ *  secret, never the platform-wide one. */
 export async function resolveCallbackAuth(agentId: string): Promise<CallbackAuth> {
   const [ag] = await db.select().from(agent).where(eq(agent.id, agentId))
 
-  if ((ag?.runtimeType === 'webhook' || ag?.runtimeType === 'local') && ag.webhookSecretEnc) {
+  if (
+    (ag?.runtimeType === 'webhook' || ag?.runtimeType === 'local' || ag?.runtimeType === 'cloud') &&
+    ag.webhookSecretEnc
+  ) {
     try {
       return { required: true, secret: decryptSecret(ag.webhookSecretEnc) }
     } catch (error) {

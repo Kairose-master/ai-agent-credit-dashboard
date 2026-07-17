@@ -25,11 +25,20 @@ import {
   RefreshCw,
   Scale,
   Bot,
+  Cloud,
 } from 'lucide-react'
 import { getAgents } from '@/app/actions/agents'
 import { drawCredit, repayCredit, getCreditDraws } from '@/app/actions/credit'
 import { getTreasury, sendFromTreasury, mintTestUsdc } from '@/app/actions/treasury'
-import { getWebhookConfig, setWebhookUrl, switchToPlatformRuntime, generateAgentWebhookSecret, connectLocalWorker } from '@/app/actions/webhook'
+import {
+  getWebhookConfig,
+  setWebhookUrl,
+  switchToPlatformRuntime,
+  generateAgentWebhookSecret,
+  connectLocalWorker,
+  setCloudApiWorker,
+  disconnectCloudApiWorker,
+} from '@/app/actions/webhook'
 import {
   getOnchainInfo,
   provisionSmartAccount,
@@ -1026,9 +1035,17 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
  * our servers — we only POST the task and wait for a callback in the same
  * format our own runtime uses. See the Guide for the exact contract.
  */
+const CLOUD_PRESETS = [
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+  { label: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
+  { label: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct' },
+  { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'meta-llama/llama-3.3-70b-instruct' },
+]
+
 function RuntimeCard({ agentId }: { agentId: string }) {
   const { t } = useI18n()
-  const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook' | 'local'>('platform')
+  const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook' | 'local' | 'cloud'>('platform')
   const [webhookUrl, setWebhookUrlState] = useState('')
   const [hasSecret, setHasSecret] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -1039,13 +1056,22 @@ function RuntimeCard({ agentId }: { agentId: string }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
+  const [cloudBaseUrl, setCloudBaseUrlState] = useState('')
+  const [cloudModel, setCloudModelState] = useState('')
+  const [showCloudForm, setShowCloudForm] = useState(false)
+  const [cloudUrlInput, setCloudUrlInput] = useState('')
+  const [cloudKeyInput, setCloudKeyInput] = useState('')
+  const [cloudModelInput, setCloudModelInput] = useState('')
+
   const load = useCallback(async () => {
     const cfg = await getWebhookConfig(agentId)
-    setRuntimeType((cfg.runtimeType as 'platform' | 'webhook' | 'local') ?? 'platform')
+    setRuntimeType((cfg.runtimeType as 'platform' | 'webhook' | 'local' | 'cloud') ?? 'platform')
     setWebhookUrlState(cfg.webhookUrl ?? '')
     setUrlInput(cfg.webhookUrl ?? '')
     setHasSecret(cfg.hasSecret)
     setLastPollAt(cfg.lastPollAt)
+    setCloudBaseUrlState(cfg.cloudBaseUrl ?? '')
+    setCloudModelState(cfg.cloudModel ?? '')
   }, [agentId])
 
   useEffect(() => {
@@ -1053,6 +1079,7 @@ function RuntimeCard({ agentId }: { agentId: string }) {
     setRevealedSecret(null)
     setLocalCommand(null)
     setEditing(false)
+    setShowCloudForm(false)
   }, [load])
 
   // Live online/offline badge for a connected local worker (it polls every
@@ -1120,6 +1147,39 @@ function RuntimeCard({ agentId }: { agentId: string }) {
     }
   }
 
+  const connectCloud = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await setCloudApiWorker(agentId, {
+        baseUrl: cloudUrlInput,
+        apiKey: cloudKeyInput,
+        model: cloudModelInput,
+      })
+      setCloudKeyInput('')
+      setShowCloudForm(false)
+      await load()
+      setMsg(t('profile.runtime.saved'))
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const disconnectCloud = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await disconnectCloudApiWorker(agentId)
+      await load()
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="border border-border rounded-lg p-6">
       <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
@@ -1131,7 +1191,13 @@ function RuntimeCard({ agentId }: { agentId: string }) {
 
       <div className="flex items-center gap-2 mb-3 text-sm">
         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${runtimeType !== 'platform' ? 'bg-primary/15 text-primary' : 'bg-secondary text-muted-foreground'}`}>
-          {runtimeType === 'webhook' ? t('profile.runtime.byoWebhook') : runtimeType === 'local' ? t('profile.runtime.localWorker') : t('profile.runtime.platform')}
+          {runtimeType === 'webhook'
+            ? t('profile.runtime.byoWebhook')
+            : runtimeType === 'local'
+              ? t('profile.runtime.localWorker')
+              : runtimeType === 'cloud'
+                ? t('profile.runtime.cloudApi')
+                : t('profile.runtime.platform')}
         </span>
         {runtimeType === 'webhook' && webhookUrl && (
           <code className="text-xs text-muted-foreground truncate max-w-xs">{webhookUrl}</code>
@@ -1141,6 +1207,9 @@ function RuntimeCard({ agentId }: { agentId: string }) {
             <span className={`size-1.5 rounded-full ${workerOnline ? 'bg-success' : 'bg-warning'}`} />
             {workerOnline ? t('profile.runtime.workerOnline') : t('profile.runtime.workerOffline')}
           </span>
+        )}
+        {runtimeType === 'cloud' && cloudBaseUrl && (
+          <code className="text-xs text-muted-foreground truncate max-w-xs">{cloudModel} · {cloudBaseUrl}</code>
         )}
       </div>
 
@@ -1162,10 +1231,26 @@ function RuntimeCard({ agentId }: { agentId: string }) {
             {t('profile.runtime.switchBack')}
           </button>
         </div>
+      ) : runtimeType === 'cloud' && !showCloudForm ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              setCloudUrlInput(cloudBaseUrl)
+              setCloudModelInput(cloudModel)
+              setShowCloudForm(true)
+            }}
+            className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
+          >
+            {t('profile.runtime.changeCloud')}
+          </button>
+          <button onClick={disconnectCloud} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
+            {t('profile.runtime.switchBack')}
+          </button>
+        </div>
       ) : (
-        (editing || runtimeType === 'platform') && (
+        (editing || runtimeType === 'platform' || showCloudForm) && (
           <div className="space-y-3">
-            {!editing && (
+            {!editing && !showCloudForm && (
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={connectLocal}
@@ -1178,28 +1263,101 @@ function RuntimeCard({ agentId }: { agentId: string }) {
                 <span className="text-xs text-muted-foreground">{t('profile.runtime.localModelsHint')}</span>
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="https://your-server.example.com/agent"
-                className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
-                disabled={busy}
-              />
-              <button
-                onClick={saveUrl}
-                disabled={busy || !urlInput.trim()}
-                className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-              >
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
-                {t('profile.runtime.useWebhook')}
-              </button>
-              {editing && (
-                <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
-                  {t('profile.runtime.cancel')}
+            {!editing && !showCloudForm && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setShowCloudForm(true)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+                >
+                  <Cloud className="size-4" />
+                  {t('profile.runtime.connectCloud')}
                 </button>
-              )}
-            </div>
+                <span className="text-xs text-muted-foreground">{t('profile.runtime.cloudApiHint')}</span>
+              </div>
+            )}
+
+            {showCloudForm ? (
+              <div className="space-y-2 rounded-md border border-border p-3">
+                <div className="flex flex-wrap gap-1.5">
+                  {CLOUD_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        setCloudUrlInput(p.baseUrl)
+                        setCloudModelInput(p.model)
+                      }}
+                      className="rounded-md border border-border px-2 py-1 text-xs hover:bg-secondary"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  value={cloudUrlInput}
+                  onChange={(e) => setCloudUrlInput(e.target.value)}
+                  placeholder="https://api.groq.com/openai/v1"
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  disabled={busy}
+                />
+                <input
+                  value={cloudModelInput}
+                  onChange={(e) => setCloudModelInput(e.target.value)}
+                  placeholder={t('profile.runtime.cloudModelPlaceholder')}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  disabled={busy}
+                />
+                <input
+                  type="password"
+                  value={cloudKeyInput}
+                  onChange={(e) => setCloudKeyInput(e.target.value)}
+                  placeholder={t('profile.runtime.cloudApiKeyPlaceholder')}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  disabled={busy}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={connectCloud}
+                    disabled={busy || !cloudUrlInput.trim() || !cloudModelInput.trim() || !cloudKeyInput.trim()}
+                    className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  >
+                    {busy ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />}
+                    {t('profile.runtime.connect')}
+                  </button>
+                  <button
+                    onClick={() => setShowCloudForm(false)}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
+                  >
+                    {t('profile.runtime.cancel')}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">{t('profile.runtime.cloudApiKeyNote')}</p>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  placeholder="https://your-server.example.com/agent"
+                  className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
+                  disabled={busy}
+                />
+                <button
+                  onClick={saveUrl}
+                  disabled={busy || !urlInput.trim()}
+                  className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+                >
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
+                  {t('profile.runtime.useWebhook')}
+                </button>
+                {editing && (
+                  <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
+                    {t('profile.runtime.cancel')}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )
       )}
