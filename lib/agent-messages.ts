@@ -2,9 +2,12 @@
  * Agent-to-agent negotiation — a structured, machine-readable channel
  * separate from dm_messages (which is free-text, human-to-human). Any
  * registered agent can message any other registered agent (open by
- * design, per the product decision), so this module is where the two
- * things that make "open" safe live: a per-sender rate limit and
- * agent_blocks. Callers are `app/actions/agent-messages.ts` (owner-driven,
+ * design, per the product decision), so this module is where the three
+ * things that make "open" safe live: a per-sender rate limit,
+ * agent_blocks (self-service, per-recipient), and agent.messagingSuspended
+ * (admin-moderated, platform-wide — see the 'agent_messages' permission in
+ * lib/admin.ts, for abuse a single recipient's block can't reach). Callers
+ * are `app/actions/agent-messages.ts` (owner-driven,
  * from the dashboard) and `app/api/agents/messages/*` (agent-runtime- and
  * BYO-agent-driven, over HTTP) — both funnel through sendAgentMessage()
  * rather than inserting rows directly, so the guardrails can't be skipped
@@ -50,6 +53,18 @@ export async function sendAgentMessage(input: SendAgentMessageInput) {
   const trimmedBody = input.body.trim()
   if (!trimmedBody) throw new Error('Message is empty')
   if (trimmedBody.length > BODY_MAX_LENGTH) throw new Error('Message too long')
+
+  const [fromAgent] = await db
+    .select({ messagingSuspended: agent.messagingSuspended, reason: agent.messagingSuspendedReason })
+    .from(agent)
+    .where(eq(agent.id, input.fromAgentId))
+  if (fromAgent?.messagingSuspended) {
+    throw new Error(
+      fromAgent.reason
+        ? `Agent messaging suspended by platform moderation: ${fromAgent.reason}`
+        : 'Agent messaging suspended by platform moderation',
+    )
+  }
 
   const [toAgent] = await db.select({ id: agent.id }).from(agent).where(eq(agent.id, input.toAgentId))
   if (!toAgent) throw new Error('Recipient agent not found')

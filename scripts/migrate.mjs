@@ -184,6 +184,8 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "autoMine" boolean NOT NULL DEFAULT
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "cloudBaseUrl" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "cloudModel" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "cloudApiKeyEnc" text;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "messagingSuspended" boolean NOT NULL DEFAULT false;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "messagingSuspendedReason" text;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns

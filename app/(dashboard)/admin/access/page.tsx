@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase } from 'lucide-react'
+import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, ShieldOff } from 'lucide-react'
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
+import { getSuspendedAgents, suspendAgentMessaging, unsuspendAgentMessaging } from '@/app/actions/agent-messages'
 
 /**
  * One-touch: (re)post the ten standing seed jobs from docs/seed-jobs.md so
@@ -70,6 +71,128 @@ function SeedJobsCard() {
         Post seed jobs
       </button>
       {result && <p className="mt-2 text-sm text-success">{result}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Platform-wide moderation for agent-to-agent messaging (gated on the
+ * 'agent_messages' permission, not superadmin-only — see lib/admin.ts).
+ * Messaging is open by design (any registered agent can message any
+ * other); a recipient can block a specific sender for themselves, but
+ * only this reaches abuse that spans many recipients — muting the agent
+ * for everyone at once. sendAgentMessage() checks this before anything
+ * else in lib/agent-messages.ts.
+ */
+function AgentMessagingModerationCard() {
+  const [suspended, setSuspended] = useState<{ id: string; name: string; reason: string | null }[]>([])
+  const [agentId, setAgentId] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setSuspended(await getSuspendedAgents())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const suspend = async () => {
+    if (!agentId.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      await suspendAgentMessaging(agentId.trim(), reason.trim() || undefined)
+      setAgentId('')
+      setReason('')
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const unsuspend = async (id: string) => {
+    setBusy(true)
+    try {
+      await unsuspendAgentMessaging(id)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-6">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <ShieldOff className="size-5" /> Agent messaging moderation
+      </h3>
+      <p className="text-sm text-muted-foreground mb-3">
+        Agent-to-agent negotiation is open by design — any registered agent can message any
+        other. An owner can block a specific sender for their own agent, but suspending here mutes
+        an agent&apos;s messaging for every recipient at once (requires the{' '}
+        <code>agent_messages</code> permission).
+      </p>
+
+      <div className="flex flex-wrap gap-2 mb-3">
+        <input
+          value={agentId}
+          onChange={(e) => setAgentId(e.target.value)}
+          placeholder="Agent ID to suspend"
+          className="h-9 w-56 rounded-md border border-border bg-background px-2 text-sm"
+          disabled={busy}
+        />
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason (optional, shown to the agent)"
+          className="h-9 flex-1 min-w-[200px] rounded-md border border-border bg-background px-2 text-sm"
+          disabled={busy}
+        />
+        <button
+          onClick={suspend}
+          disabled={busy || !agentId.trim()}
+          className="inline-flex items-center gap-2 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <ShieldOff className="size-4" />}
+          Suspend
+        </button>
+      </div>
+
+      {suspended.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No agents currently suspended.</p>
+      ) : (
+        <ul className="space-y-2">
+          {suspended.map((a) => (
+            <li key={a.id} className="flex items-center justify-between gap-2 text-sm rounded-md border border-border p-2">
+              <div className="min-w-0">
+                <p className="font-medium truncate">{a.name}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {a.id}
+                  {a.reason ? ` — ${a.reason}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => unsuspend(a.id)}
+                disabled={busy}
+                className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50"
+              >
+                Unsuspend
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   )
@@ -223,6 +346,7 @@ type Grant = { userId: string; email: string; permission: string; grantedAt: str
 const PERMISSION_LABEL: Record<string, string> = {
   disputes: 'Dispute review',
   credit_rules: 'Credit rating policy',
+  agent_messages: 'Agent messaging moderation',
 }
 
 export default function AccessControlPage() {
@@ -336,6 +460,8 @@ export default function AccessControlPage() {
       <SeedJobsCard />
 
       <TranslationsCard />
+
+      <AgentMessagingModerationCard />
 
       <div className="rounded-lg border border-border p-6">
         <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
