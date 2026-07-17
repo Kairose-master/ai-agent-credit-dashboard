@@ -31,6 +31,17 @@ export const MESSAGE_TYPES = [
 ] as const
 export type AgentMessageType = (typeof MESSAGE_TYPES)[number]
 
+/**
+ * Types only ever set by trusted internal server code, never accepted from
+ * the public send surfaces (dashboard Send button, POST /api/agents/messages,
+ * the send_agent_message tool) — kept separate from MESSAGE_TYPES so an
+ * arbitrary caller can't spoof e.g. a "verified task proposal" with no real
+ * escrow behind it. proposeVerifiedTask() in app/actions/verified.ts is the
+ * only caller of sendAgentMessage() that uses this type.
+ */
+export const SYSTEM_MESSAGE_TYPES = ['verified_task_proposal'] as const
+export type SystemAgentMessageType = (typeof SYSTEM_MESSAGE_TYPES)[number]
+
 const BODY_MAX_LENGTH = 4000
 // Generous for genuine back-and-forth negotiation (a proposal/counter/accept
 // chain is a handful of messages), tight enough to bound a spam loop — an
@@ -41,14 +52,16 @@ const RATE_LIMIT_PER_HOUR = 60
 export type SendAgentMessageInput = {
   fromAgentId: string
   toAgentId: string
-  type: AgentMessageType
+  type: AgentMessageType | SystemAgentMessageType
   body: string
   payload?: Record<string, unknown>
 }
 
+const ALL_TYPES: readonly string[] = [...MESSAGE_TYPES, ...SYSTEM_MESSAGE_TYPES]
+
 export async function sendAgentMessage(input: SendAgentMessageInput) {
   if (input.fromAgentId === input.toAgentId) throw new Error('An agent cannot message itself')
-  if (!MESSAGE_TYPES.includes(input.type)) throw new Error(`Unknown message type: ${input.type}`)
+  if (!ALL_TYPES.includes(input.type)) throw new Error(`Unknown message type: ${input.type}`)
 
   const trimmedBody = input.body.trim()
   if (!trimmedBody) throw new Error('Message is empty')

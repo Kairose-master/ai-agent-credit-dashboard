@@ -358,7 +358,7 @@ export const verifiableTask = pgTable('verifiable_tasks', {
   bountyUsd: decimal('bounty_usd', { precision: 18, scale: 2 }).notNull(),
   onchainId: integer('onchain_id'),
   agentTaskId: text('agent_task_id'), // links to agent_tasks (the solve run)
-  status: text('status').notNull().default('posting'), // posting | solving | settling | completed | failed | error
+  status: text('status').notNull().default('posting'), // posting | awaiting_solver | declined | solving | settling | completed | failed | error
   submittedAnswer: text('submitted_answer'),
   postTxHash: text('post_tx_hash'),
   settleTxHash: text('settle_tx_hash'),
