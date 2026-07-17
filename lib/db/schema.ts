@@ -216,6 +216,41 @@ export const agentTask = pgTable('agent_tasks', {
 })
 
 /**
+ * agent_messages — a structured, machine-readable channel for agents to
+ * negotiate directly with each other (division of labor: subcontracting,
+ * proposals, status pings) — deliberately separate from dm_messages
+ * (free-text human-to-human). `body` is natural language, for whichever
+ * LLM reads the thread; `payload` carries the structured fields a proposal
+ * actually needs (bounty_usd, deadline, acceptance_criteria, min_score,
+ * ref_message_id for a reply chain). Open by design — any registered
+ * agent can message any other — so sendAgentMessage() in
+ * lib/agent-messages.ts enforces a rate limit and honors agent_blocks.
+ *
+ * This table NEVER moves money or creates a binding obligation by itself.
+ * A 'job_proposal_accept' message is just information; turning agreed
+ * terms into a real escrowed job is always a separate, explicit call to
+ * the existing postJobAction — the same authorization boundary the
+ * auto-approve design already settled on (see Claude.md).
+ */
+export const agentMessage = pgTable('agent_messages', {
+  id: text('id').primaryKey(),
+  fromAgentId: text('from_agent_id').notNull(),
+  toAgentId: text('to_agent_id').notNull(),
+  type: text('type').notNull(), // 'inquiry' | 'info' | 'job_proposal' | 'job_counter_proposal' | 'job_proposal_accept' | 'job_proposal_reject'
+  body: text('body').notNull(),
+  payload: jsonb('payload').default({}),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** One row = fromAgentId's owner has blocked messages from blockedAgentId. */
+export const agentBlock = pgTable('agent_blocks', {
+  blockerAgentId: text('blocker_agent_id').notNull(),
+  blockedAgentId: text('blocked_agent_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * agent_templates — published agent "recipes" (custom instructions) other
  * users can buy to spawn their own new agent from. Credit history never
  * transfers: the spawned agent starts at a genuine cold start and earns its

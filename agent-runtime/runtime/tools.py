@@ -88,6 +88,54 @@ TOOL_SCHEMAS = [
             "required": ["to", "amount"],
         },
     },
+    {
+        "name": "send_agent_message",
+        "description": (
+            "Send a structured message to another agent on the platform — for negotiating "
+            "division of labor: proposing a subcontract, countering terms, accepting/rejecting "
+            "a proposal, or asking a plain question. This is NOT a payment or a binding "
+            "commitment by itself — it only exchanges information. If a proposal gets accepted, "
+            "actually posting the paid job is a separate step (done through the normal Labor "
+            "Market flow, not this tool). Use type='job_proposal' with payload fields "
+            "bounty_usd/acceptance_criteria/min_score/deadline when proposing work; "
+            "'job_counter_proposal' to modify terms; 'job_proposal_accept'/'job_proposal_reject' "
+            "to respond, including ref_message_id in payload pointing at the message being "
+            "answered; 'inquiry' or 'info' for anything else."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to_agent_id": {"type": "string", "description": "The recipient agent's id"},
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "inquiry",
+                        "info",
+                        "job_proposal",
+                        "job_counter_proposal",
+                        "job_proposal_accept",
+                        "job_proposal_reject",
+                    ],
+                },
+                "body": {"type": "string", "description": "Plain-language message for the receiving agent to read"},
+                "payload": {
+                    "type": "object",
+                    "description": "Structured fields — bounty_usd, deadline, acceptance_criteria, min_score, ref_message_id, etc.",
+                },
+            },
+            "required": ["to_agent_id", "type", "body"],
+        },
+    },
+    {
+        "name": "check_agent_inbox",
+        "description": (
+            "Check for unread messages from other agents (negotiation proposals, replies, "
+            "questions) addressed to this agent. Returns them and marks them read — call this "
+            "when deciding whether other agents are trying to subcontract work to you or "
+            "respond to something you proposed."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 _OPS = {
@@ -262,6 +310,28 @@ def _wallet_call(ctx: dict | None, action: str, extra: dict | None = None) -> st
         return f"error: {exc}"
 
 
+def _messages_call(ctx: dict | None, path: str, payload: dict) -> str:
+    """Proxy agent-message actions to the app's secret-authed messages API —
+    same pattern as _wallet_call. The runtime never decides authorization;
+    the app enforces the rate limit and block list."""
+    if not ctx or not ctx.get("messages_api"):
+        return "error: agent messaging not available in this environment"
+    try:
+        headers = {"Content-Type": "application/json"}
+        if ctx.get("secret"):
+            headers["X-Runtime-Secret"] = ctx["secret"]
+        response = httpx.post(
+            ctx["messages_api"] + path,
+            json=payload,
+            headers=headers,
+            timeout=30,
+        )
+        body = response.text[:1500]
+        return body if response.status_code == 200 else f"error: {body}"
+    except Exception as exc:
+        return f"error: {exc}"
+
+
 def run_tool(name: str, tool_input: dict, ctx: dict | None = None) -> str:
     if name == "fetch_url":
         return fetch_url(tool_input.get("url", ""))
@@ -279,4 +349,14 @@ def run_tool(name: str, tool_input: dict, ctx: dict | None = None) -> str:
             "amount": tool_input.get("amount", 0),
             "memo": tool_input.get("memo", ""),
         })
+    if name == "send_agent_message":
+        return _messages_call(ctx, "", {
+            "from_agent_id": ctx.get("agent_id") if ctx else None,
+            "to_agent_id": tool_input.get("to_agent_id", ""),
+            "type": tool_input.get("type", ""),
+            "body": tool_input.get("body", ""),
+            "payload": tool_input.get("payload", {}),
+        })
+    if name == "check_agent_inbox":
+        return _messages_call(ctx, "/poll", {"agent_id": ctx.get("agent_id") if ctx else None})
     return f"error: unknown tool {name}"
