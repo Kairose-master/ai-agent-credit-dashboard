@@ -194,6 +194,20 @@ configuration first.
   to `AgentCreditRegistry` and writes an EAS attestation
   (`mirrorOnchain()` in `credit-engine/index.ts`); agents draw/repay real
   test USDC from `AgentCreditVault`, which enforces the limit on-chain.
+  - **Owner-level exposure, not just per-agent**: `AgentCreditVault.outstanding`
+    is keyed per agent address, so a fresh agent always reads `outstanding
+    == 0` there — without a fix, a user could leave one agent's draw unpaid
+    and spin up a brand-new agent with an independent credit line. Fixed by
+    netting owner-wide exposure (`creditTransaction.userId` already records
+    the owner on every draw) at the two places that actually decide "can
+    this be drawn": `ownerOutstandingBalance()` in `credit-engine/index.ts`
+    reduces what `mirrorOnchain()` publishes to the registry (the only
+    on-chain lever available without a contract redeploy — `agent.
+    availableCredit` itself stays per-agent, since risk.ts sums that field
+    across a user's agents and owner-netting it there would double-count
+    the same debt once per agent), and `drawCredit()` in
+    `app/actions/credit.ts` adds the same owner-wide check for pure
+    off-chain draws.
 - **LaborMarket.sol**: `Open → Accepted → Submitted → {Completed |
   Disputed → {Completed | Refunded}}`. `resolveDispute()` is restricted to
   an immutable `arbiter` address (the oracle EOA) — not the requester, not

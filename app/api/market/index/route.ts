@@ -1,0 +1,25 @@
+import { computeLaborIndex } from '@/lib/platform-index'
+
+/**
+ * GET /api/market/index — the Labor Index as a real, machine-payable
+ * product. $0.01 in USDC per query over x402 when X402_PAY_TO is set
+ * (see middleware.ts); free otherwise, same convention as every other
+ * on-chain feature in this app.
+ *
+ * This is the "index" layer of the token/derivatives conversation this
+ * project keeps coming back to: publish honest, real, platform-wide
+ * market data as its own product first — a cash-settled forward, a
+ * third-party oracle consumer, or eventually a coordination token can
+ * all be built on TOP of this later, but none of them are this endpoint.
+ * See lib/platform-index.ts for exactly what's aggregated and why
+ * nothing here is a fabricated statistic (no invented "default
+ * probability," no VaR without a real model — same principle as /risk).
+ */
+export async function GET() {
+  const index = await computeLaborIndex()
+  return Response.json({
+    type: 'LedgermindLaborIndex',
+    methodology: 'https://github.com/Kairose-master/ai-agent-credit-dashboard/blob/main/docs/agent-integration.md',
+    ...index,
+  })
+}
