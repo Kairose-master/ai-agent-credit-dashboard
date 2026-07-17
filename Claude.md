@@ -238,7 +238,7 @@ bespoke admin check.
 
 ## BYO everything (agent code, API key)
 
-Three independent "bring your own X" mechanisms, don't conflate them:
+Four independent "bring your own X" mechanisms, don't conflate them:
 
 - **BYO webhook** (`lib/webhook.ts`, `lib/agent-tasks.ts`): an agent can
   run on its owner's own HTTP endpoint instead of the platform runtime. No
@@ -261,6 +261,30 @@ Three independent "bring your own X" mechanisms, don't conflate them:
   local worker's `quality_score` is null by design — an owner-controlled
   machine's self-grade is worthless; only independent graders (Proving
   Ground, job acceptance tests, requester approval) move its credit.
+- **BYO cloud API worker** (`runtimeType: 'cloud'`; `setCloudApiWorker()`/
+  `disconnectCloudApiWorker()` in `app/actions/webhook.ts`;
+  `dispatchToCloudApi()` in `lib/agent-tasks.ts`): the "no terminal, just
+  paste an API key" onboarding path for a casual user who has a cloud LLM
+  key (Groq/OpenAI/Together/Fireworks/OpenRouter/etc.) and no interest in
+  running a process. Unlike webhook/local, there's no external server or
+  owner-run worker to hand the task to — WE call the owner's own
+  OpenAI-compatible `/chat/completions` endpoint ourselves, server-side,
+  using their AES-256-GCM-encrypted key (`agent.cloudApiKeyEnc`, same
+  `lib/crypto.ts` helper as everything else), then POST our own
+  `/api/runtime/callback` exactly like a webhook agent's server would —
+  one code path stays authoritative for grading/crediting regardless of
+  who ran the completion. Dispatched via Next's `after()` (not awaited
+  inline) so the completion doesn't hold the dispatching request open;
+  a run that genuinely hangs past `CLOUD_CALL_TIMEOUT_MS` (4 min) still
+  gets caught by `reapStuckTasks()`'s existing 30-minute sweep, same
+  safety net a crashed local worker relies on. Server-to-server also
+  sidesteps a real constraint browser-side calls would hit: most LLM
+  providers don't set permissive CORS headers for direct browser fetches
+  (that's deliberate on their end, to stop key exposure in client code),
+  so "call the cloud API straight from a page in the user's browser" was
+  never a viable design for this — the key has to be used from a server,
+  which is exactly what this does, scoped to a per-agent encrypted secret
+  the same way the webhook secret already is.
 - **Auto-mine** (`lib/auto-mine.ts`, wired into `/api/worker/poll`;
   `agent.autoMine` flag; one-click setup via `startMining()` in
   `app/actions/mining.ts`): when a local worker polls idle, the platform
@@ -287,8 +311,8 @@ Three independent "bring your own X" mechanisms, don't conflate them:
 
 `lib/agent-tasks.ts::runAgentTask()` is the one place that decides which
 of these to use for a given run — call it rather than re-implementing the
-platform/webhook/local branch elsewhere (it's already shared between the
-ad-hoc task API route and Labor Market's "actually do the job" dispatch).
+platform/webhook/local/cloud branch elsewhere (it's already shared between
+the ad-hoc task API route and Labor Market's "actually do the job" dispatch).
 
 - **Live task progress** (`app/api/runtime/progress/route.ts`, `task_progress`
   table): the Python runtime pushes each event (`PLAN_CREATED`,

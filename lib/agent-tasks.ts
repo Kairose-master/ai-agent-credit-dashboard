@@ -9,8 +9,10 @@ import { db } from '@/lib/db'
 import { agentTask, type agent as agentTable } from '@/lib/db/schema'
 import { and, eq, inArray, lt } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
+import { after } from 'next/server'
 import { startAgentTask } from '@/lib/agent-runtime/client'
 import { resolveCallbackAuth } from '@/lib/webhook'
+import { decryptSecret } from '@/lib/crypto'
 
 type AgentRow = typeof agentTable.$inferSelect
 
@@ -98,6 +100,14 @@ export async function runAgentTask(input: {
   try {
     if (agent.runtimeType === 'webhook' && agent.webhookUrl) {
       await dispatchToWebhook(agent.id, agent.webhookUrl, taskId, effectiveTask, callbackUrl)
+    } else if (agent.runtimeType === 'cloud' && agent.cloudBaseUrl && agent.cloudApiKeyEnc) {
+      // Run after the response is sent — the actual completion can take
+      // longer than we want to hold a serverless request open, same reason
+      // 'webhook'/'platform' dispatch is fire-and-forget. Unlike those two
+      // there's no external server to do the work on, so we do it
+      // ourselves and call our own callback endpoint exactly like a
+      // webhook agent's server would.
+      after(() => dispatchToCloudApi(agent, taskId, effectiveTask, callbackUrl))
     } else {
       const { resolveUserAnthropicKey } = await import('@/lib/user-keys')
       const apiKey = await resolveUserAnthropicKey(agent.userId)
@@ -136,5 +146,121 @@ async function dispatchToWebhook(
   })
   if (!response.ok) {
     throw new Error(`Webhook responded ${response.status}: ${(await response.text()).slice(0, 300)}`)
+  }
+}
+
+const CLOUD_SYSTEM_PROMPT =
+  'You are an autonomous worker agent on the Ledgermind labor market. ' +
+  'Complete the task exactly as specified. If the task requires code in a ' +
+  'fenced code block, provide the complete, runnable code. Be factual and concise.'
+
+// Vercel functions extended via after() are still bounded by the same
+// duration budget as the request — this is a single-shot chat completion
+// (no tool use, same shape as the local worker's cloud path), so 4 minutes
+// is generous for any realistic provider while staying inside typical
+// Fluid-compute limits. A run that genuinely exceeds this is caught the
+// same way a crashed local worker is: reapStuckTasks()'s 30-minute sweep.
+const CLOUD_CALL_TIMEOUT_MS = 4 * 60 * 1000
+
+function cloudEvent(
+  agentId: string,
+  taskId: string,
+  type: string,
+  success: boolean,
+  executionTime: number,
+  detail: Record<string, unknown> = {},
+) {
+  return {
+    agent_id: agentId,
+    task_id: taskId,
+    event_type: type,
+    success,
+    execution_time: executionTime,
+    token_cost: 0,
+    quality_score: null,
+    detail,
+  }
+}
+
+/**
+ * Runs the task against the owner's own OpenAI-compatible cloud endpoint
+ * (Groq, Together, Fireworks, OpenRouter, actual OpenAI, ...) using their
+ * stored, encrypted API key — server-side, so there's no CORS concern and
+ * no local process for the owner to keep running. Single-shot completion,
+ * same trust model as the local worker script's --openai path: our own
+ * independent graders decide what the output is worth, never this call's
+ * self-reported success.
+ */
+async function dispatchToCloudApi(
+  agentRow: AgentRow,
+  taskId: string,
+  task: string,
+  callbackUrl: string,
+) {
+  const startedAt = Date.now()
+  let output = ''
+  let success = true
+  let error: string | undefined
+
+  try {
+    const apiKey = decryptSecret(agentRow.cloudApiKeyEnc as string)
+    const res = await fetch(`${(agentRow.cloudBaseUrl as string).replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: agentRow.cloudModel || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: CLOUD_SYSTEM_PROMPT },
+          { role: 'user', content: task },
+        ],
+      }),
+      signal: AbortSignal.timeout(CLOUD_CALL_TIMEOUT_MS),
+    })
+    if (!res.ok) {
+      throw new Error(`Cloud endpoint responded ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    }
+    const data = await res.json()
+    output = (data?.choices?.[0]?.message?.content ?? '').trim()
+    if (!output) {
+      success = false
+      error = 'Cloud model returned empty output'
+    }
+  } catch (e) {
+    success = false
+    error = e instanceof Error ? e.message : String(e)
+  }
+
+  const executionTime = Math.round((Date.now() - startedAt) / 1000)
+  const events = [
+    cloudEvent(agentRow.id, taskId, 'TASK_STARTED', true, 0, { task: task.slice(0, 200) }),
+    cloudEvent(agentRow.id, taskId, success ? 'TASK_COMPLETED' : 'TASK_FAILED', success, executionTime, {
+      runtime: 'cloud-api',
+      model: agentRow.cloudModel,
+      ...(error ? { error: error.slice(0, 300) } : {}),
+    }),
+  ]
+
+  try {
+    const auth = await resolveCallbackAuth(agentRow.id)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (auth.required) headers['X-Runtime-Secret'] = auth.secret
+
+    await fetch(callbackUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        task_id: taskId,
+        agent_id: agentRow.id,
+        success,
+        output: success ? output : `Cloud worker error: ${error}`,
+        plan: '',
+        quality_score: null,
+        execution_time: executionTime,
+        token_cost: 0,
+        events,
+      }),
+    })
+  } catch (callbackError) {
+    console.error('[agent-tasks] cloud dispatch callback failed:', callbackError)
   }
 }

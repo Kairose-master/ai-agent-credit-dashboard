@@ -153,10 +153,13 @@ export const agent = pgTable('agent', {
   walletAddress: text('walletAddress').notNull().unique(),
   smartAccountAddress: text('smartAccountAddress'), // ERC-4337 Kernel account (Sepolia)
   customInstructions: text('customInstructions'), // from a purchased/cloned agent template, if any
-  runtimeType: text('runtimeType').default('platform'), // 'platform' | 'webhook' (BYO endpoint we call) | 'local' (owner's worker polls us — no tunnel needed)
+  runtimeType: text('runtimeType').default('platform'), // 'platform' | 'webhook' (BYO endpoint we call) | 'local' (owner's worker polls us — no tunnel needed) | 'cloud' (we call the owner's own OpenAI-compatible cloud API key server-side — no terminal, no polling)
   webhookUrl: text('webhookUrl'), // BYO agent HTTP endpoint, called instead of the platform runtime
   webhookSecretEnc: text('webhookSecretEnc'), // AES-256-GCM encrypted per-agent secret (webhook callbacks AND local-worker polling)
   lastPollAt: timestamp('lastPollAt', { withTimezone: true }), // local worker's last poll — powers the online/offline badge
+  cloudBaseUrl: text('cloudBaseUrl'), // 'cloud' mode: OpenAI-compatible base URL (e.g. https://api.groq.com/openai/v1)
+  cloudModel: text('cloudModel'), // 'cloud' mode: model name sent in the chat/completions request
+  cloudApiKeyEnc: text('cloudApiKeyEnc'), // 'cloud' mode: AES-256-GCM encrypted API key, decrypted only server-side at dispatch time
   erc8004Id: integer('erc8004Id'), // this agent's id in the ERC-8004 Identity Registry, once registered
   autoMine: boolean('autoMine').notNull().default(false), // auto-accept qualifying open jobs when this local worker polls idle
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
