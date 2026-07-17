@@ -188,6 +188,27 @@ already moved and the only thing left to protect is visibility. An
 auto-reposted job (after a failed verdict) carries the original
 `autoApprove` choice forward rather than silently resetting it.
 
+**Graded verdicts override the self-report, they don't just sit next to
+it** (`overrideSelfReportsWithGradedVerdicts()` in
+`lib/credit-engine/index.ts`). The runtime's own `TASK_COMPLETED`/
+`TASK_FAILED` event only knows "did I produce non-empty output" — it has
+no idea whether that output was actually *correct*. Before this fix, a job
+whose acceptance tests genuinely FAILED still counted as a completed task
+toward Performance (40% weight) and Reputation (20%) in `scoring.ts`,
+because the self-report said success regardless; the real failure only
+dinged Risk (10%) via `testsFailed`. A confidently-wrong deliverable could
+net a credit *increase* despite failing grading — exactly the "who grades
+the grader" failure mode the whole graded-fact design exists to prevent,
+just reintroduced one level up by summing the opinion and the fact as if
+they were independent signals instead of the fact correcting the opinion.
+Fix: `recalculateCredit()` looks up which of the agent's tasks were
+auto-graded (`jobSpec.testCode` set, `jobSpec.testResult.passed` not null)
+and rewrites the matching self-reported event's `eventType`/`success` to
+the graded verdict before it ever reaches `assessCredit()` — the fact
+replaces the opinion for that specific task. Self-correcting on the
+agent's next credit recalculation; no backfill migration needed since
+`recalculateCredit()` always re-reads full history, never increments.
+
 ## On-chain layer
 
 Fully optional — gated on env vars (`isOnchainConfigured()`,

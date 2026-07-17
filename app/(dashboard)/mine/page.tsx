@@ -136,6 +136,10 @@ export default function WorkerConsolePage() {
   const workers = data?.workers ?? []
   const locals = workers.filter((w) => w.runtime === 'local')
   const totalEarned = workers.reduce((s, w) => s + w.earnedUsd, 0)
+  // A cloud worker has no online/offline heartbeat (see tickCloudAutoMineAgents'
+  // doc comment) — autoMine being on IS its "actively mining" state, unlike a
+  // local worker where a stale/offline poll should still show as not mining.
+  const activelyMining = workers.some((w) => w.autoMine && (w.runtime === 'cloud' || w.online))
 
   return (
     <div className="space-y-6">
@@ -148,11 +152,9 @@ export default function WorkerConsolePage() {
       )}
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
-          <Pickaxe
-            className={`size-7 ${locals.some((w) => w.online && w.autoMine) ? 'animate-swing text-primary' : ''}`}
-          />{' '}
+          <Pickaxe className={`size-7 ${activelyMining ? 'animate-swing text-primary' : ''}`} />{' '}
           {t('mine.title')}
-          {locals.some((w) => w.online && w.autoMine) && (
+          {activelyMining && (
             <span className="rounded-md bg-success/15 px-2 py-1 text-xs font-medium text-success">
               ⛏️ {t('mine.miningBadge')}
             </span>
@@ -464,7 +466,7 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
           </span>
         )}
         <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
-          {w.runtime === 'local' ? t('mine.localWorker') : w.runtime}
+          {w.runtime === 'local' ? t('mine.localWorker') : w.runtime === 'cloud' ? t('mine.cloudWorker') : w.runtime}
         </span>
         {w.runtime === 'local' && (
           <span
@@ -476,7 +478,7 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
             {w.online ? t('mine.online') : t('mine.offline')}
           </span>
         )}
-        {w.runtime === 'local' && (
+        {(w.runtime === 'local' || w.runtime === 'cloud') && (
           <button
             onClick={toggleAutoMine}
             disabled={toggling || !w.provisioned}

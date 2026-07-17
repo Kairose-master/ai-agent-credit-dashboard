@@ -7,11 +7,54 @@
  * the agent's live credit state.
  */
 import { db } from '@/lib/db'
-import { agent, agentEvent, creditScoreEntry, creditTransaction } from '@/lib/db/schema'
-import { and, desc, eq } from 'drizzle-orm'
+import { agent, agentEvent, creditScoreEntry, creditTransaction, jobSpec } from '@/lib/db/schema'
+import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { assessCredit, buildCalculationReason, type CreditAssessment } from './scoring'
 import { getEffectiveCreditRules } from '@/lib/credit-rules'
+
+/**
+ * A task's self-reported TASK_COMPLETED/TASK_FAILED event only knows "did
+ * the runtime produce non-empty output" — it has no idea whether that
+ * output was actually CORRECT. For an auto-graded Labor Market job, the
+ * platform's own acceptance-test run (JOB_TESTS_PASSED/FAILED) is the real
+ * verdict on the SAME task, and it's a fact, not an opinion (see Claude.md
+ * — "the two grades of credit signal"). Without this correction, a job
+ * whose acceptance tests genuinely FAILED still counted as a "completed"
+ * task toward Performance (40% weight) and Reputation (20%) — the runtime
+ * produced *some* text, so the self-report said success — while the real
+ * failure only dinged Risk (10%) via testsFailed. A confidently-wrong
+ * deliverable could net a credit INCREASE despite failing grading, which
+ * defeats the entire point of grading being authoritative.
+ *
+ * Fix: look up which of this agent's tasks were auto-graded, and overwrite
+ * the self-reported event's outcome with the graded verdict before scoring
+ * — the fact replaces the opinion for that specific task, rather than the
+ * two being summed as if independent.
+ */
+async function overrideSelfReportsWithGradedVerdicts<
+  T extends { eventType: string; success: boolean; taskId: string },
+>(agentId: string, events: T[]): Promise<T[]> {
+  const gradedSpecs = await db
+    .select({ agentTaskId: jobSpec.agentTaskId, testResult: jobSpec.testResult })
+    .from(jobSpec)
+    .where(and(eq(jobSpec.workerAgentId, agentId), isNotNull(jobSpec.testCode)))
+
+  const verdictByTaskId = new Map<string, boolean>()
+  for (const s of gradedSpecs) {
+    const passed = s.testResult?.passed
+    if (s.agentTaskId && (passed === true || passed === false)) {
+      verdictByTaskId.set(s.agentTaskId, passed)
+    }
+  }
+  if (verdictByTaskId.size === 0) return events
+
+  return events.map((e) => {
+    const passed = verdictByTaskId.get(e.taskId)
+    if (passed === undefined || (e.eventType !== 'TASK_COMPLETED' && e.eventType !== 'TASK_FAILED')) return e
+    return { ...e, eventType: passed ? 'TASK_COMPLETED' : 'TASK_FAILED', success: passed }
+  })
+}
 
 /** Sum of credit drawn but not yet repaid — reduces available credit. */
 async function outstandingBalance(agentId: string): Promise<number> {
@@ -50,10 +93,11 @@ export type CreditState = CreditAssessment & {
 }
 
 export async function recalculateCredit(agentId: string): Promise<CreditState> {
-  const events = await db
+  const rawEvents = await db
     .select()
     .from(agentEvent)
     .where(eq(agentEvent.agentId, agentId))
+  const events = await overrideSelfReportsWithGradedVerdicts(agentId, rawEvents)
 
   const rules = await getEffectiveCreditRules()
   const assessment = assessCredit(
