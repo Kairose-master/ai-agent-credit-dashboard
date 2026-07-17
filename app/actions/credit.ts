@@ -3,7 +3,7 @@
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent, agentEvent, creditTransaction } from '@/lib/db/schema'
-import { recalculateCredit } from '@/lib/credit-engine'
+import { recalculateCredit, ownerOutstandingBalance } from '@/lib/credit-engine'
 import { and, desc, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
@@ -35,6 +35,12 @@ export async function getCreditDraws(agentId: string) {
 /**
  * Draw against the agent's available credit line. Bounded by availableCredit,
  * which the scoring engine derives from the credit limit minus outstanding draws.
+ *
+ * Also bounded by the owner's total exposure across every agent they own —
+ * without this, leaving one agent's draw unpaid and creating a fresh agent
+ * would net a second, independent credit line with zero regard for the
+ * first agent's unpaid balance (agent.availableCredit is per-agent by
+ * design, see lib/credit-engine's comment, so it alone can't catch this).
  */
 export async function drawCredit(agentId: string, amount: number, description?: string) {
   const { agent: ag, userId } = await requireOwnedAgent(agentId)
@@ -43,6 +49,14 @@ export async function drawCredit(agentId: string, amount: number, description?: 
   const available = parseFloat(ag.availableCredit ?? '0')
   if (amount > available) {
     throw new Error(`Amount exceeds available credit ($${Math.round(available).toLocaleString()})`)
+  }
+
+  const ownerOutstanding = await ownerOutstandingBalance(userId)
+  const ownerNettedAvailable = Math.max(0, parseFloat(ag.totalCreditLine ?? '0') - ownerOutstanding)
+  if (amount > ownerNettedAvailable) {
+    throw new Error(
+      `Amount exceeds available credit ($${Math.round(ownerNettedAvailable).toLocaleString()}) — you have unpaid balances on other agents`,
+    )
   }
 
   await db.insert(creditTransaction).values({

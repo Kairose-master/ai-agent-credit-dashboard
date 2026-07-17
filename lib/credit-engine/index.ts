@@ -24,6 +24,26 @@ async function outstandingBalance(agentId: string): Promise<number> {
     .reduce((sum, t) => sum + parseFloat(t.amount), 0)
 }
 
+/**
+ * Same sum, but across every agent the same user owns — not just one.
+ *
+ * Without this, a user could leave Agent A's draw unpaid, create a brand
+ * new Agent B (fresh address, outstanding[B] == 0 both off-chain and in
+ * the on-chain vault), and B would get its own independent credit line
+ * with zero regard for A's unpaid balance. creditTransaction.userId
+ * already records the owner on every draw, so this is a straight sum —
+ * the owner is the real unit of credit exposure, not the agent address.
+ */
+export async function ownerOutstandingBalance(userId: string): Promise<number> {
+  const active = await db
+    .select()
+    .from(creditTransaction)
+    .where(and(eq(creditTransaction.userId, userId), eq(creditTransaction.status, 'active')))
+  return active
+    .filter((t) => t.type === 'credit_draw')
+    .reduce((sum, t) => sum + parseFloat(t.amount), 0)
+}
+
 export type CreditState = CreditAssessment & {
   previousScore: number | null
   calculationReason: string
@@ -72,9 +92,19 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     breakdown: assessment.breakdown,
   })
 
-  // Available credit is the new limit minus whatever is still drawn.
-  const outstanding = await outstandingBalance(agentId)
-  const available = Math.max(0, assessment.creditLimit - outstanding)
+  // agent.availableCredit stays this agent's OWN headroom (limit minus its
+  // own outstanding) — risk.ts and other consumers sum this per-agent
+  // field across a user's agents, and netting it against owner-wide
+  // exposure here would make the same unpaid debt get counted once per
+  // agent that owner holds. The owner-wide guard lives at the draw call
+  // sites (app/actions/credit.ts, onchain publish below) instead, where
+  // "how much can be drawn right now" is actually decided.
+  const thisAgentOutstanding = await outstandingBalance(agentId)
+  const ownerOutstanding = agentRow?.userId
+    ? await ownerOutstandingBalance(agentRow.userId)
+    : thisAgentOutstanding
+  const otherAgentsOutstanding = Math.max(0, ownerOutstanding - thisAgentOutstanding)
+  const available = Math.max(0, assessment.creditLimit - thisAgentOutstanding)
 
   await db
     .update(agent)
@@ -91,7 +121,13 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
 
   // Best-effort on-chain mirror: publish the limit to the registry and attest
   // the score via EAS. Never blocks or fails the off-chain recalculation.
-  await mirrorOnchain(scoreEntryId, agentId, agentRow?.smartAccountAddress ?? null, assessment)
+  await mirrorOnchain(
+    scoreEntryId,
+    agentId,
+    agentRow?.smartAccountAddress ?? null,
+    assessment,
+    otherAgentsOutstanding,
+  )
 
   return { ...assessment, previousScore, calculationReason }
 }
@@ -101,6 +137,7 @@ async function mirrorOnchain(
   agentId: string,
   smartAccountAddress: string | null,
   assessment: CreditAssessment,
+  otherAgentsOutstanding: number,
 ): Promise<void> {
   if (!smartAccountAddress) return
   try {
@@ -108,9 +145,18 @@ async function mirrorOnchain(
     if (!isOnchainConfigured()) return
     const { publishLimit, attestCredit } = await import('@/lib/onchain/credit')
 
+    // The vault computes available = registry.creditLimit(agent) −
+    // vault.outstanding(agent), and vault.outstanding is keyed per agent
+    // address — a fresh agent always reads 0 there. Publishing the limit
+    // net of what this owner already owes on OTHER agents is the only
+    // on-chain lever that closes that gap without a contract redeploy;
+    // this agent's own on-chain outstanding still gets subtracted by the
+    // vault as usual, so an agent carrying its own debt isn't double-
+    // penalized.
+    const publishedLimit = Math.max(0, assessment.creditLimit - otherAgentsOutstanding)
     const registryTxHash = await publishLimit(
       smartAccountAddress as `0x${string}`,
-      assessment.creditLimit,
+      publishedLimit,
       assessment.score,
     )
 

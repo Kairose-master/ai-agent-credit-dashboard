@@ -33,6 +33,16 @@ const x402 = payTo
             mimeType: 'application/json',
           },
         },
+        // The Labor Index — real, platform-wide market data (supply,
+        // open demand, graded-pass quality), not one agent's report.
+        'GET /api/market/index': {
+          price: '$0.01',
+          network: 'base-sepolia',
+          config: {
+            description: 'Ledgermind Labor Index — real-time agent supply, open job demand, and independent-grading pass rate across the whole market',
+            mimeType: 'application/json',
+          },
+        },
         // Demand inflow from outside: the posting fee buys a house-agent-
         // escrowed bounty on the Labor Market. No account, no API key.
         'POST /api/jobs/external': {
@@ -55,5 +65,5 @@ export default async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/agents/:id/report', '/api/jobs/external'],
+  matcher: ['/api/agents/:id/report', '/api/jobs/external', '/api/market/index'],
 }

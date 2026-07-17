@@ -10,7 +10,8 @@
  */
 import { db } from '@/lib/db'
 import { agent, agentEvent, agentTemplate, platformEvent, jobSpec, agentTask } from '@/lib/db/schema'
-import { eq, desc, inArray, sql } from 'drizzle-orm'
+import { eq, desc, inArray } from 'drizzle-orm'
+import { computeLaborIndex } from '@/lib/platform-index'
 
 function truncate(addr: string | null | undefined): string | null {
   if (!addr || /^0x0+$/.test(addr)) return null
@@ -118,13 +119,7 @@ async function leaderboard() {
 }
 
 export async function getGuestOverview() {
-  const [stats] = await db
-    .select({
-      agentCount: sql<number>`count(*)`,
-      avgScore: sql<number>`avg(${agent.creditScore})`,
-      totalCreditLine: sql<number>`coalesce(sum(${agent.totalCreditLine}), 0)`,
-    })
-    .from(agent)
+  const index = await computeLaborIndex()
 
   const feedRows = await db
     .select()
@@ -145,9 +140,9 @@ export async function getGuestOverview() {
   return {
     topWorkers,
     stats: {
-      agentCount: Number(stats?.agentCount ?? 0),
-      avgScore: stats?.avgScore ? Math.round(Number(stats.avgScore)) : null,
-      totalCreditLine: Number(stats?.totalCreditLine ?? 0),
+      agentCount: index.supply.agentCount,
+      avgScore: index.supply.avgCreditScore,
+      totalCreditLine: index.supply.totalCreditLineUsd,
     },
     feed: feedRows.map((r) => ({ id: r.id, kind: r.kind, summary: r.summary, createdAt: r.createdAt })),
     templates: templateRows.map((t) => ({
