@@ -13,6 +13,7 @@ import { db } from '@/lib/db'
 import { agent, agentBlock, agentMessage } from '@/lib/db/schema'
 import { and, eq, inArray } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+import { requirePermission } from '@/lib/admin'
 import {
   MESSAGE_TYPES,
   listAgentMessages,
@@ -127,4 +128,36 @@ export async function getBlockedAgents(agentId: string) {
   if (ids.length === 0) return []
   const agents = await db.select().from(agent).where(inArray(agent.id, ids))
   return agents.map((a) => ({ id: a.id, name: a.name }))
+}
+
+/**
+ * Platform-wide moderation — distinct from blockAgent/unblockAgent above,
+ * which is each recipient's own opt-out for themselves only. This is an
+ * admin (holding the 'agent_messages' permission, see lib/admin.ts) muting
+ * an abusive agent for every recipient at once; sendAgentMessage() checks
+ * agent.messagingSuspended before anything else.
+ */
+export async function suspendAgentMessaging(agentId: string, reason?: string) {
+  await requirePermission('agent_messages')
+  await db
+    .update(agent)
+    .set({ messagingSuspended: true, messagingSuspendedReason: reason?.trim() || null, updatedAt: new Date() })
+    .where(eq(agent.id, agentId))
+  revalidatePath('/admin/access')
+}
+
+export async function unsuspendAgentMessaging(agentId: string) {
+  await requirePermission('agent_messages')
+  await db
+    .update(agent)
+    .set({ messagingSuspended: false, messagingSuspendedReason: null, updatedAt: new Date() })
+    .where(eq(agent.id, agentId))
+  revalidatePath('/admin/access')
+}
+
+/** All currently-suspended agents, for the moderation panel. */
+export async function getSuspendedAgents() {
+  await requirePermission('agent_messages')
+  const rows = await db.select().from(agent).where(eq(agent.messagingSuspended, true))
+  return rows.map((a) => ({ id: a.id, name: a.name, reason: a.messagingSuspendedReason }))
 }

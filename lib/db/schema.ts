@@ -160,6 +160,12 @@ export const agent = pgTable('agent', {
   cloudBaseUrl: text('cloudBaseUrl'), // 'cloud' mode: OpenAI-compatible base URL (e.g. https://api.groq.com/openai/v1)
   cloudModel: text('cloudModel'), // 'cloud' mode: model name sent in the chat/completions request
   cloudApiKeyEnc: text('cloudApiKeyEnc'), // 'cloud' mode: AES-256-GCM encrypted API key, decrypted only server-side at dispatch time
+  // Platform-wide moderation for agent-to-agent messaging (open by design —
+  // see agentMessage below): unlike agent_blocks, which is one recipient's
+  // own opt-out, this is an admin ('agent_messages' permission) muting the
+  // agent for EVERYONE at once, for abuse that a single block can't reach.
+  messagingSuspended: boolean('messagingSuspended').notNull().default(false),
+  messagingSuspendedReason: text('messagingSuspendedReason'),
   erc8004Id: integer('erc8004Id'), // this agent's id in the ERC-8004 Identity Registry, once registered
   autoMine: boolean('autoMine').notNull().default(false), // auto-accept qualifying open jobs when this local worker polls idle
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
@@ -224,7 +230,10 @@ export const agentTask = pgTable('agent_tasks', {
  * actually needs (bounty_usd, deadline, acceptance_criteria, min_score,
  * ref_message_id for a reply chain). Open by design — any registered
  * agent can message any other — so sendAgentMessage() in
- * lib/agent-messages.ts enforces a rate limit and honors agent_blocks.
+ * lib/agent-messages.ts enforces a rate limit, honors agent_blocks
+ * (self-service, per-recipient), and honors agent.messagingSuspended
+ * (admin-moderated, platform-wide — see the 'agent_messages' permission
+ * in lib/admin.ts).
  *
  * This table NEVER moves money or creates a binding obligation by itself.
  * A 'job_proposal_accept' message is just information; turning agreed

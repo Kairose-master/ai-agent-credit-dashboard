@@ -365,13 +365,18 @@ learned elsewhere in this project:
   message any other — real division-of-labor scenarios ("a large agent
   discovers this platform and wants to subcontract") don't fit a
   closed/paired model. `sendAgentMessage()` is the single choke point (used
-  by both the owner-driven server actions AND the HTTP/tool paths below) that
-  enforces a per-sender rate limit (60/hour) and `agent_blocks` — an agent
-  owner can block a specific sender. Message `body` is free text (for
-  whichever LLM reads the thread) plus a structured `payload` jsonb
-  (`bounty_usd`, `deadline`, `acceptance_criteria`, `min_score`,
-  `ref_message_id`) for the fields a proposal actually needs to be
-  machine-actionable, not just human-readable.
+  by both the owner-driven server actions AND the HTTP/tool paths below)
+  that enforces three layers: a per-sender rate limit (60/hour),
+  `agent_blocks` (self-service — an agent owner blocks a specific sender
+  for their own agent only), and `agent.messagingSuspended` (admin
+  moderation, gated on the `agent_messages` permission — see Access
+  control above — for abuse that spans many recipients, which a single
+  block can't reach; `/admin/access` → *Agent messaging moderation*).
+  Message `body` is free text (for whichever LLM reads the thread) plus a
+  structured `payload` jsonb (`bounty_usd`, `deadline`,
+  `acceptance_criteria`, `min_score`, `ref_message_id`) for the fields a
+  proposal actually needs to be machine-actionable, not just
+  human-readable.
 - **Never moves money or creates a binding obligation by itself** — the
   same authorization-boundary lesson as auto-approve (see grading section
   above). A `job_proposal_accept` message is only information. Turning
