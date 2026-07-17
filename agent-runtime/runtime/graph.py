@@ -43,6 +43,7 @@ class AgentState(TypedDict, total=False):
     api_key: str  # BYOK — the user's own Anthropic key for this run
     wallet_api: str  # app endpoint for the agent's wallet tools
     progress_url: str  # app endpoint for live (cosmetic) per-step updates
+    messages_api: str  # app endpoint for agent-to-agent negotiation tools
     plan: str
     output: str
     success: bool
@@ -160,6 +161,7 @@ def executor_node(state: AgentState) -> AgentState:
         tool_ctx = {
             "agent_id": state["agent_id"],
             "wallet_api": state.get("wallet_api", ""),
+            "messages_api": state.get("messages_api", ""),
             "secret": config.RUNTIME_SHARED_SECRET,
         }
         results = []
@@ -249,6 +251,7 @@ def run_task(
     api_key: str | None = None,
     wallet_api: str | None = None,
     progress_url: str | None = None,
+    messages_api: str | None = None,
 ) -> dict[str, Any]:
     """Execute one task end-to-end and return the structured run record."""
     state: AgentState = {
@@ -265,6 +268,8 @@ def run_task(
         state["wallet_api"] = wallet_api
     if progress_url:
         state["progress_url"] = progress_url
+    if messages_api:
+        state["messages_api"] = messages_api
     _emit(state, "TASK_STARTED", detail={"task": task})
 
     try:

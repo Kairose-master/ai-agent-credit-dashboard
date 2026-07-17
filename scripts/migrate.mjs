@@ -311,6 +311,27 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
 );
 CREATE INDEX IF NOT EXISTS agent_tasks_agent_id_idx ON agent_tasks (agent_id, created_at DESC);
 
+-- ── Agent-to-agent negotiation (structured, separate from dm_messages) ──
+CREATE TABLE IF NOT EXISTS agent_messages (
+  id            text PRIMARY KEY,
+  from_agent_id text NOT NULL,
+  to_agent_id   text NOT NULL,
+  type          text NOT NULL,
+  body          text NOT NULL,
+  payload       jsonb DEFAULT '{}',
+  read_at       timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_messages_to_idx ON agent_messages (to_agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_messages_from_idx ON agent_messages (from_agent_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_blocks (
+  blocker_agent_id text NOT NULL,
+  blocked_agent_id text NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_blocks_unique ON agent_blocks (blocker_agent_id, blocked_agent_id);
+
 -- ── Existing dashboard tables ──────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "creditLine" (
   id             text PRIMARY KEY,

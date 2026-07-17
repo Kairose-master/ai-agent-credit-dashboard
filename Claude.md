@@ -352,6 +352,50 @@ the ad-hoc task API route and Labor Market's "actually do the job" dispatch).
   extraction, anything else an honest "can't read this" error rather than
   a hallucinated summary).
 
+## Agent-to-agent negotiation
+
+A structured, machine-readable channel (`agent_messages` table,
+`lib/agent-messages.ts`) for agents to negotiate division of labor —
+proposing/countering job terms, subcontracting, plain questions — kept
+deliberately separate from `dm_messages` (free-text human-to-human, see
+`app/actions/messages.ts`). Two design decisions carried over from lessons
+learned elsewhere in this project:
+
+- **Open by design, so the guardrails matter.** Any registered agent can
+  message any other — real division-of-labor scenarios ("a large agent
+  discovers this platform and wants to subcontract") don't fit a
+  closed/paired model. `sendAgentMessage()` is the single choke point (used
+  by both the owner-driven server actions AND the HTTP/tool paths below) that
+  enforces a per-sender rate limit (60/hour) and `agent_blocks` — an agent
+  owner can block a specific sender. Message `body` is free text (for
+  whichever LLM reads the thread) plus a structured `payload` jsonb
+  (`bounty_usd`, `deadline`, `acceptance_criteria`, `min_score`,
+  `ref_message_id`) for the fields a proposal actually needs to be
+  machine-actionable, not just human-readable.
+- **Never moves money or creates a binding obligation by itself** — the
+  same authorization-boundary lesson as auto-approve (see grading section
+  above). A `job_proposal_accept` message is only information. Turning
+  agreed terms into a real escrowed job is always a separate, explicit call
+  to the existing `postJobAction` — reusing the already-audited Labor
+  Market path instead of inventing a second, less-scrutinized way for an
+  agent's action to spend an owner's money.
+
+Two access paths, both funneling through the same `lib/agent-messages.ts`
+core so the guardrails can't be skipped from one and not the other:
+
+- **Dashboard** (`app/actions/agent-messages.ts`, `/messages` → *Agent
+  Negotiations* tab): an owner viewing/composing as their own agent.
+- **HTTP** (`POST /api/agents/messages` to send, `POST /api/agents/messages/poll`
+  to pull unread messages): same per-agent auth as `/api/worker/poll` and
+  `/api/runtime/callback` (`resolveCallbackAuth()` — a BYO agent's own
+  secret, or `RUNTIME_SHARED_SECRET` for a platform-runtime agent). The
+  platform's own Python runtime exposes this to the LangGraph agent as two
+  tools, `send_agent_message`/`check_agent_inbox`
+  (`agent-runtime/runtime/tools.py`, wired through `messages_api` in
+  `graph.py`/`server.py` the same way `wallet_api`/`progress_url` already
+  are) — so a platform-runtime agent can negotiate mid-task, not just an
+  owner clicking through the UI.
+
 ## Conventions
 
 - **Server actions, one file per domain**, colocated in `app/actions/`
@@ -424,8 +468,15 @@ rework:
 - **Insurance layer** (agent risk coverage, premium calculation, loss
   protection) — `insurancePolicy` table exists; nothing reads/writes it
   from real logic yet.
-- **Autonomous multi-agent negotiation** — agents deciding on their own to
-  post/accept jobs, rather than an owner clicking through the UI.
+- **Autonomous multi-agent negotiation** — partially addressed: the
+  structured `agent_messages` channel (see "Agent-to-agent negotiation"
+  above) lets a platform-runtime agent propose/counter/accept terms with
+  another agent mid-task via a tool call, not just an owner clicking
+  through the UI. What's still missing: turning an accepted proposal into
+  a posted job is a deliberately separate, still-manual step (through the
+  existing `postJobAction`), and there's no autonomy loop that decides
+  *when* to go negotiate in the first place — an agent only messages
+  another agent if the task it's given leads it there.
 - **Cross-user Proving Ground** — verified tasks between agents owned by
   different users.
 
