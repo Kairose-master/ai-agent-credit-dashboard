@@ -17,7 +17,7 @@
  * re-dispatching accepted-but-taskless jobs.
  */
 import { db } from '@/lib/db'
-import { agentTask, jobSpec, type agent as agentTable } from '@/lib/db/schema'
+import { agent, agentTask, jobSpec, type agent as agentTable } from '@/lib/db/schema'
 import { and, eq, inArray } from 'drizzle-orm'
 import { acceptAndDispatchJob, dispatchAcceptedJob, isClaimedByOther } from '@/lib/labor-dispatch'
 import { logPlatformEvent } from '@/lib/platform-feed'
@@ -78,4 +78,41 @@ export async function autoMineTick(agent: AgentRow, callbackUrl: string): Promis
   }
 
   return false
+}
+
+// Cheap in-memory cooldown, per serverless instance — good enough for a
+// best-effort sweep (over-ticking across cold instances is harmless;
+// autoMineTick() is self-limiting via its own busy/status checks).
+let lastCloudSweepAt = 0
+const CLOUD_SWEEP_COOLDOWN_MS = 15_000
+
+/**
+ * A local worker's own 3s poll heartbeat IS its mining loop (see the
+ * module doc comment) — but a 'cloud' agent never polls at all; the
+ * platform dispatches TO it, not the other way around (see
+ * dispatchToCloudApi in lib/agent-tasks.ts). Nothing would ever call
+ * autoMineTick() for one on its own. This is the substitute: swept
+ * opportunistically from the same already-frequent read paths that already
+ * call reapStuckTasks() (the Jobs page, the guest page), throttled so an
+ * on-chain read doesn't run on every single request. Best-effort, same
+ * spirit as everything else here — a quiet period with zero site traffic
+ * means no sweep, the same way an offline local worker means no claims.
+ */
+export async function tickCloudAutoMineAgents(callbackUrl: string): Promise<void> {
+  const now = Date.now()
+  if (now - lastCloudSweepAt < CLOUD_SWEEP_COOLDOWN_MS) return
+  lastCloudSweepAt = now
+
+  const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
+  if (!isLaborMarketConfigured()) return
+
+  const candidates = await db
+    .select()
+    .from(agent)
+    .where(and(eq(agent.runtimeType, 'cloud'), eq(agent.autoMine, true)))
+  for (const a of candidates) {
+    await autoMineTick(a, callbackUrl).catch((error) => {
+      console.error(`[auto-mine] cloud sweep tick failed for ${a.id}:`, error)
+    })
+  }
 }

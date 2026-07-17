@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loader2, Zap, Wallet } from 'lucide-react'
+import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loader2, Zap, Wallet, Cloud } from 'lucide-react'
 import { getWorkerConsole } from '@/app/actions/worker-console'
-import { startMining, setAutoMine } from '@/app/actions/mining'
+import { startMining, startMiningCloud, setAutoMine } from '@/app/actions/mining'
 import { getPayoutAddress, setPayoutAddress, withdrawAllEarnings } from '@/app/actions/treasury'
 import { Celebration } from '@/components/celebration'
 import { useI18n } from '@/lib/i18n'
+import { CLOUD_PRESETS } from '@/lib/cloud-providers'
 
 type Console_ = Awaited<ReturnType<typeof getWorkerConsole>>
 type Worker = Console_['workers'][number]
@@ -49,6 +50,11 @@ export default function WorkerConsolePage() {
   const [starting, setStarting] = useState(false)
   const [startResult, setStartResult] = useState<{ command: string; provisioned: boolean } | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
+  const [cloudResult, setCloudResult] = useState<{ provisioned: boolean } | null>(null)
+  const [showCloudForm, setShowCloudForm] = useState(false)
+  const [cloudUrl, setCloudUrl] = useState('')
+  const [cloudModel, setCloudModel] = useState('')
+  const [cloudKey, setCloudKey] = useState('')
   const [celebrate, setCelebrate] = useState(false)
   const prevJobsRef = useRef<number | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -94,9 +100,29 @@ export default function WorkerConsolePage() {
   const handleStartMining = async () => {
     setStarting(true)
     setStartError(null)
+    setCloudResult(null)
     try {
       const result = await startMining()
       setStartResult({ command: result.command, provisioned: result.provisioned })
+      await refresh()
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  const handleStartMiningCloud = async () => {
+    setStarting(true)
+    setStartError(null)
+    setStartResult(null)
+    try {
+      const result = await startMiningCloud({ baseUrl: cloudUrl, apiKey: cloudKey, model: cloudModel })
+      setCloudResult({ provisioned: result.provisioned })
+      setShowCloudForm(false)
+      setCloudUrl('')
+      setCloudModel('')
+      setCloudKey('')
       await refresh()
     } catch (e) {
       setStartError(e instanceof Error ? e.message : String(e))
@@ -165,15 +191,80 @@ export default function WorkerConsolePage() {
               {t('mine.start.description')}
             </p>
           </div>
-          <button
-            onClick={handleStartMining}
-            disabled={starting}
-            className="inline-flex shrink-0 items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {starting ? <Loader2 className="size-4 animate-spin" /> : <Pickaxe className="size-4" />}
-            {starting ? t('mine.start.settingUp') : t('mine.start.button')}
-          </button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <button
+              onClick={handleStartMining}
+              disabled={starting}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {starting ? <Loader2 className="size-4 animate-spin" /> : <Pickaxe className="size-4" />}
+              {starting ? t('mine.start.settingUp') : t('mine.start.button')}
+            </button>
+            <button
+              onClick={() => {
+                setShowCloudForm((v) => !v)
+                setStartResult(null)
+                setCloudResult(null)
+              }}
+              disabled={starting}
+              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+            >
+              <Cloud className="size-4" />
+              {t('mine.start.cloudButton')}
+            </button>
+          </div>
         </div>
+
+        {showCloudForm && (
+          <div className="mt-4 space-y-2 rounded-md border border-border p-3">
+            <p className="text-xs text-muted-foreground">{t('mine.start.cloudHint')}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {CLOUD_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => {
+                    setCloudUrl(p.baseUrl)
+                    setCloudModel(p.model)
+                  }}
+                  className="rounded-md border border-border px-2 py-1 text-xs hover:bg-secondary"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <input
+              value={cloudUrl}
+              onChange={(e) => setCloudUrl(e.target.value)}
+              placeholder="https://api.groq.com/openai/v1"
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              disabled={starting}
+            />
+            <input
+              value={cloudModel}
+              onChange={(e) => setCloudModel(e.target.value)}
+              placeholder={t('mine.start.cloudModelPlaceholder')}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              disabled={starting}
+            />
+            <input
+              type="password"
+              value={cloudKey}
+              onChange={(e) => setCloudKey(e.target.value)}
+              placeholder={t('mine.start.cloudApiKeyPlaceholder')}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              disabled={starting}
+            />
+            <button
+              onClick={handleStartMiningCloud}
+              disabled={starting || !cloudUrl.trim() || !cloudModel.trim() || !cloudKey.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {starting ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />}
+              {t('mine.start.cloudConnect')}
+            </button>
+          </div>
+        )}
 
         {startError && <p className="mt-3 text-sm text-destructive">{startError}</p>}
         {startResult && (
@@ -197,9 +288,16 @@ export default function WorkerConsolePage() {
             </p>
           </div>
         )}
+        {cloudResult && (
+          <div className="mt-4 rounded-md border border-success/40 bg-success/10 p-3 text-xs">
+            <p className="font-medium">
+              {cloudResult.provisioned ? t('mine.start.cloudCreatedProvisioned') : t('mine.start.cloudCreated')}
+            </p>
+          </div>
+        )}
       </div>
 
-      {locals.length === 0 && !startResult && (
+      {workers.filter((w) => w.runtime === 'local' || w.runtime === 'cloud').length === 0 && !startResult && !cloudResult && (
         <div className="rounded-lg border border-border p-6">
           <p className="font-semibold">{t('mine.empty.title')}</p>
           <p className="mt-1 text-sm text-muted-foreground">

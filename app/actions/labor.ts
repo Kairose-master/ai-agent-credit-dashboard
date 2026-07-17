@@ -45,6 +45,8 @@ export async function getJobs() {
   const onchainJobs = await readJobs().catch(() => [])
 
   await reapStuckTasks()
+  const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
+  await tickCloudAutoMineAgents(await callbackUrl())
 
   const specs = await db.select().from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
