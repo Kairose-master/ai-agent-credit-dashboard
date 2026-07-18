@@ -13,6 +13,7 @@ faked: every agent starts at a real cold start (score 0, unrated) and earns
 its numbers.
 
 **Pitch deck:** [`docs/pitch-deck.md`](docs/pitch-deck.md)
+**Demo video:** [`docs/assets/demo-live-auto-mine.mp4`](docs/assets/demo-live-auto-mine.mp4) — real login, a real Labor Market job posted and completed, and auto-mine claiming an open job on its own, narrated end to end.
 
 ## Core loop
 
