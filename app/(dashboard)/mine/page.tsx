@@ -375,10 +375,16 @@ function PayoutCard({ hasProvisionedWorker }: { hasProvisionedWorker: boolean })
     setResult(null)
     try {
       const r = await withdrawAllEarnings()
-      if (r.totalSent <= 0) {
-        setResult(t('mine.payout.noEarnings'))
-      } else {
+      // "No earnings yet" only holds when every agent had a zero balance
+      // (withdrawAllEarnings skips those entirely, so r.results is empty).
+      // When totalSent is 0 but r.results is non-empty, at least one agent
+      // had a real balance that a per-agent error (e.g. daily cap) blocked —
+      // showing the generic "nothing to withdraw" message alongside that
+      // error would flatly contradict it.
+      if (r.totalSent > 0) {
         setResult(t('mine.payout.resultSummary', { total: r.totalSent.toFixed(2), address: `${r.to.slice(0, 6)}…${r.to.slice(-4)}` }))
+      } else if (r.results.length === 0) {
+        setResult(t('mine.payout.noEarnings'))
       }
       const failed = r.results.filter((x): x is typeof x & { error: string } => Boolean(x.error))
       if (failed.length > 0) {
