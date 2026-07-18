@@ -27,6 +27,13 @@ jobs:
       matrix:
         platform: [windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
+    # tauri-action calls the Releases API (create/update release, upload
+    # asset) using GITHUB_TOKEN — many repos default that token to
+    # read-only, which fails as "Resource not accessible by integration".
+    # This grants exactly the write scope that call needs, for this
+    # workflow only (least-privilege — it doesn't touch repo settings).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
