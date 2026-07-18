@@ -21,3 +21,7 @@ tsconfig.tsbuildinfo
 __pycache__/
 *.pyc
 agent-runtime/.venv/
+
+# Rust / Tauri desktop app
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
