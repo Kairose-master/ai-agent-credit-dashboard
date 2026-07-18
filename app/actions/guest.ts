@@ -61,6 +61,7 @@ export async function publicJobs(limit = 10) {
         attachmentUrl: spec?.attachmentUrl ?? null,
         attachmentName: spec?.attachmentName ?? null,
         testResult: spec?.testResult ?? null,
+        hasTests: Boolean(spec?.testCode),
       }
     })
 }

@@ -87,6 +87,7 @@ type PublicJob = {
   requesterLabel: string | null
   workerLabel: string | null
   testResult: { passed: boolean | null; output: string; gradedAt: string } | null
+  hasTests: boolean
 }
 
 /** Normalizes a Labor Market job — same shape publicJobs() (app/actions/guest.ts)
@@ -106,7 +107,7 @@ export function jobToTaskSpec(job: PublicJob): TaskSpec {
     requesterLabel: job.requesterLabel,
     workerAgentId: null,
     workerLabel: job.workerLabel,
-    verification: job.testResult ? 'auto_graded_tests' : 'manual_review',
+    verification: job.testResult || job.hasTests ? 'auto_graded_tests' : 'manual_review',
     createdAt: null, // on-chain reads don't currently carry a posted-at timestamp
   }
 }
