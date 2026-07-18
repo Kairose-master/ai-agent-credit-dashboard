@@ -20,8 +20,11 @@ function truncate(addr: string | null | undefined): string | null {
 
 /** Same shape as the logged-in Jobs page's cards (acceptance criteria,
  *  real output, dispute reason, attachment) minus "mine"/action buttons —
- *  guests can't act, but should be able to see the real flow at a glance. */
-async function publicJobs() {
+ *  guests can't act, but should be able to see the real flow at a glance.
+ *  Exported so GET /api/tasks (lib/task-spec.ts) can reuse the same
+ *  session-less on-chain read instead of duplicating it — that route passes
+ *  its own `limit`; the guest page keeps relying on the 10-row default. */
+export async function publicJobs(limit = 10) {
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
   if (!isLaborMarketConfigured()) return []
 
@@ -38,7 +41,7 @@ async function publicJobs() {
   const taskById = new Map(tasks.map((t) => [t.id, t]))
 
   return onchainJobs
-    .slice(0, 10)
+    .slice(0, limit)
     .map((j) => {
       const spec = specByHash.get(j.specHash)
       const task = spec?.agentTaskId ? taskById.get(spec.agentTaskId) : undefined
