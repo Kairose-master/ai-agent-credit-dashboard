@@ -1,0 +1,60 @@
+name: Desktop Miner — build installers
+
+# The dev sandbox this app was written in is Linux-only and can't produce
+# real Windows/macOS installers itself (no cross-toolchain, no code-signing
+# certs). This workflow is that missing cross-platform build step: it
+# compiles desktop/ on real windows-latest/macos-latest runners and attaches
+# the resulting installers to a DRAFT GitHub Release — draft so a human
+# always reviews and clicks "Publish" before anything goes out publicly.
+#
+# Trigger manually (Actions tab → this workflow → Run workflow) for a test
+# build, or push a `desktop-v*` tag to cut a real release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach artifacts to (e.g. desktop-v0.1.0)'
+        required: false
+        default: 'desktop-dev'
+  push:
+    tags:
+      - 'desktop-v*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        run: echo "value=${{ github.event_name == 'push' && github.ref_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and attach installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ steps.tag.outputs.value }}
+          releaseName: 'Ledgermind Miner ${{ steps.tag.outputs.value }}'
+          releaseBody: |
+            Download the installer for your OS below.
+
+            **Windows** users: SmartScreen will warn "Windows protected your PC" because this
+            build isn't code-signed yet — click "More info" → "Run anyway".
+            **Mac** users: Gatekeeper will say the app "is damaged" for the same reason — right-click
+            the app → Open, or run `xattr -cr "Ledgermind Miner.app"` in Terminal once.
+
+            See [desktop/README.md](https://github.com/${{ github.repository }}/blob/main/desktop/README.md)
+            for setup help.
+          releaseDraft: true
+          prerelease: false

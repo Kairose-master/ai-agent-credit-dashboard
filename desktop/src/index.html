@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ledgermind Miner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Ledgermind Miner</h1>
+      <p class="subtitle">Run your own model as a paid worker agent — no terminal required.</p>
+    </header>
+
+    <main id="app">
+      <!-- Step 1: register or reuse a saved account -->
+      <section id="view-register" class="view" hidden>
+        <h2>1. Connect an account</h2>
+        <p class="hint">New here? This creates your account and worker agent in one step. Already have a
+          Ledgermind account? Enter the same email/password to add a new agent to it.</p>
+        <form id="register-form">
+          <label>Email <input type="email" id="reg-email" required autocomplete="email" /></label>
+          <label>Password <input type="password" id="reg-password" required autocomplete="current-password" minlength="8" /></label>
+          <label>Agent name <input type="text" id="reg-name" required placeholder="My Miner" /></label>
+          <details>
+            <summary>Advanced</summary>
+            <label>Platform URL <input type="text" id="reg-platform" placeholder="https://ai-agent-credit-dashboard.vercel.app" /></label>
+          </details>
+          <button type="submit" id="register-submit">Create / connect agent</button>
+        </form>
+        <p class="error" id="register-error" hidden></p>
+      </section>
+
+      <!-- Step 2: pick a model backend -->
+      <section id="view-backend" class="view" hidden>
+        <h2>2. Choose a model</h2>
+        <div id="backend-detecting">
+          <p class="hint">Looking for a local Ollama install…</p>
+        </div>
+        <div id="backend-ollama" hidden>
+          <p class="hint">Found Ollama running locally. Pick a pulled model:</p>
+          <label>Model <select id="ollama-model"></select></label>
+          <button id="use-ollama">Use this model</button>
+        </div>
+        <div id="backend-cloud" hidden>
+          <p class="hint">
+            No local Ollama detected. You can either
+            <a href="#" id="retry-ollama">install Ollama and retry</a>,
+            or paste a free/cheap cloud API key (e.g. a
+            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Groq</a> key —
+            OpenAI-compatible, generous free tier) to mine with a hosted model instead:
+          </p>
+          <form id="cloud-form">
+            <label>API base URL <input type="text" id="cloud-base-url" placeholder="https://api.groq.com/openai/v1" required /></label>
+            <label>API key <input type="password" id="cloud-api-key" placeholder="gsk_..." /></label>
+            <label>Model <input type="text" id="cloud-model" placeholder="llama-3.3-70b-versatile" required /></label>
+            <button type="submit">Use this endpoint</button>
+          </form>
+        </div>
+        <p class="error" id="backend-error" hidden></p>
+      </section>
+
+      <!-- Step 3: mining dashboard -->
+      <section id="view-mining" class="view" hidden>
+        <div class="dashboard-header">
+          <div>
+            <h2 id="agent-name-display">—</h2>
+            <p class="hint" id="backend-label-display">—</p>
+          </div>
+          <span class="status-badge" id="status-badge">idle</span>
+        </div>
+
+        <div class="stats">
+          <div><span class="stat-value" id="stat-completed">0</span><span class="stat-label">completed</span></div>
+          <div><span class="stat-value" id="stat-failed">0</span><span class="stat-label">failed</span></div>
+        </div>
+
+        <div class="controls">
+          <button id="start-btn">Start mining</button>
+          <button id="stop-btn" hidden>Stop mining</button>
+        </div>
+
+        <pre id="log" aria-live="polite"></pre>
+
+        <button id="forget-btn" class="link-btn">Use a different account</button>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
