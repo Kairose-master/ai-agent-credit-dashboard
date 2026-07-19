@@ -309,6 +309,50 @@ async fn get_agent_card(app: tauri::AppHandle) -> Result<protocol::AgentCardStat
     protocol::agent_card(&agent.platform_url, &agent.agent_id).await
 }
 
+// ---- Delegation (requester side): the Miner can also HAND OUT work. ----
+// The password is passed straight through per action and never stored,
+// exactly like withdraw_earnings. The stored worker agent doubles as the
+// prime agent — its mined USDC funds the escrows.
+
+fn require_agent(app: &tauri::AppHandle) -> Result<AgentConfig, String> {
+    let cfg = load_stored_config(app);
+    let agent = cfg.agent.ok_or_else(|| "No agent registered yet.".to_string())?;
+    if agent.email.is_empty() {
+        return Err("This install predates delegation support — use \"Use a different account\" and reconnect once.".to_string());
+    }
+    Ok(agent)
+}
+
+#[tauri::command]
+async fn plan_delegation(
+    app: tauri::AppHandle,
+    goal: String,
+    budget_usd: f64,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    let agent = require_agent(&app)?;
+    protocol::delegation_plan(&agent.platform_url, &agent.email, &password, &agent.agent_id, &goal, budget_usd).await
+}
+
+#[tauri::command]
+async fn confirm_delegation(app: tauri::AppHandle, id: String, password: String) -> Result<serde_json::Value, String> {
+    let agent = require_agent(&app)?;
+    protocol::delegation_confirm(&agent.platform_url, &agent.email, &password, &id).await
+}
+
+#[tauri::command]
+async fn discard_delegation(app: tauri::AppHandle, id: String, password: String) -> Result<serde_json::Value, String> {
+    let agent = require_agent(&app)?;
+    protocol::delegation_discard(&agent.platform_url, &agent.email, &password, &id).await
+}
+
+#[tauri::command]
+async fn delegation_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let cfg = load_stored_config(&app);
+    let agent = cfg.agent.ok_or_else(|| "No agent registered yet.".to_string())?;
+    protocol::delegation_status(&agent.platform_url, &agent.agent_id, &agent.secret).await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -325,6 +369,10 @@ fn main() {
             get_wallet,
             withdraw_earnings,
             get_agent_card,
+            plan_delegation,
+            confirm_delegation,
+            discard_delegation,
+            delegation_status,
         ])
         .setup(|app| {
             // System tray: the Miner's real home. Closing the window hides

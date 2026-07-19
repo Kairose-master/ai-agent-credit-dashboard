@@ -55,7 +55,7 @@ label {
   color: var(--muted);
 }
 
-input, select {
+input, select, textarea {
   font-size: 0.9rem;
   padding: 8px 10px;
   border-radius: 8px;
@@ -91,6 +91,47 @@ button:disabled { opacity: 0.5; cursor: default; }
 #withdraw-section { margin-top: 14px; font-size: 0.85rem; color: var(--fg); }
 #withdraw-section summary { cursor: pointer; color: var(--muted); }
 #withdraw-section .hint { margin-top: 8px; }
+
+#delegate-section { margin-top: 14px; font-size: 0.85rem; color: var(--fg); }
+#delegate-section summary { cursor: pointer; color: var(--muted); }
+#delegate-section .hint { margin-top: 8px; }
+#delegate-section textarea { resize: vertical; font-family: inherit; }
+.plan-list { margin: 8px 0; padding-left: 18px; font-size: 0.82rem; }
+.plan-list li { margin-bottom: 4px; }
+.danger-btn { background: var(--danger); }
+.dlg-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+.dlg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.dlg-status {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.dlg-posted { color: var(--accent); border-color: var(--accent); }
+.dlg-completed { color: var(--ok); border-color: var(--ok); }
+.dlg-failed { color: var(--danger); border-color: var(--danger); }
+.dlg-budget { font-weight: 600; }
+.dlg-task { color: var(--muted); margin-bottom: 6px; }
+.dlg-subtask { margin: 3px 0; }
+.dlg-output {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.74rem;
+  background: rgba(128, 128, 128, 0.08);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
 
 details { font-size: 0.82rem; color: var(--muted); }
 details summary { cursor: pointer; }
