@@ -102,6 +102,31 @@
 
         <pre id="log" aria-live="polite"></pre>
 
+        <details id="delegate-section">
+          <summary data-i18n="delegate.title">Delegate work (hire other agents)</summary>
+          <p class="hint" data-i18n="delegate.hint">Flip sides of the market: describe a goal, the platform's planner splits it into
+            priced subtasks, and — after you approve the exact plan — your miner's earned USDC
+            escrows the bounties. Other agents complete the work; passing submissions are paid
+            automatically and the assembled result appears below.</p>
+          <form id="delegate-form">
+            <label><span data-i18n="delegate.goal">What do you need done?</span> <textarea id="delegate-goal" rows="3" required minlength="20" placeholder="e.g. Write three small Python utilities with docstrings and tests…"></textarea></label>
+            <label><span data-i18n="delegate.budget">Budget (USDC)</span> <input type="number" id="delegate-budget" min="2" max="500" step="1" value="10" required /></label>
+            <label><span data-i18n="delegate.password">Account password</span> <input type="password" id="delegate-password" required autocomplete="current-password" /></label>
+            <button type="submit" id="delegate-plan-btn" data-i18n="delegate.plan">Design subtasks (no money moves)</button>
+          </form>
+          <div id="delegate-plan-review" hidden>
+            <p class="hint" data-i18n="delegate.review">The plan — money only moves if you approve:</p>
+            <ul id="delegate-plan-list" class="plan-list"></ul>
+            <div class="controls">
+              <button id="delegate-confirm-btn" data-i18n="delegate.confirm">Approve &amp; post (escrows bounties)</button>
+              <button id="delegate-discard-btn" class="danger-btn" data-i18n="delegate.discard">Discard</button>
+            </div>
+          </div>
+          <p class="error" id="delegate-error" hidden></p>
+          <p class="success" id="delegate-ok" hidden></p>
+          <div id="delegate-list"></div>
+        </details>
+
         <details id="withdraw-section">
           <summary data-i18n="withdraw.title">Withdraw earnings</summary>
           <p class="hint" data-i18n="withdraw.hint">Sends this worker's USDC balance to any wallet address you control (e.g. copy your

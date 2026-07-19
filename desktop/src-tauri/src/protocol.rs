@@ -439,6 +439,104 @@ pub async fn agent_card(platform_url: &str, agent_id: &str) -> Result<AgentCardS
     })
 }
 
+/// Shared POST /api/delegations caller — the response is passed to the
+/// frontend as raw JSON (serde_json::Value): the UI renders whatever the
+/// platform returns, so new fields don't require a Rust release.
+async fn delegations_call(
+    platform_url: &str,
+    body: serde_json::Value,
+    secret: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}/api/delegations", platform_url.trim_end_matches('/'));
+    let mut req = client().post(&url).json(&body);
+    if let Some(s) = secret {
+        req = req.header("X-Runtime-Secret", s);
+    }
+    let res = req.send().await.map_err(|e| format!("delegation call failed: {e}"))?;
+    let status = res.status();
+    let parsed: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("unexpected delegation response: {e}"))?;
+    if !status.is_success() {
+        let msg = parsed
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("delegation call failed");
+        return Err(msg.to_string());
+    }
+    Ok(parsed)
+}
+
+/// op "plan" — decompose a goal into priced subtasks. Nothing is escrowed
+/// yet; requires the account password (owner action, and the planner LLM
+/// costs tokens). Never stores the password.
+pub async fn delegation_plan(
+    platform_url: &str,
+    email: &str,
+    password: &str,
+    prime_agent_id: &str,
+    goal: &str,
+    budget_usd: f64,
+) -> Result<serde_json::Value, String> {
+    delegations_call(
+        platform_url,
+        json!({
+            "op": "plan",
+            "email": email,
+            "password": password,
+            "prime_agent_id": prime_agent_id,
+            "goal": goal,
+            "budget_usd": budget_usd,
+            "auto_verify": true,
+        }),
+        None,
+    )
+    .await
+}
+
+/// op "confirm" — the moment money moves (per-subtask escrow from the
+/// prime agent's wallet). Password again: same rule as withdraw.
+pub async fn delegation_confirm(
+    platform_url: &str,
+    email: &str,
+    password: &str,
+    id: &str,
+) -> Result<serde_json::Value, String> {
+    delegations_call(
+        platform_url,
+        json!({ "op": "confirm", "email": email, "password": password, "id": id }),
+        None,
+    )
+    .await
+}
+
+/// op "discard" — drop an unconfirmed plan (nothing was escrowed).
+pub async fn delegation_discard(
+    platform_url: &str,
+    email: &str,
+    password: &str,
+    id: &str,
+) -> Result<serde_json::Value, String> {
+    delegations_call(
+        platform_url,
+        json!({ "op": "discard", "email": email, "password": password, "id": id }),
+        None,
+    )
+    .await
+}
+
+/// op "status" — worker-secret-authenticated read of the owner's
+/// delegations; each poll also drives the platform's verification tick
+/// (the same no-cron heartbeat the web page's polling provides).
+pub async fn delegation_status(
+    platform_url: &str,
+    agent_id: &str,
+    secret: &str,
+) -> Result<serde_json::Value, String> {
+    delegations_call(platform_url, json!({ "op": "status", "agent_id": agent_id }), Some(secret)).await
+}
+
 /// Ollama's own local listing endpoint — used to auto-detect whether the
 /// user already has Ollama running, and which models are pulled, before
 /// asking them to configure anything by hand.

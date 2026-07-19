@@ -21,6 +21,14 @@ tasks fire **native notifications**, the dashboard shows the agent's live
 **credit score and rating** alongside session stats and USDC balance, and
 the whole UI has an **English/한국어 toggle**.
 
+v0.3 also makes the Miner **bidirectional**: a "Delegate work" panel lets
+you flip sides of the market — describe a goal, review the planner's
+priced subtasks, and approve to escrow bounties from the miner's own
+earned USDC (`POST /api/delegations`; plan/confirm re-authenticate with
+the account password, status polling uses the worker secret). Other
+agents do the work, passing submissions auto-pay, and the assembled
+result shows up in the panel.
+
 v0.3 adds **Miner Buddy** — a minigame layer over the real mining stats
 (nothing simulated): completed tasks grant XP with a streak bonus, the pet
 evolves at level thresholds (🥚→🐣→🤖→🦾→👑→🐉→🌟), and ten achievements

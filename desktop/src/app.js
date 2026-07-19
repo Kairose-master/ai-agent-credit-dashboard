@@ -40,6 +40,15 @@ const KO = {
   'withdraw.password': '계정 비밀번호',
   'withdraw.submit': '인출',
   'game.pet': '채굴 펫',
+  'delegate.title': '일감 맡기기 (다른 에이전트 고용)',
+  'delegate.hint': '이번엔 반대편에 서 보세요: 목표를 적으면 플랫폼 플래너가 보수가 책정된 하위 작업으로 쪼개주고, 정확한 계획을 승인한 뒤에야 채굴로 번 USDC가 에스크로됩니다. 다른 에이전트들이 작업을 수행하고, 검수를 통과한 제출물엔 자동으로 지급되며 조립된 결과물이 아래에 표시됩니다.',
+  'delegate.goal': '무엇을 맡기시겠어요?',
+  'delegate.budget': '예산 (USDC)',
+  'delegate.password': '계정 비밀번호',
+  'delegate.plan': '하위 작업 설계 (돈 안 나감)',
+  'delegate.review': '설계된 계획 — 승인해야만 돈이 움직입니다:',
+  'delegate.confirm': '승인·게시 (보수 에스크로)',
+  'delegate.discard': '버리기',
 }
 
 let lang = localStorage.getItem('miner-lang') || 'en'
@@ -394,6 +403,163 @@ async function refreshWallet() {
   }
 }
 
+// ---------- Delegation (requester side) ----------
+
+let currentPlanId = null
+let delegateTimer = null
+
+function delegateMsg(okText, errText) {
+  const ok = document.getElementById('delegate-ok')
+  const err = document.getElementById('delegate-error')
+  ok.hidden = !okText
+  ok.textContent = okText || ''
+  err.hidden = !errText
+  err.textContent = errText || ''
+}
+
+const JOB_STATUS_ICON = {
+  Open: '🕐', Claimed: '⚙️', Submitted: '📤', Completed: '✅', Refunded: '↩️', Disputed: '⚠️',
+}
+
+function renderPlanReview(subtasks) {
+  const list = document.getElementById('delegate-plan-list')
+  list.innerHTML = ''
+  for (const st of subtasks) {
+    const li = document.createElement('li')
+    li.textContent = `$${Number(st.bountyUsd).toFixed(2)} — ${st.title}`
+    li.title = st.description
+    list.appendChild(li)
+  }
+  document.getElementById('delegate-plan-review').hidden = false
+}
+
+function renderDelegations(delegations) {
+  const wrap = document.getElementById('delegate-list')
+  wrap.innerHTML = ''
+  for (const d of delegations) {
+    if (d.status === 'planned' && d.id !== currentPlanId) continue // stale unconfirmed plans from other sessions
+    const card = document.createElement('div')
+    card.className = 'dlg-card'
+
+    const head = document.createElement('div')
+    head.className = 'dlg-head'
+    const statusKo = { planned: '계획됨', posted: '진행 중', completed: '완료', failed: '실패' }
+    const label = lang === 'ko' ? (statusKo[d.status] || d.status) : d.status
+    head.innerHTML = `<span class="dlg-status dlg-${d.status}">${label}</span> <span class="dlg-budget">$${d.budget_usd.toFixed(2)}</span>`
+    card.appendChild(head)
+
+    const task = document.createElement('div')
+    task.className = 'dlg-task'
+    task.textContent = d.task.length > 120 ? d.task.slice(0, 120) + '…' : d.task
+    card.appendChild(task)
+
+    if (d.status !== 'planned') {
+      for (const st of d.subtasks) {
+        const line = document.createElement('div')
+        line.className = 'dlg-subtask'
+        const icon = st.failed ? '❌' : (JOB_STATUS_ICON[st.jobStatus] || '🕐')
+        const worker = st.workerLabel ? ` · ${st.workerLabel}` : ''
+        line.textContent = `${icon} ${st.title} — $${Number(st.bountyUsd).toFixed(2)}${worker}`
+        card.appendChild(line)
+      }
+    }
+
+    if (d.final_output) {
+      const det = document.createElement('details')
+      const sum = document.createElement('summary')
+      sum.textContent = lang === 'ko' ? '최종 결과물 보기' : 'View final output'
+      const pre = document.createElement('pre')
+      pre.className = 'dlg-output'
+      pre.textContent = d.final_output
+      det.appendChild(sum)
+      det.appendChild(pre)
+      card.appendChild(det)
+    }
+    if (d.error) {
+      const err = document.createElement('div')
+      err.className = 'error'
+      err.textContent = d.error
+      card.appendChild(err)
+    }
+    wrap.appendChild(card)
+  }
+}
+
+async function refreshDelegations() {
+  try {
+    const res = await invoke('delegation_status')
+    renderDelegations(res.delegations || [])
+  } catch {
+    /* offline or platform hiccup — keep the last rendering */
+  }
+}
+
+function initDelegateView() {
+  const section = document.getElementById('delegate-section')
+
+  // Poll only while the panel is open — each poll also drives the
+  // platform's verification tick, so an open panel IS the heartbeat.
+  section.addEventListener('toggle', () => {
+    if (section.open) {
+      refreshDelegations()
+      if (!delegateTimer) delegateTimer = setInterval(refreshDelegations, 12_000)
+    } else if (delegateTimer) {
+      clearInterval(delegateTimer)
+      delegateTimer = null
+    }
+  })
+
+  document.getElementById('delegate-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    delegateMsg('', '')
+    const btn = document.getElementById('delegate-plan-btn')
+    btn.disabled = true
+    try {
+      const goal = document.getElementById('delegate-goal').value.trim()
+      const budgetUsd = Number(document.getElementById('delegate-budget').value)
+      const password = document.getElementById('delegate-password').value
+      const res = await invoke('plan_delegation', { goal, budgetUsd, password })
+      currentPlanId = res.id
+      renderPlanReview(res.subtasks || [])
+    } catch (err) {
+      delegateMsg('', String(err))
+    } finally {
+      btn.disabled = false
+    }
+  })
+
+  document.getElementById('delegate-confirm-btn').addEventListener('click', async () => {
+    if (!currentPlanId) return
+    delegateMsg('', '')
+    const btn = document.getElementById('delegate-confirm-btn')
+    btn.disabled = true
+    try {
+      const password = document.getElementById('delegate-password').value
+      const res = await invoke('confirm_delegation', { id: currentPlanId, password })
+      document.getElementById('delegate-plan-review').hidden = true
+      document.getElementById('delegate-goal').value = ''
+      delegateMsg(lang === 'ko' ? `하위 작업 ${res.posted}건 게시 완료 — 아래에서 진행 상황을 확인하세요.` : `Posted ${res.posted} subtasks — track progress below.`, '')
+      currentPlanId = null
+      refreshDelegations()
+    } catch (err) {
+      delegateMsg('', String(err))
+    } finally {
+      btn.disabled = false
+    }
+  })
+
+  document.getElementById('delegate-discard-btn').addEventListener('click', async () => {
+    if (!currentPlanId) return
+    try {
+      const password = document.getElementById('delegate-password').value
+      await invoke('discard_delegation', { id: currentPlanId, password })
+    } catch { /* already gone is fine */ }
+    currentPlanId = null
+    document.getElementById('delegate-plan-review').hidden = true
+    refreshDelegations()
+  })
+}
+
 // Buttons/listeners for the mining view are bound exactly once at boot —
 // enterMiningView() (called on every view transition into it) only
 // populates data, so re-entering never double-registers a handler.
@@ -480,6 +646,7 @@ async function boot() {
   await initRegisterView()
   initBackendView()
   initMiningView()
+  initDelegateView()
 
   const cfg = await invoke('load_config')
   if (!cfg.agent) {
