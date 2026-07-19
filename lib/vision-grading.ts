@@ -25,11 +25,27 @@ export interface GradedVerdict {
 
 export async function gradeImageSubmission(
   spec: { title: string; description: string | null; acceptanceCriteria: string | null },
-  artifacts: { mime: string; dataBase64: string }[],
+  artifacts: { mime: string; dataBase64: string | null; url?: string | null }[],
   requesterOwnerUserId: string | null,
 ): Promise<GradedVerdict> {
   const gradedAt = new Date().toISOString()
-  const images = artifacts.filter((a) => ALLOWED_IMAGE_MIMES.has(a.mime))
+  // Resolve blob-stored images to bytes so the grader can see them
+  // (bounded — an image past 5MB is refused rather than streamed).
+  const images: { mime: string; dataBase64: string }[] = []
+  for (const a of artifacts) {
+    if (!ALLOWED_IMAGE_MIMES.has(a.mime)) continue
+    if (a.dataBase64) {
+      images.push({ mime: a.mime, dataBase64: a.dataBase64 })
+    } else if (a.url) {
+      try {
+        const res = await fetch(a.url, { signal: AbortSignal.timeout(20_000) })
+        const buf = Buffer.from(await res.arrayBuffer())
+        if (res.ok && buf.length <= 5 * 1024 * 1024) {
+          images.push({ mime: a.mime, dataBase64: buf.toString('base64') })
+        }
+      } catch { /* unreachable blob — treat as absent */ }
+    }
+  }
 
   if (images.length === 0) {
     // A definite failure, not an infra gap: the job demanded an image and

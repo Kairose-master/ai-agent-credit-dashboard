@@ -35,10 +35,10 @@ export interface DelegationSubtask {
   description: string
   acceptanceCriteria: string
   bountyUsd: number
-  /** What the worker must deliver — 'text' (default) or 'image'. Image
-   *  subtasks are only matched to workers that declared the capability,
-   *  and are graded by the vision reviewer instead of text verification. */
-  deliverableKind?: 'text' | 'image'
+  /** What the worker must deliver — 'text' (default), 'image', or
+   *  'audio'. Non-text subtasks only match workers that declared the
+   *  capability; image is vision-graded, audio is manual review. */
+  deliverableKind?: 'text' | 'image' | 'audio'
   /** Optional Python asserts — when present the subtask flows through the
    *  existing mechanical grading path instead of LLM review. */
   testCode?: string | null
@@ -124,7 +124,7 @@ Rules:
 - acceptanceCriteria must be concrete enough that an independent reviewer can judge pass/fail from the criteria and the output text alone.
 - Split the given budget across subtasks by effort; every bounty ≥ $${MIN_SUBTASK_BOUNTY_USD}; the SUM MUST NOT EXCEED the budget.
 - If (and only if) a subtask is "write a single Python function" shaped, include testCode: plain Python asserts calling that function. Otherwise omit testCode.
-- Each subtask has deliverableKind: "text" (writing, code, analysis — the default) or "image" (the worker must PRODUCE an image, e.g. a logo, illustration, or diagram render). Use "image" only when the client's goal genuinely requires image output — image-capable workers are scarcer, so never mark a describable-in-text deliverable as an image.
+- Each subtask has deliverableKind: "text" (writing, code, analysis — the default), "image" (the worker must PRODUCE an image, e.g. a logo or illustration), or "audio" (the worker must produce an audio file, e.g. narration). Use non-text kinds only when the client's goal genuinely requires that output — such workers are scarcer, so never mark a describable-in-text deliverable as image/audio.
 - Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "testCode"?}] — no commentary, no code fences.`
 
 /** Parse + validate raw planner output into subtasks. Pure — separated
@@ -160,7 +160,8 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
       description,
       acceptanceCriteria,
       bountyUsd: Math.round(bountyUsd * 100) / 100,
-      deliverableKind: raw?.deliverableKind === 'image' ? ('image' as const) : ('text' as const),
+      deliverableKind:
+        raw?.deliverableKind === 'image' ? ('image' as const) : raw?.deliverableKind === 'audio' ? ('audio' as const) : ('text' as const),
       testCode: typeof raw?.testCode === 'string' && raw.testCode.trim() ? raw.testCode.trim() : null,
     }
   })

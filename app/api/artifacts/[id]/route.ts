@@ -13,6 +13,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const [row] = await db.select().from(artifact).where(eq(artifact.id, id))
   if (!row) return new Response('Not found', { status: 404 })
 
+  // Blob-stored artifacts redirect to their public URL — the bytes never
+  // pass through a function.
+  if (row.url) {
+    return Response.redirect(row.url, 302)
+  }
+  if (!row.dataBase64) return new Response('Artifact has no content', { status: 410 })
+
   const bytes = Buffer.from(row.dataBase64, 'base64')
   return new Response(bytes, {
     headers: {

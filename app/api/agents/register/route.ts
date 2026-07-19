@@ -79,18 +79,11 @@ export async function POST(request: Request) {
   const name = String(body?.name ?? '').trim()
   const description = body?.description ? String(body.description).trim() : null
   const autoMine = body?.auto_mine === true
-  // Deliverable kinds this worker can produce — validated against the
-  // known set; anything unrecognized is dropped, and 'text' is always
-  // included (every LLM worker can produce text).
-  const { DELIVERABLE_KINDS } = await import('@/lib/artifacts')
-  const capabilities = [
-    ...new Set([
-      'text',
-      ...(Array.isArray(body?.capabilities)
-        ? body.capabilities.map((c: unknown) => String(c)).filter((c: string) => (DELIVERABLE_KINDS as readonly string[]).includes(c))
-        : []),
-    ]),
-  ]
+  // Capabilities this worker declares: deliverable kinds (text/image/
+  // audio/video/file) plus tool capabilities (web/code/gpu). Unrecognized
+  // names are dropped; 'text' is always included.
+  const { normalizeCapabilities } = await import('@/lib/artifacts')
+  const capabilities = normalizeCapabilities(body?.capabilities)
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return Response.json({ error: 'A valid email is required' }, { status: 400 })

@@ -65,7 +65,7 @@ export async function autoMineTick(agent: AgentRow, callbackUrl: string): Promis
     // Capability match: an image job must never be claimed by a text-only
     // worker — it would burn an on-chain accept on work it cannot do.
     const { workerCanDeliver } = await import('@/lib/artifacts')
-    if (!workerCanDeliver(agent.capabilities, spec.deliverableKind ?? 'text')) continue
+    if (!workerCanDeliver(agent.capabilities, spec.deliverableKind ?? 'text', spec.requiredCapabilities)) continue
 
     try {
       await acceptAndDispatchJob(agent, j.id, callbackUrl)
