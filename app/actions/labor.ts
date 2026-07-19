@@ -48,9 +48,15 @@ export async function getJobs() {
   const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
   await tickCloudAutoMineAgents(await callbackUrl())
   // Re-drive any settlement that died mid-flight on a transient RPC
-  // failure (throttled internally; re-checks on-chain state before acting).
-  const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
-  await sweepStuckGradedJobs()
+  // failure — AFTER the response: a re-driven settlement is multiple
+  // on-chain txs and must never hold the jobs list hostage.
+  {
+    const { after } = await import('next/server')
+    after(async () => {
+      const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
+      await sweepStuckGradedJobs().catch((e) => console.error('[jobs] settle sweep failed:', e))
+    })
+  }
 
   const specs = await db.select().from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))

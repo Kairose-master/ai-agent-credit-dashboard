@@ -12,6 +12,7 @@ import { agent, delegation } from '@/lib/db/schema'
 import { desc, eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import {
   planDelegation,
   postDelegationJobs,
@@ -142,42 +143,35 @@ export async function getMyDelegations() {
     return []
   }
 
-  // One on-chain read shared by every tick and status view below — this
-  // action polls every ~8s while the page is open, so per-row reads
-  // would multiply RPC load for nothing.
+  // One on-chain read shared by the status views below — this action polls
+  // every ~8s while the page is open, so per-row reads would multiply RPC
+  // load for nothing.
   const hasActive = rows.some((r) => r.status === 'posted')
   const { readJobs } = await import('@/lib/onchain/labor')
   const jobs = hasActive ? await readJobs().catch(() => []) : []
 
-  // Re-drive any mechanically-graded settlement that died on a transient
-  // RPC failure — a delegation's testCode subtasks depend on that path
-  // completing, and the delegate page is the screen its owner watches.
+  // The heavy work — re-driving stuck settlements (on-chain txs, tens of
+  // seconds) and per-delegation verification ticks (LLM calls) — runs
+  // AFTER the response is sent. Running it inline once froze this page on
+  // a loading spinner for a full settlement's duration; the next 8s poll
+  // picks up whatever the deferred work finished. Still no cron: the
+  // owner's own polling remains the heartbeat.
   if (hasActive) {
-    const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
-    await sweepStuckGradedJobs()
+    const active = rows.filter((r) => r.status === 'posted')
+    after(async () => {
+      const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
+      await sweepStuckGradedJobs().catch((e) => console.error('[delegate] sweep failed:', e))
+      for (const row of active) {
+        await tickDelegation(row, jobs).catch((e) => console.error('[delegate] tick failed:', e))
+      }
+    })
   }
-
-  // Tick active delegations opportunistically (bounded: they're capped at
-  // MAX_SUBTASKS jobs each, and verification only runs on Submitted work).
-  for (const row of rows) {
-    if (row.status === 'posted') {
-      await tickDelegation(row, jobs).catch((e) => console.error('[delegate] tick failed:', e))
-    }
-  }
-
-  // Re-read anything the tick may have finalized, then attach live views.
-  const fresh = await db
-    .select()
-    .from(delegation)
-    .where(eq(delegation.userId, userId))
-    .orderBy(desc(delegation.createdAt))
-    .limit(20)
 
   const agents = await db.select().from(agent).where(eq(agent.userId, userId))
   const agentName = new Map(agents.map((a) => [a.id, a.name]))
 
   return Promise.all(
-    fresh.map(async (row) => ({
+    rows.map(async (row) => ({
       id: row.id,
       primeAgentId: row.primeAgentId,
       primeAgentName: agentName.get(row.primeAgentId) ?? 'Unknown agent',

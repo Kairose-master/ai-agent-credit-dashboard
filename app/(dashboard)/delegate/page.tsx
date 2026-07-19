@@ -50,8 +50,12 @@ export default function DelegatePage() {
     // The status read doubles as the verification/finalization tick, so
     // polling IS the orchestrator's heartbeat while this page is open.
     pollRef.current = setInterval(refresh, 8000)
+    // Safety net: a slow first response must degrade to "show what we
+    // have" (the next poll will fill in), never an indefinite spinner.
+    const failsafe = setTimeout(() => setLoading(false), 10_000)
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      clearTimeout(failsafe)
     }
   }, [refresh])
 
