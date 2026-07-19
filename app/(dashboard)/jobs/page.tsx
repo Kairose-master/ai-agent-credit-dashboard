@@ -184,7 +184,11 @@ export default function JobsPage() {
 
   const submitDispute = (job: Job) =>
     run(job.id, () =>
-      raiseDisputeAction(myAgents.find((a) => a.name === job.requesterName)!.id, job.id, disputeNote).then(() => {
+      raiseDisputeAction(
+        (myAgents.find((a) => a.name === job.requesterName) ?? myAgents[0]).id,
+        job.id,
+        disputeNote,
+      ).then(() => {
         setDisputing(null)
         setDisputeNote('')
       }),
@@ -502,7 +506,12 @@ export default function JobsPage() {
                           <button
                             onClick={() =>
                               run(job.id, () =>
-                                approveJobAction(myAgents.find((a) => a.name === job.requesterName)!.id, job.id),
+                                // The server re-resolves the real requester agent by the job's
+                                // on-chain address — this id is just the ownership fallback.
+                                approveJobAction(
+                                  (myAgents.find((a) => a.name === job.requesterName) ?? myAgents[0]).id,
+                                  job.id,
+                                ),
                               )
                             }
                             disabled={busy === job.id}

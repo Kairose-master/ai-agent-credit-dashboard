@@ -81,17 +81,23 @@
 
         <section id="game-panel" aria-label="Miner Buddy">
           <div class="game-header">
-            <span id="pet-sprite" title="Miner Buddy">🥚</span>
+            <span id="pet-wrap"><span id="pet-sprite" title="Miner Buddy">🥚</span><span id="pet-hat" hidden></span></span>
             <div class="game-info">
               <div class="game-title-row">
                 <strong data-i18n="game.pet">Miner Buddy</strong>
                 <span id="pet-level" class="pet-level">Lv.1</span>
                 <span id="pet-streak" class="pet-streak" hidden></span>
+                <span class="game-shards" title="Shards"><span id="shard-count">0</span> 💎</span>
               </div>
               <div class="xp-bar"><div id="xp-fill"></div></div>
-              <div class="xp-label"><span id="xp-text">0 / 50 XP</span></div>
+              <div class="xp-label">
+                <span id="xp-text">0 / 50 XP</span>
+                <button id="shop-toggle" class="shop-btn" type="button">🛒 <span data-i18n="game.shop">Shop</span></button>
+              </div>
             </div>
           </div>
+          <div id="quests" class="quests"></div>
+          <div id="shop" class="shop" hidden></div>
           <div id="badges" class="badges"></div>
         </section>
 
