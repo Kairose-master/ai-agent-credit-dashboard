@@ -30,15 +30,19 @@ export default function DelegatePage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const refresh = useCallback(async () => {
+    // Fetched independently on purpose: one failing (e.g. delegations
+    // table missing until migration) must not blank the other.
     try {
-      const [ags, dls] = await Promise.all([getDelegationAgents(), getMyDelegations()])
-      setAgents(ags)
-      setRows(dls)
+      setAgents(await getDelegationAgents())
     } catch {
       /* signed out mid-poll etc. */
-    } finally {
-      setLoading(false)
     }
+    try {
+      setRows(await getMyDelegations())
+    } catch {
+      /* ignore */
+    }
+    setLoading(false)
   }, [])
 
   useEffect(() => {
