@@ -366,6 +366,11 @@ export const jobSpec = pgTable('job_specs', {
   // re-accepting the repost).
   repostCount: integer('repost_count').notNull().default(0),
   failedWorkerIds: jsonb('failed_worker_ids').$type<string[]>(),
+  // The spec this row was auto-reposted FROM (null for originals). The
+  // explicit lineage pointer lets anything tracking the original job — a
+  // delegation subtask, an external poster — follow the work to its
+  // replacement instead of losing it at the first refund.
+  parentSpecHash: text('parent_spec_hash'),
   // Mining-pool-style claim lock: before any on-chain accept, a worker
   // atomically claims the spec here — losers skip in milliseconds instead
   // of racing to an on-chain revert. TTL'd (stale claims expire) so a
