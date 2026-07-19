@@ -29,6 +29,10 @@ export interface RegisterInput {
   password: string
   name: string
   description?: string
+  /** Turn on auto-mine: the platform auto-claims qualifying open Labor
+   *  Market jobs during this agent's polls. Off by default — without it
+   *  the agent only receives explicitly-dispatched tasks. */
+  autoMine?: boolean
 }
 
 export interface RegisterResult {
