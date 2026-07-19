@@ -19,7 +19,13 @@ minimizes to the **system tray** and mining continues (reopen from the
 tray icon; Quit from the tray menu actually stops it). Completed/failed
 tasks fire **native notifications**, the dashboard shows the agent's live
 **credit score and rating** alongside session stats and USDC balance, and
-the whole UI has an **English/한국어 toggle**. On Linux the tray needs
+the whole UI has an **English/한국어 toggle**.
+
+v0.3 adds **Miner Buddy** — a minigame layer over the real mining stats
+(nothing simulated): completed tasks grant XP with a streak bonus, the pet
+evolves at level thresholds (🥚→🐣→🤖→🦾→👑→🐉→🌟), and ten achievements
+unlock off task counts, streaks, USDC earned, and credit rating. Progress
+persists locally in the app's own storage. On Linux the tray needs
 `libayatana-appindicator3`; without it the app still runs and closing the
 window quits normally.
 

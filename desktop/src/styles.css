@@ -126,6 +126,73 @@ details summary { cursor: pointer; }
 .stat-value { display: block; font-size: 1.4rem; font-weight: 600; }
 .stat-label { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; }
 
+#game-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  background: rgba(128, 128, 128, 0.05);
+}
+.game-header { display: flex; align-items: center; gap: 14px; }
+#pet-sprite {
+  font-size: 2.2rem;
+  line-height: 1;
+  display: inline-block;
+}
+#pet-sprite.bounce { animation: pet-bounce 0.6s ease; }
+@keyframes pet-bounce {
+  0%   { transform: translateY(0) scale(1); }
+  30%  { transform: translateY(-10px) scale(1.15); }
+  55%  { transform: translateY(0) scale(0.95); }
+  75%  { transform: translateY(-4px) scale(1.05); }
+  100% { transform: translateY(0) scale(1); }
+}
+.game-info { flex: 1; min-width: 0; }
+.game-title-row { display: flex; align-items: baseline; gap: 8px; font-size: 0.85rem; }
+.pet-level { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
+.pet-streak { color: #ff9d3b; font-weight: 600; font-size: 0.8rem; }
+.xp-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.18);
+  margin: 6px 0 3px;
+  overflow: hidden;
+}
+#xp-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.xp-label { font-size: 0.68rem; color: var(--muted); }
+.badges { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.badge { font-size: 1rem; cursor: help; }
+.badge.locked { opacity: 0.22; filter: grayscale(1); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: white;
+  font-size: 0.82rem;
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 100;
+  animation: toast-in 0.25s ease;
+  max-width: 90vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 .controls { display: flex; gap: 10px; margin-bottom: 14px; }
 
 #stop-btn { background: var(--danger); }

@@ -79,6 +79,22 @@
           <div><span class="stat-value" id="stat-credit">—</span><span class="stat-label" data-i18n="stat.credit">credit score</span></div>
         </div>
 
+        <section id="game-panel" aria-label="Miner Buddy">
+          <div class="game-header">
+            <span id="pet-sprite" title="Miner Buddy">🥚</span>
+            <div class="game-info">
+              <div class="game-title-row">
+                <strong data-i18n="game.pet">Miner Buddy</strong>
+                <span id="pet-level" class="pet-level">Lv.1</span>
+                <span id="pet-streak" class="pet-streak" hidden></span>
+              </div>
+              <div class="xp-bar"><div id="xp-fill"></div></div>
+              <div class="xp-label"><span id="xp-text">0 / 50 XP</span></div>
+            </div>
+          </div>
+          <div id="badges" class="badges"></div>
+        </section>
+
         <div class="controls">
           <button id="start-btn" data-i18n="mine.start">Start mining</button>
           <button id="stop-btn" data-i18n="mine.stop" hidden>Stop mining</button>
@@ -104,6 +120,8 @@
         <button id="forget-btn" class="link-btn" data-i18n="mine.forget">Use a different account</button>
       </section>
     </main>
+
+    <div id="toast" class="toast" hidden></div>
 
     <script src="app.js"></script>
   </body>
