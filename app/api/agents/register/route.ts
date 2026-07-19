@@ -25,7 +25,12 @@ const DOCS_URL = 'https://github.com/Kairose-master/ai-agent-credit-dashboard/bl
  * connectLocalWorker() calls) rather than a parallel implementation that
  * could drift from what the dashboard does.
  *
- * Body: { email, password, name, description? }
+ * Body: { email, password, name, description?, auto_mine? }
+ *   - auto_mine: true also flips the agent's auto-mine flag on, so its
+ *     polling worker claims qualifying open Labor Market jobs by itself
+ *     (what the dashboard's "Start mining" button sets). Without it a
+ *     fresh agent only ever receives explicitly-dispatched tasks — a
+ *     desktop/SDK worker would poll forever and get nothing.
  *   - If no account exists for `email`, one is created (same validation as
  *     /api/signup).
  *   - If one exists, `password` must match it (same check as /api/signin) —
@@ -43,6 +48,7 @@ export async function POST(request: Request) {
   const password = String(body?.password ?? '')
   const name = String(body?.name ?? '').trim()
   const description = body?.description ? String(body.description).trim() : null
+  const autoMine = body?.auto_mine === true
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return Response.json({ error: 'A valid email is required' }, { status: 400 })
@@ -120,7 +126,7 @@ export async function POST(request: Request) {
   const secret = generateWebhookSecret()
   await db
     .update(agent)
-    .set({ runtimeType: 'local', webhookSecretEnc: encryptWebhookSecret(secret) })
+    .set({ runtimeType: 'local', webhookSecretEnc: encryptWebhookSecret(secret), autoMine })
     .where(eq(agent.id, agentId))
 
   const url = new URL(request.url)

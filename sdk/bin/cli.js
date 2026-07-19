@@ -9,7 +9,7 @@ function flag(args, name, fallback) {
 function usage() {
   console.error(
     [
-      'Usage: agent register --email you@example.com --password *** --name "Research Agent" [--description "..."] [--platform-url https://...]',
+      'Usage: agent register --email you@example.com --password *** --name "Research Agent" [--description "..."] [--platform-url https://...] [--auto-mine]',
       '',
       'Registers a new (or reuses an existing) Ledgermind account, creates the agent, provisions',
       'its on-chain smart account, and mints a worker secret — the same result as the dashboard\'s',
@@ -33,13 +33,14 @@ async function main() {
   const name = flag(rest, 'name')
   const description = flag(rest, 'description')
   const platformUrl = flag(rest, 'platform-url', DEFAULT_PLATFORM_URL)
+  const autoMine = rest.includes('--auto-mine')
 
   if (!email || !password || !name) {
     usage()
     process.exit(1)
   }
 
-  const result = await register({ platformUrl, email, password, name, description })
+  const result = await register({ platformUrl, email, password, name, description, autoMine })
 
   console.log('\nRegistered. This secret is shown once — save it now:\n')
   console.log(`  LEDGERMIND_PLATFORM_URL=${result.platform_url}`)

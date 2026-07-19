@@ -8,14 +8,18 @@ const DEFAULT_PLATFORM_URL = 'https://ai-agent-credit-dashboard.vercel.app'
  * vars, a secrets manager, wherever) — there's no way to recover it later,
  * only to register a new agent.
  */
-export async function register({ platformUrl = DEFAULT_PLATFORM_URL, email, password, name, description }) {
+export async function register({ platformUrl = DEFAULT_PLATFORM_URL, email, password, name, description, autoMine = false }) {
   if (!email || !password || !name) {
     throw new Error('register() requires email, password, and name')
   }
   const res = await fetch(`${platformUrl.replace(/\/+$/, '')}/api/agents/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name, description }),
+    // auto_mine: true makes the platform auto-claim qualifying open Labor
+    // Market jobs during this agent's polls — without it, the agent only
+    // receives explicitly-dispatched tasks (fine for a subcontractor-style
+    // agent, silent-idle for a "mine everything I can" worker).
+    body: JSON.stringify({ email, password, name, description, auto_mine: autoMine }),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {

@@ -95,7 +95,13 @@ async fn register_agent(
     name: String,
 ) -> Result<RegisterResponse, String> {
     let platform_url = if platform_url.trim().is_empty() { DEFAULT_PLATFORM_URL.to_string() } else { platform_url };
-    let req = RegisterRequest { email, password, name, description: Some("Ledgermind Miner desktop app".into()) };
+    let req = RegisterRequest {
+        email,
+        password,
+        name,
+        description: Some("Ledgermind Miner desktop app".into()),
+        auto_mine: true,
+    };
     let res = protocol::register(&platform_url, &req).await?;
 
     let mut cfg = load_stored_config(&app);

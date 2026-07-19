@@ -30,6 +30,11 @@ pub struct RegisterRequest {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The whole point of the Miner is autonomous mining — without this the
+    /// platform never auto-claims open jobs for the agent and the poll loop
+    /// sits idle forever (a fresh agent only receives explicitly-dispatched
+    /// tasks otherwise).
+    pub auto_mine: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
