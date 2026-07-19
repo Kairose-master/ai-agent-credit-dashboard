@@ -47,16 +47,20 @@ export async function POST(request: Request) {
           serverInfo: { name: 'ledgermind', version: '1.0.0' },
           instructions:
             'Ledgermind is an AI-agent labor market with on-chain (testnet USDC) escrow. ' +
-            'Use plan_delegation to decompose a goal into priced subtasks (free), review the plan, ' +
-            'then confirm_delegation to escrow bounties and post the work. delegation_status tracks ' +
-            'progress and returns the assembled final output when done.',
+            'You can work BOTH sides of it. Requester side: plan_delegation decomposes a goal into ' +
+            'priced subtasks (free), then confirm_delegation escrows bounties and posts the work; ' +
+            'delegation_status tracks progress and returns the assembled output. Worker side: ' +
+            'browse_open_jobs → claim_job (accepts the escrowed job for one of your agents and hands ' +
+            'you the full task) → do the work yourself, right here in this conversation → submit_work. ' +
+            'Passing independent grading pays the bounty into your agent wallet; my_work shows verdicts ' +
+            'and earnings. Create an agent first with create_worker_agent if the account has none.',
         })
       case 'ping':
         return rpcResult(msg.id, {})
       case 'tools/list':
         return rpcResult(msg.id, { tools: TOOLS })
       case 'tools/call':
-        return await callTool(msg.id, auth, String(msg.params?.name ?? ''), msg.params?.arguments ?? {})
+        return await callTool(msg.id, auth, String(msg.params?.name ?? ''), msg.params?.arguments ?? {}, origin)
       default:
         return rpcError(msg.id, -32601, `Method not found: ${msg.method}`)
     }
@@ -137,9 +141,57 @@ const TOOLS = [
     description: 'Open jobs on the labor market right now (bounty, title, requirements) — work your agents could claim.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  {
+    name: 'create_worker_agent',
+    description:
+      'Create a worker agent on this account (with its own on-chain wallet) so you can claim and earn from jobs. ' +
+      'No money moves — agents earn INTO their wallet. Skip if list_my_agents already shows a provisioned agent.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'Agent display name, e.g. "Claude Worker"' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'claim_job',
+    description:
+      'Accept an Open job for one of your agents and receive the full task. YOU then do the work in this ' +
+      'conversation and call submit_work with the result. Claiming commits your agent on-chain: failing to ' +
+      'submit (or failing the grading) hurts its credit score, so claim only jobs you can genuinely complete.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'number' },
+        agent_name: { type: 'string', description: 'Which of your agents claims it (optional — defaults to the first provisioned one)' },
+      },
+      required: ['job_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'submit_work',
+    description:
+      'Submit your completed work for a claimed job. Auto-graded jobs (Python tests / vision review) settle ' +
+      'immediately: pass pays the bounty into your agent wallet, fail refunds and reposts. Returns the verdict.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'From claim_job' },
+        output: { type: 'string', description: 'The complete deliverable (for code jobs include the full ```python block)' },
+      },
+      required: ['task_id', 'output'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'my_work',
+    description: "Your agents' claimed jobs with grading verdicts, payout status and earnings.",
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
 ]
 
-async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<string, unknown>) {
+async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<string, unknown>, origin: string) {
   switch (name) {
     case 'list_my_agents': {
       const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
@@ -262,6 +314,143 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         const spec = byHash.get(j.specHash)
         const kind = spec?.deliverableKind && spec.deliverableKind !== 'text' ? ` [${spec.deliverableKind}]` : ''
         return `#${j.id} · $${j.bounty} · ${spec?.title ?? 'Untitled'}${kind} (min score ${j.minScore})`
+      })
+      return toolText(id, lines.join('\n'))
+    }
+
+    case 'create_worker_agent': {
+      const name_ = String(args.name ?? '').trim()
+      if (!name_ || name_.length > 100) return toolText(id, 'name must be 1-100 characters.', true)
+      const owned = await db.select({ id: agent.id }).from(agent).where(eq(agent.userId, auth.userId))
+      const maxAgents = Number(process.env.MAX_AGENTS_PER_ACCOUNT ?? 20)
+      if (owned.length >= maxAgents) return toolText(id, `Account agent limit reached (${maxAgents}).`, true)
+
+      const { randomBytes } = await import('node:crypto')
+      const agentId = nanoid()
+      await db.insert(agent).values({
+        id: agentId,
+        userId: auth.userId,
+        name: name_,
+        walletAddress: `0x${randomBytes(20).toString('hex')}`,
+        description: 'MCP connector worker (works live inside a Claude/ChatGPT session)',
+        modelVersion: 'claude-sonnet-5',
+        creditScore: '0',
+        creditRating: 'unrated',
+        riskLevel: 'UNKNOWN',
+        riskRating: 'unrated',
+        totalCreditLine: '0',
+        availableCredit: '0',
+        capabilities: ['text'],
+      })
+      let address: string | null = null
+      try {
+        const { isAgentAccountConfigured } = await import('@/lib/onchain/config')
+        if (isAgentAccountConfigured()) {
+          const { getAgentAccountAddress } = await import('@/lib/onchain/account')
+          address = await getAgentAccountAddress(agentId)
+          await db.update(agent).set({ smartAccountAddress: address }).where(eq(agent.id, agentId))
+          const { recalculateCredit } = await import('@/lib/credit-engine')
+          await recalculateCredit(agentId)
+        }
+      } catch (e) {
+        console.error('[mcp] provisioning failed (non-fatal):', e)
+      }
+      return toolText(
+        id,
+        `Agent "${name_}" created${address ? ` with wallet ${address}` : ' (wallet provisioning pending — retry later)'}. ` +
+          'It can now claim jobs with claim_job; bounties it earns land in that wallet.',
+      )
+    }
+
+    case 'claim_job': {
+      const jobId = Number(args.job_id)
+      if (!Number.isInteger(jobId) || jobId < 0) return toolText(id, 'job_id must be a job number.', true)
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wanted = args.agent_name ? String(args.agent_name) : null
+      const worker = wanted
+        ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+        : agents.find((a) => a.smartAccountAddress)
+      if (!worker) return toolText(id, wanted ? `No agent named "${wanted}".` : 'No provisioned agent — call create_worker_agent first.', true)
+      if (!worker.smartAccountAddress) return toolText(id, `Agent ${worker.name} has no wallet yet.`, true)
+
+      const { acceptJobForExternalWorker } = await import('@/lib/labor-dispatch')
+      const { taskId, prompt, bounty } = await acceptJobForExternalWorker(worker, jobId)
+      return toolText(
+        id,
+        `Claimed job #${jobId} ($${bounty}) as ${worker.name}. task_id: ${taskId}\n\n` +
+          `Now DO this work yourself, in this conversation, then call submit_work with the task_id and your complete result:\n\n${prompt}`,
+      )
+    }
+
+    case 'submit_work': {
+      const taskId = String(args.task_id ?? '')
+      const output = String(args.output ?? '')
+      if (!taskId || !output.trim()) return toolText(id, 'task_id and a non-empty output are required.', true)
+
+      const { agentTask } = await import('@/lib/db/schema')
+      const [task] = await db.select().from(agentTask).where(eq(agentTask.id, taskId))
+      if (!task || task.userId !== auth.userId) return toolText(id, 'Task not found on this account.', true)
+      if (task.status !== 'running') return toolText(id, `Task is already ${task.status}.`, true)
+
+      // Route through the real callback endpoint — grading, credit events
+      // and settlement stay on the single battle-tested path.
+      const { resolveCallbackAuth } = await import('@/lib/webhook')
+      const cbAuth = await resolveCallbackAuth(task.agentId)
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (cbAuth.required) headers['X-Runtime-Secret'] = cbAuth.secret
+      const res = await fetch(`${origin}/api/runtime/callback`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          task_id: taskId,
+          agent_id: task.agentId,
+          success: true,
+          output,
+          quality_score: null,
+          execution_time: 0,
+          token_cost: 0,
+          events: [],
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        return toolText(id, `Submission failed (${res.status}): ${body.slice(0, 300)}`, true)
+      }
+
+      // Read back what grading + settlement decided.
+      const { jobSpec } = await import('@/lib/db/schema')
+      const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, taskId))
+      const { readJobs } = await import('@/lib/onchain/labor')
+      const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
+      const job = spec?.onchainJobId != null ? jobs.find((j) => j.id === spec.onchainJobId) : undefined
+      const verdict = spec?.testResult
+        ? spec.testResult.passed === true
+          ? 'Independent grading PASSED.'
+          : spec.testResult.passed === false
+            ? `Independent grading FAILED: ${spec.testResult.output.slice(0, 300)}`
+            : `Grading unavailable — awaiting manual review (${spec.testResult.output.slice(0, 200)})`
+        : 'No automatic grading on this job — the requester reviews manually.'
+      const settle =
+        job?.status === 'Completed'
+          ? `Escrow released — $${job.bounty} paid to your agent's wallet. 🎉`
+          : job?.status === 'Refunded'
+            ? 'Escrow refunded to the requester; the job was reposted for another worker.'
+            : `Job status: ${job?.status ?? 'unknown'}.`
+      return toolText(id, `Submitted. ${verdict}\n${settle}`)
+    }
+
+    case 'my_work': {
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const mine = new Map(agents.map((a) => [a.id, a]))
+      const { jobSpec } = await import('@/lib/db/schema')
+      const specs = (await db.select().from(jobSpec)).filter((s) => s.workerAgentId && mine.has(s.workerAgentId))
+      if (specs.length === 0) return toolText(id, 'No claimed jobs yet — browse_open_jobs → claim_job to start earning.')
+      const { readJobs } = await import('@/lib/onchain/labor')
+      const jobs = await readJobs().catch(() => [])
+      const lines = specs.slice(-10).map((s) => {
+        const job = s.onchainJobId != null ? jobs.find((j) => j.id === s.onchainJobId) : undefined
+        const grade = s.testResult ? (s.testResult.passed === true ? 'passed' : s.testResult.passed === false ? 'FAILED' : 'ungraded') : '—'
+        return `#${s.onchainJobId ?? '?'} · ${s.title.slice(0, 50)} · ${job?.status ?? '?'} · grading: ${grade} · agent: ${mine.get(s.workerAgentId!)?.name}`
       })
       return toolText(id, lines.join('\n'))
     }
