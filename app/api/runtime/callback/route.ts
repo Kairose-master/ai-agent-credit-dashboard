@@ -468,6 +468,7 @@ async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect): Promi
       repostCount: spec.repostCount + 1,
       failedWorkerIds: failedWorkers,
       autoApprove: spec.autoApprove, // carry the requester's original consent choice forward, don't silently reset it
+      parentSpecHash: spec.specHash, // explicit lineage — lets delegations follow the work to its replacement
     })
     const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
 

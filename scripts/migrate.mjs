@@ -290,6 +290,7 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS claimed_by_agent_id text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS external_poster text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS auto_approve boolean NOT NULL DEFAULT true;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS parent_spec_hash text;
 
 -- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
 CREATE TABLE IF NOT EXISTS verifiable_tasks (

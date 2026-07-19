@@ -291,10 +291,23 @@ export async function tickDelegation(
     }
 
     if (job.status === 'Cancelled' || job.status === 'Refunded') {
-      // Refunded = the mechanical grader failed it and the auto-repost
-      // path took over with a NEW job this delegation doesn't follow (the
-      // repost lineage is market-wide, not delegation-scoped). Mark the
-      // part failed; the budget for it came back to the prime's wallet.
+      // Refunded = the grader failed a worker's submission and the
+      // auto-return path refunded + reposted the same spec as a NEW job
+      // (parentSpecHash lineage, recorded at repost time). Follow the
+      // lineage: retarget this subtask at the replacement and keep
+      // tracking, so one bad worker doesn't dead-end the delegation.
+      const successor = st.specHash
+        ? specs.find((s) => s.parentSpecHash === st.specHash)
+        : undefined
+      const successorJob = successor ? jobs.find((j) => j.specHash === successor.specHash) : undefined
+      if (successor && successorJob) {
+        st.specHash = successor.specHash
+        st.onchainJobId = successorJob.id
+        changed = true
+        continue
+      }
+      // No replacement on-chain (owner cancel, repost failure, or a
+      // pre-lineage refund) — terminal. Escrow is back in the prime's wallet.
       st.failed = true
       st.failReason = `job ${job.status.toLowerCase()} — escrow returned`
       changed = true
