@@ -39,6 +39,7 @@ const KO = {
   'withdraw.to': '받는 주소',
   'withdraw.password': '계정 비밀번호',
   'withdraw.submit': '인출',
+  'game.pet': '채굴 펫',
 }
 
 let lang = localStorage.getItem('miner-lang') || 'en'
@@ -157,6 +158,187 @@ function initBackendView() {
   })
 }
 
+// ---------- Minigame: Miner Buddy ----------
+//
+// A game layer over the *real* mining stats — nothing here is simulated.
+// Completed tasks grant XP (with a streak bonus), the pet evolves at level
+// thresholds, and achievements unlock off task counts, streaks, balance and
+// credit rating. State persists in localStorage so it survives restarts.
+
+const GAME_KEY = 'miner-game-v1'
+
+const PET_STAGES = [
+  [1, '🥚'], [3, '🐣'], [5, '🤖'], [8, '🦾'], [12, '👑'], [16, '🐉'], [20, '🌟'],
+]
+
+const ACHIEVEMENTS = [
+  { id: 'first_task', emoji: '🎯', en: 'First task completed', ko: '첫 작업 완료' },
+  { id: 'tasks10', emoji: '⚒️', en: '10 tasks completed', ko: '작업 10개 완료' },
+  { id: 'tasks50', emoji: '🏭', en: '50 tasks completed', ko: '작업 50개 완료' },
+  { id: 'streak5', emoji: '🔥', en: '5-task streak', ko: '연속 5개 성공' },
+  { id: 'streak10', emoji: '🌋', en: '10-task streak', ko: '연속 10개 성공' },
+  { id: 'dollar1', emoji: '💵', en: 'First $1 earned', ko: '첫 $1 달성' },
+  { id: 'dollar10', emoji: '💰', en: '$10 earned', ko: '$10 달성' },
+  { id: 'level5', emoji: '⭐', en: 'Reached level 5', ko: '레벨 5 달성' },
+  { id: 'level10', emoji: '🌟', en: 'Reached level 10', ko: '레벨 10 달성' },
+  { id: 'credit_a', emoji: '🏆', en: 'A-tier credit rating', ko: '신용 A등급' },
+]
+
+function loadGame() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(GAME_KEY))
+    if (raw && typeof raw.xp === 'number') return raw
+  } catch { /* corrupted state — start over */ }
+  return { xp: 0, level: 1, total: 0, streak: 0, best: 0, ach: {} }
+}
+
+const game = loadGame()
+
+function saveGame() {
+  localStorage.setItem(GAME_KEY, JSON.stringify(game))
+}
+
+// XP needed to go from `level` to `level + 1`.
+function xpNeeded(level) {
+  return 50 + (level - 1) * 25
+}
+
+function petForLevel(level) {
+  let sprite = PET_STAGES[0][1]
+  for (const [min, emoji] of PET_STAGES) if (level >= min) sprite = emoji
+  return sprite
+}
+
+let toastTimer = null
+
+function showToast(message) {
+  const el = document.getElementById('toast')
+  el.textContent = message
+  el.hidden = false
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { el.hidden = true }, 4000)
+}
+
+function unlock(id) {
+  if (game.ach[id]) return
+  const def = ACHIEVEMENTS.find((a) => a.id === id)
+  if (!def) return
+  game.ach[id] = Date.now()
+  saveGame()
+  const name = lang === 'ko' ? def.ko : def.en
+  const label = lang === 'ko' ? '업적 달성' : 'Achievement unlocked'
+  showToast(`${def.emoji} ${label}: ${name}`)
+  appendLog(`🏅 ${label}: ${name}`)
+  renderGame()
+}
+
+function bouncePet() {
+  const el = document.getElementById('pet-sprite')
+  el.classList.remove('bounce')
+  void el.offsetWidth // restart the CSS animation
+  el.classList.add('bounce')
+}
+
+function addXp(amount) {
+  game.xp += amount
+  let leveled = false
+  while (game.xp >= xpNeeded(game.level)) {
+    game.xp -= xpNeeded(game.level)
+    game.level += 1
+    leveled = true
+  }
+  if (leveled) {
+    const msg = lang === 'ko'
+      ? `${petForLevel(game.level)} 레벨 업! Lv.${game.level}`
+      : `${petForLevel(game.level)} Level up! Now Lv.${game.level}`
+    showToast(msg)
+    appendLog(`🎉 ${msg}`)
+    if (game.level >= 5) unlock('level5')
+    if (game.level >= 10) unlock('level10')
+  }
+}
+
+function onTaskDone() {
+  game.total += 1
+  game.streak += 1
+  if (game.streak > game.best) game.best = game.streak
+  // 10 XP per task + streak bonus (2 XP per consecutive task, capped at +20)
+  addXp(10 + Math.min((game.streak - 1) * 2, 20))
+  unlock('first_task')
+  if (game.total >= 10) unlock('tasks10')
+  if (game.total >= 50) unlock('tasks50')
+  if (game.streak >= 5) unlock('streak5')
+  if (game.streak >= 10) unlock('streak10')
+  saveGame()
+  renderGame()
+  bouncePet()
+}
+
+function onTaskFail() {
+  game.streak = 0
+  addXp(1) // consolation XP — the model did try
+  saveGame()
+  renderGame()
+}
+
+function renderGame() {
+  const panel = document.getElementById('game-panel')
+  if (!panel) return
+  document.getElementById('pet-sprite').textContent = petForLevel(game.level)
+  document.getElementById('pet-level').textContent = `Lv.${game.level}`
+
+  const streakEl = document.getElementById('pet-streak')
+  streakEl.hidden = game.streak < 2
+  streakEl.textContent = `🔥×${game.streak}`
+
+  const need = xpNeeded(game.level)
+  document.getElementById('xp-fill').style.width = `${Math.min(100, (game.xp / need) * 100)}%`
+  document.getElementById('xp-text').textContent = `${game.xp} / ${need} XP`
+
+  const badges = document.getElementById('badges')
+  badges.innerHTML = ''
+  for (const a of ACHIEVEMENTS) {
+    const span = document.createElement('span')
+    const unlocked = Boolean(game.ach[a.id])
+    span.className = unlocked ? 'badge' : 'badge locked'
+    span.textContent = a.emoji
+    span.title = lang === 'ko' ? a.ko : a.en
+    badges.appendChild(span)
+  }
+}
+
+// Wire real stat deltas into the game. Counters come from the Rust mining
+// loop as running totals per app run, so we diff against the last seen
+// values (and re-sync if they ever go backwards, e.g. after a restart).
+let prevCompleted = null
+let prevFailed = null
+
+function gameOnStatus(completed, failed) {
+  if (prevCompleted === null) {
+    prevCompleted = completed
+    prevFailed = failed
+    return
+  }
+  if (completed < prevCompleted || failed < prevFailed) {
+    prevCompleted = completed
+    prevFailed = failed
+    return
+  }
+  for (let i = prevCompleted; i < completed; i++) onTaskDone()
+  for (let i = prevFailed; i < failed; i++) onTaskFail()
+  prevCompleted = completed
+  prevFailed = failed
+}
+
+function gameOnWallet(usdc) {
+  if (usdc >= 1) unlock('dollar1')
+  if (usdc >= 10) unlock('dollar10')
+}
+
+function gameOnCredit(rating) {
+  if (typeof rating === 'string' && rating.startsWith('A')) unlock('credit_a')
+}
+
 // ---------- Step 3: mining dashboard ----------
 
 function backendLabel(backend) {
@@ -180,6 +362,7 @@ function onMiningEvent(payload) {
     badge.dataset.state = payload.state
     setText('stat-completed', String(payload.tasks_completed))
     setText('stat-failed', String(payload.tasks_failed))
+    gameOnStatus(payload.tasks_completed, payload.tasks_failed)
 
     const running = payload.state === 'polling' || payload.state === 'running' || payload.state === 'warming'
     document.getElementById('start-btn').hidden = running
@@ -197,6 +380,7 @@ async function refreshWallet() {
       el.textContent = '—'
     } else {
       el.textContent = `$${w.usdc.toFixed(2)}`
+      gameOnWallet(w.usdc)
     }
   } catch {
     /* wallet not provisioned yet or offline — leave the dash */
@@ -204,6 +388,7 @@ async function refreshWallet() {
   try {
     const card = await invoke('get_agent_card')
     document.getElementById('stat-credit').textContent = `${card.credit_score} · ${card.credit_rating}`
+    gameOnCredit(card.credit_rating)
   } catch {
     /* card unavailable — leave the dash */
   }
@@ -276,6 +461,7 @@ async function enterMiningView() {
   setText('agent-name-display', cfg.agent.name)
   setText('backend-label-display', backendLabel(cfg.backend))
 
+  renderGame()
   refreshWallet()
   if (!walletTimer) walletTimer = setInterval(refreshWallet, 60_000)
 }
@@ -288,6 +474,7 @@ async function boot() {
     lang = lang === 'ko' ? 'en' : 'ko'
     localStorage.setItem('miner-lang', lang)
     applyLang()
+    renderGame() // badge tooltips follow the language
   })
 
   await initRegisterView()
