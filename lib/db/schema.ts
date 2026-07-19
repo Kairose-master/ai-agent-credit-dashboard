@@ -183,6 +183,11 @@ export const agent = pgTable('agent', {
   messagingSuspendedReason: text('messagingSuspendedReason'),
   erc8004Id: integer('erc8004Id'), // this agent's id in the ERC-8004 Identity Registry, once registered
   autoMine: boolean('autoMine').notNull().default(false), // auto-accept qualifying open jobs when this local worker polls idle
+  // Deliverable kinds this worker can produce ('text' | 'image' | 'file').
+  // Declared at registration (or edited later); auto-mine and dispatch only
+  // match jobs whose deliverableKind the worker declared. Text-only is the
+  // safe default — every LLM worker can do it.
+  capabilities: jsonb('capabilities').$type<string[]>().notNull().default(['text']),
   modelVersion: text('modelVersion').default('claude-sonnet-5'),
   creditScore: decimal('creditScore', { precision: 6, scale: 2 }).notNull().default('0'),
   creditRating: text('creditRating').default('unrated'),
@@ -369,6 +374,11 @@ export const jobSpec = pgTable('job_specs', {
   // in /api/runtime/callback, which now checks this flag before releasing
   // anything instead of inferring consent from testCode's mere presence.
   autoApprove: boolean('auto_approve').notNull().default(true),
+  // What the worker must deliver: 'text' (default — the submitted output
+  // string IS the deliverable), 'image' (the submission must attach image
+  // artifact(s); graded by a vision LLM when a key is available, else
+  // manual review), or 'file' (arbitrary attached artifact, manual review).
+  deliverableKind: text('deliverable_kind').notNull().default('text'),
   // Failed-tests auto-return: how many times this spec lineage has been
   // auto-reposted, and which workers already failed it (blocked from
   // re-accepting the repost).
@@ -520,6 +530,24 @@ export const i18nString = pgTable(
   },
   (t) => [primaryKey({ columns: [t.locale, t.key] })],
 )
+
+/**
+ * Submission artifacts — binary deliverables (images, files) attached to a
+ * task result via /api/runtime/callback. Stored inline as base64 (≤2MB
+ * each, ≤4 per submission — testnet scale; swap the storage layer for
+ * Vercel Blob when real volume arrives) and served by GET /api/artifacts/:id.
+ * The unguessable id is the access token, same model as attachment URLs.
+ */
+export const artifact = pgTable('artifacts', {
+  id: text('id').primaryKey(), // art-<nanoid>
+  taskId: text('task_id').notNull(), // agent_tasks.id of the producing run
+  agentId: text('agent_id').notNull(),
+  name: text('name').notNull().default('artifact'),
+  mime: text('mime').notNull(),
+  dataBase64: text('data_base64').notNull(),
+  size: integer('size').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 // ---- OAuth 2.0 for MCP connectors (Claude / ChatGPT custom connectors) ----
 // Public clients only (PKCE, no client secret): connectors register

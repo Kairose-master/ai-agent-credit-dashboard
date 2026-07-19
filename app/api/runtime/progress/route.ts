@@ -37,5 +37,16 @@ export async function POST(request: Request) {
     detail: event.detail ?? {},
   })
 
+  // Progress IS liveness: reapStuckTasks() times out on updatedAt, so a
+  // heartbeat from a legitimately long run (video render, big batch)
+  // resets its clock. Only while genuinely in flight — a terminal task's
+  // timestamps stay put.
+  if (taskRow.status === 'running' || taskRow.status === 'processing') {
+    await db
+      .update(agentTask)
+      .set({ updatedAt: new Date() })
+      .where(eq(agentTask.id, taskId))
+  }
+
   return Response.json({ status: 'ok' })
 }

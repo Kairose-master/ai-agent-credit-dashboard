@@ -62,6 +62,10 @@ export async function autoMineTick(agent: AgentRow, callbackUrl: string): Promis
     if (!spec) continue // no off-chain spec = nothing to actually do
     if (spec.failedWorkerIds?.includes(agent.id)) continue
     if (isClaimedByOther(spec, agent.id)) continue // another rig has this work unit
+    // Capability match: an image job must never be claimed by a text-only
+    // worker — it would burn an on-chain accept on work it cannot do.
+    const { workerCanDeliver } = await import('@/lib/artifacts')
+    if (!workerCanDeliver(agent.capabilities, spec.deliverableKind ?? 'text')) continue
 
     try {
       await acceptAndDispatchJob(agent, j.id, callbackUrl)

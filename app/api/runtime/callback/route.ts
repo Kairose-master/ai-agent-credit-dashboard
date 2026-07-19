@@ -54,6 +54,26 @@ export async function POST(request: Request) {
   const events = Array.isArray(body?.events) ? body.events : []
 
   try {
+    // Binary deliverables (images/files) ride alongside the text output.
+    // Validated hard before anything is stored; a bad artifact set fails
+    // the submission with an actionable error instead of dropping files.
+    const { validateArtifacts } = await import('@/lib/artifacts')
+    const artifacts = validateArtifacts(body?.artifacts)
+    if (artifacts.length > 0) {
+      const { artifact } = await import('@/lib/db/schema')
+      await db.insert(artifact).values(
+        artifacts.map((a) => ({
+          id: `art-${nanoid(16)}`,
+          taskId,
+          agentId,
+          name: a.name,
+          mime: a.mime,
+          dataBase64: a.dataBase64,
+          size: a.size,
+        })),
+      )
+    }
+
     if (events.length > 0) {
       await db.insert(agentEvent).values(
         events.map((event: any) => ({
@@ -252,17 +272,32 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
     console.error('[runtime/callback] labor market auto-submit failed:', error)
   }
 
-  if (!spec.testCode) return
+  // Two independent grading paths produce the same verdict shape:
+  // Python asserts for code jobs, a vision LLM for image deliverables.
+  // Jobs with neither stay ungraded (manual requester review).
+  const isImageJob = spec.deliverableKind === 'image'
+  if (!spec.testCode && !isImageJob) return
   try {
-    const { extractPythonCode, gradeSubmission } = await import('@/lib/code-grading')
-    const solutionCode = extractPythonCode(output)
-    const grade = solutionCode
-      ? await gradeSubmission(solutionCode, spec.testCode)
-      : {
-          passed: false,
-          output: 'No Python code block found in the submission (the task required one).',
-          gradedAt: new Date().toISOString(),
-        }
+    let grade: { passed: boolean | null; output: string; gradedAt: string }
+    if (isImageJob) {
+      const { artifact, agent } = await import('@/lib/db/schema')
+      const arts = await db.select().from(artifact).where(eq(artifact.taskId, agentTaskId))
+      const [requesterAgent] = spec.requesterAgentId
+        ? await db.select().from(agent).where(eq(agent.id, spec.requesterAgentId))
+        : []
+      const { gradeImageSubmission } = await import('@/lib/vision-grading')
+      grade = await gradeImageSubmission(spec, arts, requesterAgent?.userId ?? null)
+    } else {
+      const { extractPythonCode, gradeSubmission } = await import('@/lib/code-grading')
+      const solutionCode = extractPythonCode(output)
+      grade = solutionCode
+        ? await gradeSubmission(solutionCode, spec.testCode!)
+        : {
+            passed: false,
+            output: 'No Python code block found in the submission (the task required one).',
+            gradedAt: new Date().toISOString(),
+          }
+    }
 
     await db.update(jobSpec).set({ testResult: grade }).where(eq(jobSpec.specHash, spec.specHash))
 
@@ -282,7 +317,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
       })
       await logPlatformEvent(
         grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
-        `"${spec.title}" — acceptance tests ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
+        `"${spec.title}" — ${isImageJob ? 'vision review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
       )
 
       // Mirror the graded fact into the ERC-8004 Validation Registry — but
@@ -299,7 +334,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         await publishValidation(
           spec.workerAgentId,
           grade.passed ? 100 : 0,
-          'acceptance-tests',
+          isImageJob ? 'vision-review' : 'acceptance-tests',
           `job-${spec.onchainJobId}`,
         )
       }

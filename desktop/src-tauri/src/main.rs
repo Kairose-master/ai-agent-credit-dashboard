@@ -116,6 +116,7 @@ async fn register_agent(
         name,
         description: Some("Ledgermind Miner desktop app".into()),
         auto_mine: true,
+        capabilities: vec!["text".into()],
     };
     let res = protocol::register(&platform_url, &req).await?;
 

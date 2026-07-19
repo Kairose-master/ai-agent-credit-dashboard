@@ -78,11 +78,21 @@ export async function POST(request: Request) {
 
   if (claimed.length === 0) return Response.json({ task: null }) // raced — next poll
 
+  // Tell the worker what kind of deliverable this task expects — an image
+  // job needs the callback to attach artifacts, not just text.
+  let deliverableKind = 'text'
+  try {
+    const { jobSpec } = await import('@/lib/db/schema')
+    const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, candidate.id))
+    if (spec?.deliverableKind) deliverableKind = spec.deliverableKind
+  } catch { /* pre-migration DB — text is always right */ }
+
   return Response.json({
     task: {
       task_id: candidate.id,
       agent_id: agentId,
       task: candidate.task,
+      deliverable_kind: deliverableKind,
     },
   })
 }

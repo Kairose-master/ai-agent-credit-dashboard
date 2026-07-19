@@ -35,6 +35,10 @@ pub struct RegisterRequest {
     /// sits idle forever (a fresh agent only receives explicitly-dispatched
     /// tasks otherwise).
     pub auto_mine: bool,
+    /// Deliverable kinds this worker can produce. The Miner runs chat
+    /// models, so it's text-only — the platform then never routes it an
+    /// image job it can't do.
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

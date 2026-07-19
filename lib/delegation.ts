@@ -35,6 +35,10 @@ export interface DelegationSubtask {
   description: string
   acceptanceCriteria: string
   bountyUsd: number
+  /** What the worker must deliver — 'text' (default) or 'image'. Image
+   *  subtasks are only matched to workers that declared the capability,
+   *  and are graded by the vision reviewer instead of text verification. */
+  deliverableKind?: 'text' | 'image'
   /** Optional Python asserts — when present the subtask flows through the
    *  existing mechanical grading path instead of LLM review. */
   testCode?: string | null
@@ -120,7 +124,8 @@ Rules:
 - acceptanceCriteria must be concrete enough that an independent reviewer can judge pass/fail from the criteria and the output text alone.
 - Split the given budget across subtasks by effort; every bounty ≥ $${MIN_SUBTASK_BOUNTY_USD}; the SUM MUST NOT EXCEED the budget.
 - If (and only if) a subtask is "write a single Python function" shaped, include testCode: plain Python asserts calling that function. Otherwise omit testCode.
-- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "testCode"?}] — no commentary, no code fences.`
+- Each subtask has deliverableKind: "text" (writing, code, analysis — the default) or "image" (the worker must PRODUCE an image, e.g. a logo, illustration, or diagram render). Use "image" only when the client's goal genuinely requires image output — image-capable workers are scarcer, so never mark a describable-in-text deliverable as an image.
+- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "testCode"?}] — no commentary, no code fences.`
 
 /** Parse + validate raw planner output into subtasks. Pure — separated
  *  from the LLM call so the guardrails (count bounds, bounty bounds,
@@ -155,6 +160,7 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
       description,
       acceptanceCriteria,
       bountyUsd: Math.round(bountyUsd * 100) / 100,
+      deliverableKind: raw?.deliverableKind === 'image' ? ('image' as const) : ('text' as const),
       testCode: typeof raw?.testCode === 'string' && raw.testCode.trim() ? raw.testCode.trim() : null,
     }
   })
@@ -226,10 +232,12 @@ export async function postDelegationJobs(
       acceptanceCriteria: st.acceptanceCriteria,
       requesterAgentId: primeAgentId,
       testCode: st.testCode ?? null,
-      // Mechanical grading (testCode) may auto-release under the existing
-      // bounded path; LLM-verified subtasks release via the delegation
-      // verifier below, so the job itself stays manual-approve.
-      autoApprove: Boolean(st.testCode),
+      deliverableKind: st.deliverableKind ?? 'text',
+      // Independent grading (Python tests, or the vision reviewer for
+      // image deliverables) may auto-release under the existing bounded
+      // path; text subtasks without tests release via the delegation
+      // verifier below, so those jobs stay manual-approve.
+      autoApprove: Boolean(st.testCode) || st.deliverableKind === 'image',
     })
 
     // Bundler rate limits back-to-back userops (free tier) — space them.
@@ -270,6 +278,26 @@ async function verifySubmission(
     // human rather than guessing either way with escrowed money.
     return { pass: false, reason: 'verifier returned no parseable verdict — left for manual review' }
   }
+}
+
+/** Snapshot a subtask's deliverable: the worker's text output plus, for
+ *  binary work, stable /api/artifacts links (markdown, so the final
+ *  assembly renders images inline wherever it's displayed). */
+async function snapshotOutput(agentTaskId: string | null, textOutput: string | null): Promise<string> {
+  let text = textOutput ?? '(worker output unavailable)'
+  if (agentTaskId) {
+    try {
+      const { artifact } = await import('@/lib/db/schema')
+      const arts = await db.select().from(artifact).where(eq(artifact.taskId, agentTaskId))
+      if (arts.length > 0) {
+        const links = arts
+          .map((a) => (a.mime.startsWith('image/') ? `![${a.name}](/api/artifacts/${a.id})` : `[${a.name}](/api/artifacts/${a.id})`))
+          .join('\n')
+        text = `${text}\n\n${links}`
+      }
+    } catch { /* artifacts table missing pre-migration — text only */ }
+  }
+  return text
 }
 
 /** Deterministic final assembly — never depends on an LLM being available,
@@ -319,11 +347,11 @@ export async function tickDelegation(
 
     if (job.status === 'Completed') {
       // Paid out (mechanically graded path, or our own earlier approval) —
-      // snapshot the deliverable.
+      // snapshot the deliverable, including artifact links for binary work.
       const task = spec?.agentTaskId
         ? (await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId)))[0]
         : undefined
-      st.output = task?.output ?? '(worker output unavailable)'
+      st.output = await snapshotOutput(spec?.agentTaskId ?? null, task?.output ?? null)
       changed = true
       continue
     }
@@ -352,7 +380,10 @@ export async function tickDelegation(
       continue
     }
 
-    if (job.status === 'Submitted' && row.autoVerify) {
+    // Text subtasks only: the text verifier can't see an image, so image
+    // deliverables settle exclusively through the vision grading that ran
+    // at submission time (pass → auto-release; no verdict → manual review).
+    if (job.status === 'Submitted' && row.autoVerify && (st.deliverableKind ?? 'text') === 'text') {
       const task = spec?.agentTaskId
         ? (await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId)))[0]
         : undefined

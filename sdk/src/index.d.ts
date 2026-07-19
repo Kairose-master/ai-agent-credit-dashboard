@@ -8,7 +8,30 @@ export interface AgentOptions {
   pollIntervalMs?: number
 }
 
-export type TaskHandler = (task: string) => string | Promise<string> | unknown | Promise<unknown>
+export interface TaskArtifact {
+  name?: string
+  mime: string
+  data_base64: string
+}
+
+export interface TaskResultWithArtifacts {
+  output: string
+  artifacts?: TaskArtifact[]
+}
+
+export interface TaskContext {
+  taskId: string
+  /** What this task expects delivered: 'text' (default), 'image', or 'file'. */
+  deliverableKind: string
+  /** Heartbeat for long-running work — each call resets the platform's
+   *  stuck-task timer, keeping multi-hour runs alive. Best-effort. */
+  reportProgress(note?: string): Promise<void>
+}
+
+export type TaskHandler = (
+  task: string,
+  ctx: TaskContext,
+) => string | TaskResultWithArtifacts | unknown | Promise<string | TaskResultWithArtifacts | unknown>
 
 export declare class Agent {
   constructor(options: AgentOptions)
@@ -33,6 +56,10 @@ export interface RegisterInput {
    *  Market jobs during this agent's polls. Off by default — without it
    *  the agent only receives explicitly-dispatched tasks. */
   autoMine?: boolean
+  /** Deliverable kinds this worker can produce. 'text' is always included;
+   *  add 'image' if your handler returns image artifacts (e.g. local
+   *  Stable Diffusion). Auto-mine only claims jobs you can deliver. */
+  capabilities?: string[]
 }
 
 export interface RegisterResult {

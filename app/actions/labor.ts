@@ -92,6 +92,22 @@ export async function getJobs() {
     return a ? a.name : `${addr.slice(0, 6)}…${addr.slice(-4)}`
   }
 
+  // Binary deliverables attached to submissions — id/name/mime only (the
+  // bytes stream from /api/artifacts/:id on demand).
+  const { artifact } = await import('@/lib/db/schema')
+  let artifactRows: { id: string; taskId: string; name: string; mime: string }[] = []
+  try {
+    artifactRows = await db
+      .select({ id: artifact.id, taskId: artifact.taskId, name: artifact.name, mime: artifact.mime })
+      .from(artifact)
+  } catch { /* table missing until migration runs */ }
+  const artifactsByTask = new Map<string, { id: string; name: string; mime: string }[]>()
+  for (const a of artifactRows) {
+    const list = artifactsByTask.get(a.taskId) ?? []
+    list.push({ id: a.id, name: a.name, mime: a.mime })
+    artifactsByTask.set(a.taskId, list)
+  }
+
   const jobs = onchainJobs.map((j) => {
     const spec = specByHash.get(j.specHash)
     const task = spec?.agentTaskId ? taskById.get(spec.agentTaskId) : undefined
@@ -112,6 +128,8 @@ export async function getJobs() {
       attachmentName: spec?.attachmentName ?? null,
       hasTests: Boolean(spec?.testCode),
       testResult: spec?.testResult ?? null,
+      deliverableKind: spec?.deliverableKind ?? 'text',
+      artifacts: spec?.agentTaskId ? (artifactsByTask.get(spec.agentTaskId) ?? []) : [],
     }
   })
 
@@ -136,6 +154,10 @@ export async function postJobAction(input: {
    *  worker's submitted code block is run against these on the platform
    *  runtime (grader ≠ solver) and the result recorded as evidence. */
   testCode?: string
+  /** What the worker must deliver: 'text' (default) | 'image' | 'file'.
+   *  Image jobs are only matched to image-capable workers and are graded
+   *  by the vision reviewer on submission. */
+  deliverableKind?: string
   /** Only meaningful alongside testCode: release escrow the instant the
    *  platform grader reports a pass, with no separate "Approve & pay"
    *  click. This is the requester's own explicit choice, made right now
@@ -176,6 +198,7 @@ export async function postJobAction(input: {
       attachmentName: input.attachmentName || null,
       testCode: input.testCode?.trim() || null,
       autoApprove: input.autoApprove ?? true,
+      deliverableKind: (await import('@/lib/artifacts')).normalizeDeliverableKind(input.deliverableKind),
     })
 
     const { postJob } = await import('@/lib/onchain/labor')
