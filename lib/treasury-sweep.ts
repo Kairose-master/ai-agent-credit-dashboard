@@ -79,7 +79,25 @@ export async function sweepAgentToAddress(
       }
     }
 
-    const txHash = await doTransfer(ag.id, ag.smartAccountAddress, to, amount, memo)
+    // The bundler/paymaster RPC (ZeroDev free tier) rate-limits aggressively;
+    // a multi-agent sweep fires transfers back-to-back and trips it. Retry
+    // 429s with a short backoff instead of failing the agent outright —
+    // kept tight (2 retries) to stay inside the serverless time budget.
+    let txHash: string | undefined
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        txHash = await doTransfer(ag.id, ag.smartAccountAddress, to, amount, memo)
+        break
+      } catch (error) {
+        lastError = error
+        const msg = error instanceof Error ? error.message : String(error)
+        const rateLimited = msg.includes('429') || msg.toLowerCase().includes('rate limit')
+        if (!rateLimited || attempt === 2) throw error
+        await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)))
+      }
+    }
+    if (!txHash) throw lastError
     const capped = amount < balance
     return {
       agentId: ag.id,
