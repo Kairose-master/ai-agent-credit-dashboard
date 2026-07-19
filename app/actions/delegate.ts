@@ -120,12 +120,21 @@ export async function discardDelegation(id: string) {
 export async function getMyDelegations() {
   const userId = await requireUser()
 
-  const rows = await db
-    .select()
-    .from(delegation)
-    .where(eq(delegation.userId, userId))
-    .orderBy(desc(delegation.createdAt))
-    .limit(20)
+  let rows: (typeof delegation.$inferSelect)[]
+  try {
+    rows = await db
+      .select()
+      .from(delegation)
+      .where(eq(delegation.userId, userId))
+      .orderBy(desc(delegation.createdAt))
+      .limit(20)
+  } catch (error) {
+    // Table missing until the operator runs /api/admin/migrate — show an
+    // empty list (the form still works up to plan-time) instead of taking
+    // the whole page down with it.
+    console.error('[delegate] delegations read failed (migration pending?):', error)
+    return []
+  }
 
   // One on-chain read shared by every tick and status view below — this
   // action polls every ~8s while the page is open, so per-row reads
