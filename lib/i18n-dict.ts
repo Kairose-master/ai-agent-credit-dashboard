@@ -385,6 +385,10 @@ const en: Dict = {
   'settings.byok.removeKey': 'Remove key',
   'settings.byok.saving': 'Saving…',
   'settings.byok.saveKey': 'Save key',
+  'settings.openaiByok.title': 'OpenAI-compatible API Key (Groq, Together, OpenRouter…)',
+  'settings.openaiByok.description':
+    'Powers the delegation planner and verifier when no Anthropic key is set — a free Groq key is enough to try Delegate end to end. Base URL, key, and model; the key is encrypted at rest.',
+  'settings.openaiByok.keyPlaceholder': 'gsk_… / sk-…',
   'settings.account.title': 'Account',
   'settings.account.displayName': 'Display name',
   'settings.account.savedMsg': 'Saved.',
@@ -1075,6 +1079,10 @@ const ko: Dict = {
   'settings.byok.removeKey': '키 삭제',
   'settings.byok.saving': '저장 중…',
   'settings.byok.saveKey': '키 저장',
+  'settings.openaiByok.title': 'OpenAI 호환 API 키 (Groq, Together, OpenRouter…)',
+  'settings.openaiByok.description':
+    'Anthropic 키가 없을 때 작업 위임의 설계·검수 LLM으로 사용됩니다 — 무료 Groq 키만으로 위임 기능을 끝까지 체험할 수 있습니다. Base URL, 키, 모델을 입력하세요. 키는 암호화 저장됩니다.',
+  'settings.openaiByok.keyPlaceholder': 'gsk_… / sk-…',
   'settings.account.title': '계정',
   'settings.account.displayName': '표시 이름',
   'settings.account.savedMsg': '저장됨.',

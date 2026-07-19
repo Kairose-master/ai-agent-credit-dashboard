@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { user, agent } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, gte } from 'drizzle-orm'
 import bcrypt from 'bcryptjs'
 import { nanoid } from 'nanoid'
 import { randomBytes } from 'node:crypto'
@@ -42,7 +42,37 @@ const DOCS_URL = 'https://github.com/Kairose-master/ai-agent-credit-dashboard/bl
  * rotated (re-register isn't idempotent for a given agent name; register a
  * new agent instead).
  */
+// ---- Abuse guards ------------------------------------------------------
+// This endpoint mints accounts, agents, and on-chain wallets with zero
+// auth — unmissable spam target once publicized. Two independent layers:
+//   1. Per-IP sliding window (in-memory, per warm lambda): stops bursts.
+//   2. Platform-wide DB counters (durable): stop sustained farming that
+//      IP rotation would slip past layer 1.
+const IP_WINDOW_MS = 10 * 60 * 1000
+const IP_MAX_REGISTRATIONS = 5
+const ipHits = new Map<string, number[]>()
+
+function ipRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const hits = (ipHits.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS)
+  if (hits.length >= IP_MAX_REGISTRATIONS) {
+    ipHits.set(ip, hits)
+    return true
+  }
+  hits.push(now)
+  ipHits.set(ip, hits)
+  return false
+}
+
+const GLOBAL_HOURLY_MAX_NEW_USERS = Number(process.env.REGISTER_HOURLY_MAX_USERS ?? 30)
+const MAX_AGENTS_PER_ACCOUNT = Number(process.env.MAX_AGENTS_PER_ACCOUNT ?? 20)
+
 export async function POST(request: Request) {
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  if (ipRateLimited(ip)) {
+    return Response.json({ error: 'Too many registrations from this address — try again later' }, { status: 429 })
+  }
+
   const body = await request.json().catch(() => null)
   const email = String(body?.email ?? '').trim().toLowerCase()
   const password = String(body?.password ?? '')
@@ -70,7 +100,25 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Invalid credentials for an existing account with this email' }, { status: 401 })
     }
     userId = existing.id
+
+    // Cap agents per account — an account farming hundreds of agents is
+    // abuse, not adoption (each agent gets a provisioned wallet).
+    const owned = await db.select({ id: agent.id }).from(agent).where(eq(agent.userId, userId))
+    if (owned.length >= MAX_AGENTS_PER_ACCOUNT) {
+      return Response.json({ error: `Account agent limit reached (${MAX_AGENTS_PER_ACCOUNT})` }, { status: 429 })
+    }
   } else {
+    // Durable platform-wide throttle on NEW accounts — survives lambda
+    // recycling and IP rotation, unlike the in-memory layer above.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000)
+    const recent = await db.select({ id: user.id }).from(user).where(gte(user.createdAt, hourAgo))
+    if (recent.length >= GLOBAL_HOURLY_MAX_NEW_USERS) {
+      return Response.json(
+        { error: 'Registration is temporarily rate-limited platform-wide — try again in an hour' },
+        { status: 429 },
+      )
+    }
+
     userId = nanoid()
     const hashedPassword = await bcrypt.hash(password, 10)
     await db.insert(user).values({

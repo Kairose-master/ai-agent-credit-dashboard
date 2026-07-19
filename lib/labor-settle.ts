@@ -39,15 +39,16 @@ export async function retry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 500
   throw lastError
 }
 
-function isTransientRpcError(error: unknown): boolean {
+export function isTransientRpcError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error)
   return msg.includes('429') || /rate limit|Too Many Requests|compute units/i.test(msg)
 }
 
 /** Retry wrapper specifically for on-chain calls that may hit RPC rate
  *  limits — longer backoff than `retry` (a 429 needs breathing room, not
- *  a 500ms hammer), and only retries the transient class. */
-async function retryRpc<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+ *  a 500ms hammer), and only retries the transient class. `baseDelayMs`
+ *  is parameterized so tests don't sit through real backoffs. */
+export async function retryRpc<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 3000): Promise<T> {
   let lastError: unknown
   for (let i = 0; i < attempts; i++) {
     try {
@@ -55,7 +56,7 @@ async function retryRpc<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     } catch (error) {
       lastError = error
       if (!isTransientRpcError(error) || i === attempts - 1) throw error
-      await new Promise((r) => setTimeout(r, 3000 * (i + 1)))
+      await new Promise((r) => setTimeout(r, baseDelayMs * (i + 1)))
     }
   }
   throw lastError

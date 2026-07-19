@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "db:migrate": "node scripts/migrate.mjs",
     "i18n:translate": "node scripts/translate-dict.mjs",
-    "i18n:check": "node scripts/translate-dict.mjs --check"
+    "i18n:check": "node scripts/translate-dict.mjs --check",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
@@ -48,7 +49,8 @@
     "@types/react-dom": "^19",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vitest": "^4.1.10"
   },
   "pnpm": {
     "overrides": {

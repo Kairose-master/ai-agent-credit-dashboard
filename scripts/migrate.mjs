@@ -160,11 +160,17 @@ CREATE INDEX IF NOT EXISTS credit_rating_rules_kind_idx ON credit_rating_rules (
 -- ── BYOK user API keys (encrypted at rest) ──────────────────────────
 CREATE TABLE IF NOT EXISTS user_api_keys (
   user_id           text PRIMARY KEY,
-  anthropic_key_enc text NOT NULL,
-  key_hint          text NOT NULL,
+  anthropic_key_enc text,
+  key_hint          text,
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE user_api_keys ALTER COLUMN anthropic_key_enc DROP NOT NULL;
+ALTER TABLE user_api_keys ALTER COLUMN key_hint DROP NOT NULL;
+ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS openai_base_url text;
+ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS openai_key_enc text;
+ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS openai_model text;
+ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS openai_hint text;
 
 -- ── Agent identity ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "agent" (
