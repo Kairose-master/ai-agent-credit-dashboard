@@ -22,7 +22,7 @@ import { agent, delegation, jobSpec, agentTask } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import Anthropic from '@anthropic-ai/sdk'
-import { resolveUserAnthropicKey } from '@/lib/user-keys'
+import { getUserByok } from '@/lib/user-keys'
 import { logPlatformEvent } from '@/lib/platform-feed'
 
 export const MAX_SUBTASKS = 5
@@ -53,13 +53,64 @@ export interface SubtaskView extends DelegationSubtask {
   workerLabel: string | null
 }
 
-async function anthropicClient(userId: string): Promise<Anthropic> {
-  const byok = await resolveUserAnthropicKey(userId)
-  const key = byok ?? process.env.ANTHROPIC_API_KEY
-  if (!key) {
-    throw new Error('Planning needs an Anthropic API key — add yours in Settings (BYOK), or the platform must configure one')
+/** One text-in/text-out completion call, provider-resolved per user:
+ *  Anthropic BYOK → OpenAI-compatible BYOK (Groq/Together/OpenRouter/local)
+ *  → platform Anthropic key (unless REQUIRE_USER_API_KEY). The planner and
+ *  verifier both emit strict JSON, which every chat provider can do — no
+ *  reason to gate delegation on owning an Anthropic key specifically. */
+type CompleteFn = (system: string, userMsg: string, maxTokens: number) => Promise<string>
+
+async function resolveLlm(userId: string): Promise<CompleteFn> {
+  const { anthropicKey, openai } = await getUserByok(userId)
+
+  const anthropicComplete =
+    (key: string): CompleteFn =>
+    async (system, userMsg, maxTokens) => {
+      const client = new Anthropic({ apiKey: key })
+      const stream = client.messages.stream({
+        model: PLANNER_MODEL,
+        max_tokens: maxTokens,
+        thinking: { type: 'adaptive' },
+        system,
+        messages: [{ role: 'user', content: userMsg }],
+      })
+      const message = await stream.finalMessage()
+      return message.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('')
+    }
+
+  if (anthropicKey) return anthropicComplete(anthropicKey)
+
+  if (openai) {
+    return async (system, userMsg, maxTokens) => {
+      const res = await fetch(`${openai.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openai.apiKey}` },
+        body: JSON.stringify({
+          model: openai.model,
+          max_tokens: maxTokens,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: userMsg },
+          ],
+        }),
+      })
+      if (!res.ok) {
+        throw new Error(`Your OpenAI-compatible endpoint responded ${res.status}: ${(await res.text()).slice(0, 200)}`)
+      }
+      const data = await res.json()
+      return String(data?.choices?.[0]?.message?.content ?? '')
+    }
   }
-  return new Anthropic({ apiKey: key })
+
+  if (process.env.REQUIRE_USER_API_KEY !== 'true' && process.env.ANTHROPIC_API_KEY) {
+    return anthropicComplete(process.env.ANTHROPIC_API_KEY)
+  }
+  throw new Error(
+    'Planning needs an LLM key — add an Anthropic key or an OpenAI-compatible key (e.g. a free Groq key) in Settings',
+  )
 }
 
 const PLANNER_SYSTEM = `You decompose a client's task into subcontractable units for an AI-agent labor market. Each subtask is done independently by a different worker agent (an LLM with no shared context), so every subtask must be fully self-contained: include everything the worker needs in the description, never reference "the other subtask" or shared state.
@@ -71,23 +122,12 @@ Rules:
 - If (and only if) a subtask is "write a single Python function" shaped, include testCode: plain Python asserts calling that function. Otherwise omit testCode.
 - Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "testCode"?}] — no commentary, no code fences.`
 
-/** LLM-decompose `task` into subtasks. Pure planning — nothing is posted
- *  or escrowed here; the owner reviews the plan before confirming. */
-export async function planDelegation(userId: string, task: string, budgetUsd: number): Promise<DelegationSubtask[]> {
-  const client = await anthropicClient(userId)
-  const stream = client.messages.stream({
-    model: PLANNER_MODEL,
-    max_tokens: 8000,
-    thinking: { type: 'adaptive' },
-    system: PLANNER_SYSTEM,
-    messages: [{ role: 'user', content: `Budget: $${budgetUsd} total.\n\nClient task:\n${task}` }],
-  })
-  const message = await stream.finalMessage()
-  const text = message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .replace(/^```(?:json)?\s*|\s*```$/g, '')
+/** Parse + validate raw planner output into subtasks. Pure — separated
+ *  from the LLM call so the guardrails (count bounds, bounty bounds,
+ *  budget ceiling) are directly unit-testable: these checks are what
+ *  stand between a misbehaving planner and real escrowed money. */
+export function parsePlannerOutput(rawText: string, budgetUsd: number): DelegationSubtask[] {
+  const text = rawText.replace(/^```(?:json)?\s*|\s*```$/g, '')
 
   let parsed: unknown
   try {
@@ -124,6 +164,14 @@ export async function planDelegation(userId: string, task: string, budgetUsd: nu
     throw new Error(`Planner exceeded the budget ($${total.toFixed(2)} > $${budgetUsd}) — try again`)
   }
   return subtasks
+}
+
+/** LLM-decompose `task` into subtasks. Pure planning — nothing is posted
+ *  or escrowed here; the owner reviews the plan before confirming. */
+export async function planDelegation(userId: string, task: string, budgetUsd: number): Promise<DelegationSubtask[]> {
+  const complete = await resolveLlm(userId)
+  const text = await complete(PLANNER_SYSTEM, `Budget: $${budgetUsd} total.\n\nClient task:\n${task}`, 8000)
+  return parsePlannerOutput(text, budgetUsd)
 }
 
 /** Post every planned subtask as a real escrowed job from the prime
@@ -204,28 +252,16 @@ export async function postDelegationJobs(
 const VERIFIER_SYSTEM = `You are an independent reviewer for an AI-agent labor market. Judge whether the submitted output satisfies the acceptance criteria. Be strict but fair: the criteria are the contract — do not invent extra requirements, and do not excuse clear failures. Output ONLY a JSON object {"pass": boolean, "reason": "one sentence"}.`
 
 async function verifySubmission(
-  client: Anthropic,
+  complete: CompleteFn,
   st: DelegationSubtask,
   output: string,
 ): Promise<{ pass: boolean; reason: string }> {
-  const stream = client.messages.stream({
-    model: PLANNER_MODEL,
-    max_tokens: 2000,
-    thinking: { type: 'adaptive' },
-    system: VERIFIER_SYSTEM,
-    messages: [
-      {
-        role: 'user',
-        content: `Subtask: ${st.title}\n\nDescription:\n${st.description}\n\nAcceptance criteria:\n${st.acceptanceCriteria}\n\nSubmitted output:\n${output.slice(0, 20_000)}`,
-      },
-    ],
-  })
-  const message = await stream.finalMessage()
-  const text = message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .replace(/^```(?:json)?\s*|\s*```$/g, '')
+  const raw = await complete(
+    VERIFIER_SYSTEM,
+    `Subtask: ${st.title}\n\nDescription:\n${st.description}\n\nAcceptance criteria:\n${st.acceptanceCriteria}\n\nSubmitted output:\n${output.slice(0, 20_000)}`,
+    2000,
+  )
+  const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, '')
   try {
     const parsed = JSON.parse(text)
     return { pass: Boolean(parsed?.pass), reason: String(parsed?.reason ?? '') }
@@ -272,7 +308,7 @@ export async function tickDelegation(
   const specs = await db.select().from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
-  let client: Anthropic | null = null
+  let complete: CompleteFn | null = null
   let changed = false
 
   for (const st of subtasks) {
@@ -324,8 +360,8 @@ export async function tickDelegation(
       if (!output) continue // submitted on-chain but output not yet recorded — next tick
 
       try {
-        client = client ?? (await anthropicClient(row.userId))
-        const verdict = await verifySubmission(client, st, output)
+        complete = complete ?? (await resolveLlm(row.userId))
+        const verdict = await verifySubmission(complete, st, output)
         if (verdict.pass) {
           const txHash = await approveJob(row.primeAgentId, st.onchainJobId)
           const { creditWorkerForJob } = await import('@/app/actions/labor')

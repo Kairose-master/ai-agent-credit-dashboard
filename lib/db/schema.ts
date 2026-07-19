@@ -145,8 +145,16 @@ export const creditRatingRule = pgTable('credit_rating_rules', {
  */
 export const userApiKey = pgTable('user_api_keys', {
   userId: text('user_id').primaryKey(),
-  anthropicKeyEnc: text('anthropic_key_enc').notNull(),
-  keyHint: text('key_hint').notNull(), // last 4 chars, for display only
+  // Nullable since OpenAI-compatible keys landed: an account may bring
+  // ONLY a Groq/OpenRouter/etc. key and no Anthropic key at all.
+  anthropicKeyEnc: text('anthropic_key_enc'),
+  keyHint: text('key_hint'), // last 4 chars, for display only
+  // OpenAI-compatible BYOK (Groq, Together, OpenRouter, LM Studio…):
+  // used by the delegation planner/verifier when no Anthropic key is set.
+  openaiBaseUrl: text('openai_base_url'),
+  openaiKeyEnc: text('openai_key_enc'),
+  openaiModel: text('openai_model'),
+  openaiHint: text('openai_hint'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

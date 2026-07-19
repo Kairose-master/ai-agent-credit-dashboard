@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getApiKeyStatus, saveAnthropicKey, removeAnthropicKey } from '@/app/actions/settings'
+import {
+  getApiKeyStatus,
+  saveAnthropicKey,
+  removeAnthropicKey,
+  saveOpenAiKey,
+  removeOpenAiKey,
+} from '@/app/actions/settings'
 import { updateDisplayName, changePassword } from '@/app/actions/account'
 import { useI18n } from '@/lib/i18n'
 
@@ -115,6 +121,117 @@ export default function SettingsPage() {
         )}
         {keyMsg && <p className="mt-3 text-sm text-muted-foreground">{keyMsg}</p>}
       </div>
+
+      <OpenAiKeyCard />
+    </div>
+  )
+}
+
+/** OpenAI-compatible BYOK (Groq/Together/OpenRouter/local) — enough for the
+ *  delegation planner/verifier on its own, so a free Groq key unlocks the
+ *  full delegate flow without an Anthropic account. */
+function OpenAiKeyCard() {
+  const { t } = useI18n()
+  const [baseUrl, setBaseUrl] = useState('https://api.groq.com/openai/v1')
+  const [key, setKey] = useState('')
+  const [model, setModel] = useState('llama-3.3-70b-versatile')
+  const [saved, setSaved] = useState<{ hint: string; baseUrl: string; model: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    getApiKeyStatus()
+      .then((s) => {
+        if (s.hasOpenAiKey && s.openaiHint) {
+          setSaved({ hint: s.openaiHint, baseUrl: s.openaiBaseUrl ?? '', model: s.openaiModel ?? '' })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const { hint } = await saveOpenAiKey({ baseUrl, apiKey: key, model })
+      setSaved({ hint, baseUrl, model })
+      setKey('')
+      setMsg(t('settings.byok.savedMsg'))
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await removeOpenAiKey()
+      setSaved(null)
+      setMsg(t('settings.byok.removedMsg'))
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border border-border rounded-lg p-6">
+      <h3 className="font-bold text-lg mb-1">{t('settings.openaiByok.title')}</h3>
+      <p className="text-sm text-muted-foreground mb-4">{t('settings.openaiByok.description')}</p>
+
+      {saved ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="rounded-md bg-success/15 px-3 py-1.5 text-sm font-mono text-success">
+            {saved.model} @ {saved.baseUrl.replace(/^https?:\/\//, '')} · …{saved.hint}
+          </span>
+          <button
+            onClick={remove}
+            disabled={busy}
+            className="rounded border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50"
+          >
+            {t('settings.byok.removeKey')}
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://api.groq.com/openai/v1"
+            className="h-9 w-full max-w-md rounded-md border border-border bg-background px-3 font-mono text-sm"
+            autoComplete="off"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder={t('settings.openaiByok.keyPlaceholder')}
+              className="h-9 w-full max-w-xs rounded-md border border-border bg-background px-3 font-mono text-sm"
+              autoComplete="off"
+            />
+            <input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="llama-3.3-70b-versatile"
+              className="h-9 w-full max-w-xs rounded-md border border-border bg-background px-3 font-mono text-sm"
+              autoComplete="off"
+            />
+            <button
+              onClick={save}
+              disabled={busy || !key.trim() || !baseUrl.trim() || !model.trim()}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? t('settings.byok.saving') : t('settings.byok.saveKey')}
+            </button>
+          </div>
+        </div>
+      )}
+      {msg && <p className="mt-3 text-sm text-muted-foreground">{msg}</p>}
     </div>
   )
 }

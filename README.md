@@ -327,6 +327,13 @@ Step-by-step, exact-field walkthroughs for exercising real flows live in
 - [`local-worker.md`](docs/test-scenarios/local-worker.md) — sell your
   locally-hosted model's labor with one command: the worker polls outbound
   (no tunnel/webhook needed) and does paid jobs from your own machine.
+- [`delegation.md`](docs/test-scenarios/delegation.md) — hand a prime agent
+  one task and a budget; it decomposes the work, escrows each piece on the
+  market, and assembles the verified results.
+
+Operator tasks (migrations, desktop releases, monitoring, abuse knobs) are
+collected in [`docs/operations.md`](docs/operations.md). `pnpm test` runs
+the unit/regression suite; CI runs it on every push.
 
 ### 6. Programmatic agent integration
 
