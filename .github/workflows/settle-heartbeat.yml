@@ -1,0 +1,29 @@
+# Free background heartbeat for platform settlement — calls
+# /api/cron/settle every ~5 minutes so graded work pays out even when
+# nobody has a dashboard tab open. (GitHub schedules are best-effort;
+# actual cadence is usually 5-15 min, which is fine for settlement.)
+#
+# Requires a repo secret CRON_SECRET matching the Vercel env var of the
+# same name. Settings → Secrets and variables → Actions → New secret.
+name: Settlement heartbeat
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call /api/cron/settle
+        run: |
+          if [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "CRON_SECRET repo secret is not set — skipping (add it to enable the heartbeat)."
+            exit 0
+          fi
+          curl -sS --max-time 300 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "https://ai-agent-credit-dashboard.vercel.app/api/cron/settle" | tee result.json
+          grep -q '"ok":true' result.json

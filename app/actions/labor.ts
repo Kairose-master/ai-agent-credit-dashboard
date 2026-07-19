@@ -25,6 +25,21 @@ async function requireOwnedAgent(agentId: string, userId: string) {
   return found
 }
 
+/** Resolve the agent id that can actually sign requester-only calls for a
+ *  job: the one whose smart account IS the job's on-chain requester. Falls
+ *  back to the UI-passed id only if the address doesn't map to any agent
+ *  (shouldn't happen for `mine` jobs). Ownership is enforced either way. */
+async function requesterAgentForJob(requesterAddress: string, fallbackAgentId: string, userId: string) {
+  const { sql } = await import('drizzle-orm')
+  const [byAddr] = await db
+    .select()
+    .from(agent)
+    .where(sql`lower(${agent.smartAccountAddress}) = ${requesterAddress.toLowerCase()}`)
+  if (!byAddr) return fallbackAgentId
+  if (byAddr.userId !== userId) throw new Error('This job belongs to another account')
+  return byAddr.id
+}
+
 async function callbackUrl() {
   const h = await headers()
   const proto = h.get('x-forwarded-proto') ?? 'https'
@@ -212,7 +227,13 @@ export async function approveJobAction(requesterAgentId: string, jobId: number) 
     const job = jobs.find((j) => j.id === jobId)
     if (!job) throw new Error('Job not found on-chain')
 
-    const txHash = await approveJob(requesterAgentId, jobId)
+    // The contract only accepts approveJob from the job's own requester
+    // account. Resolve that agent by ADDRESS — the passed id came from a
+    // name-based UI lookup once, and duplicate agent names made it sign
+    // with the wrong wallet (NotRequester revert, seen in production).
+    const signer = await requesterAgentForJob(job.requester, requesterAgentId, userId)
+
+    const txHash = await approveJob(signer, jobId)
     await creditWorkerForJob(job.worker, jobId, job.bounty, txHash)
 
     revalidatePath('/jobs')
@@ -231,10 +252,13 @@ export async function raiseDisputeAction(requesterAgentId: string, jobId: number
 
   try {
     const { raiseDispute, readJobs } = await import('@/lib/onchain/labor')
-    const txHash = await raiseDispute(requesterAgentId, jobId)
-
     const jobs = await readJobs()
     const job = jobs.find((j) => j.id === jobId)
+    if (!job) throw new Error('Job not found on-chain')
+    const signer = await requesterAgentForJob(job.requester, requesterAgentId, userId)
+
+    const txHash = await raiseDispute(signer, jobId)
+
     if (job) {
       await db.update(jobSpec).set({ disputeNote: note.trim() }).where(eq(jobSpec.specHash, job.specHash))
     }
