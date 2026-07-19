@@ -190,8 +190,12 @@ export async function withdrawAllEarnings() {
 
   const results: SweepResult[] = []
 
-  for (const ag of provisioned) {
-    const r = await sweepAgentToAddress(ag, to, 'Withdraw all earnings')
+  for (let i = 0; i < provisioned.length; i++) {
+    // Space the transfers out — the bundler RPC rate-limits back-to-back
+    // user operations (free tier), which is exactly what a multi-agent
+    // sweep produces.
+    if (i > 0) await new Promise((r) => setTimeout(r, 2000))
+    const r = await sweepAgentToAddress(provisioned[i], to, 'Withdraw all earnings')
     if (r) results.push(r) // null = zero balance, skipped silently (same as before)
   }
 

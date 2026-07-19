@@ -73,8 +73,10 @@ export async function POST(request: Request) {
   }
 
   const results: SweepResult[] = []
-  for (const ag of agents.filter((a) => a.smartAccountAddress)) {
-    const r = await sweepAgentToAddress(ag, to, 'Withdraw (headless)')
+  const provisioned = agents.filter((a) => a.smartAccountAddress)
+  for (let i = 0; i < provisioned.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 2000)) // bundler RPC rate limit
+    const r = await sweepAgentToAddress(provisioned[i], to, 'Withdraw (headless)')
     if (r) results.push(r)
   }
 
