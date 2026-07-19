@@ -145,6 +145,25 @@ export async function postDelegationJobs(
   const [prime] = await db.select().from(agent).where(eq(agent.id, primeAgentId))
   if (!prime?.smartAccountAddress) throw new Error('Prime agent has no provisioned wallet')
 
+  // Check the escrow is actually affordable BEFORE the first on-chain call —
+  // a raw "USDC: balance" revert mid-posting is undiagnosable for users.
+  const remaining = subtasks.filter((st) => st.onchainJobId === undefined)
+  const needed = remaining.reduce((s, x) => s + x.bountyUsd, 0)
+  try {
+    const { usdcBalanceOf } = await import('@/lib/onchain/treasury')
+    const balance = await usdcBalanceOf(prime.smartAccountAddress as `0x${string}`)
+    if (balance < needed) {
+      throw new Error(
+        `${prime.name}'s wallet holds $${balance.toFixed(2)} but posting the remaining subtasks escrows $${needed.toFixed(2)} — mint test USDC on the agent's Treasury card first`,
+      )
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('mint test USDC')) throw error
+    // Balance read itself failed (RPC hiccup) — let posting proceed and
+    // surface the on-chain error if there genuinely isn't enough.
+    console.error('[delegation] balance pre-check failed (continuing):', error)
+  }
+
   for (let i = 0; i < subtasks.length; i++) {
     const st = subtasks[i]
     if (st.onchainJobId !== undefined) continue // already posted (confirm retried)

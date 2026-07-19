@@ -93,14 +93,18 @@ function NewDelegationForm({ agents, onCreated }: { agents: AgentOption[]; onCre
     setPlanning(true)
     setError(null)
     try {
-      await createDelegationPlan({
+      const r = await createDelegationPlan({
         primeAgentId: effectiveAgentId,
         task,
         budgetUsd: Number(budget),
         autoVerify,
       })
-      setTask('')
-      onCreated()
+      if ('error' in r) {
+        setError(r.error ?? 'Planning failed')
+      } else {
+        setTask('')
+        onCreated()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -183,8 +187,12 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
     setConfirming(true)
     setError(null)
     try {
-      await confirmDelegation(d.id)
-      onChanged()
+      const r = await confirmDelegation(d.id)
+      if ('error' in r && r.error) {
+        setError(r.error)
+      } else {
+        onChanged()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
