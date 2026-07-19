@@ -8,53 +8,55 @@
   </head>
   <body>
     <header>
-      <h1>Ledgermind Miner</h1>
-      <p class="subtitle">Run your own model as a paid worker agent — no terminal required.</p>
+      <div class="header-row">
+        <h1>Ledgermind Miner</h1>
+        <button id="lang-toggle" class="lang-btn" title="Language">한국어</button>
+      </div>
+      <p class="subtitle" data-i18n="subtitle">Run your own model as a paid worker agent — no terminal required.</p>
     </header>
 
     <main id="app">
       <!-- Step 1: register or reuse a saved account -->
       <section id="view-register" class="view" hidden>
-        <h2>1. Connect an account</h2>
-        <p class="hint">New here? This creates your account and worker agent in one step. Already have a
+        <h2 data-i18n="reg.title">1. Connect an account</h2>
+        <p class="hint" data-i18n="reg.hint">New here? This creates your account and worker agent in one step. Already have a
           Ledgermind account? Enter the same email/password to add a new agent to it.</p>
         <form id="register-form">
-          <label>Email <input type="email" id="reg-email" required autocomplete="email" /></label>
-          <label>Password <input type="password" id="reg-password" required autocomplete="current-password" minlength="8" /></label>
-          <label>Agent name <input type="text" id="reg-name" required placeholder="My Miner" /></label>
+          <label><span data-i18n="reg.email">Email</span> <input type="email" id="reg-email" required autocomplete="email" /></label>
+          <label><span data-i18n="reg.password">Password</span> <input type="password" id="reg-password" required autocomplete="current-password" minlength="8" /></label>
+          <label><span data-i18n="reg.agentName">Agent name</span> <input type="text" id="reg-name" required placeholder="My Miner" /></label>
           <details>
-            <summary>Advanced</summary>
-            <label>Platform URL <input type="text" id="reg-platform" placeholder="https://ai-agent-credit-dashboard.vercel.app" /></label>
+            <summary data-i18n="reg.advanced">Advanced</summary>
+            <label><span data-i18n="reg.platformUrl">Platform URL</span> <input type="text" id="reg-platform" placeholder="https://ai-agent-credit-dashboard.vercel.app" /></label>
           </details>
-          <button type="submit" id="register-submit">Create / connect agent</button>
+          <button type="submit" id="register-submit" data-i18n="reg.submit">Create / connect agent</button>
         </form>
         <p class="error" id="register-error" hidden></p>
       </section>
 
       <!-- Step 2: pick a model backend -->
       <section id="view-backend" class="view" hidden>
-        <h2>2. Choose a model</h2>
+        <h2 data-i18n="backend.title">2. Choose a model</h2>
         <div id="backend-detecting">
-          <p class="hint">Looking for a local Ollama install…</p>
+          <p class="hint" data-i18n="backend.detecting">Looking for a local Ollama install…</p>
         </div>
         <div id="backend-ollama" hidden>
-          <p class="hint">Found Ollama running locally. Pick a pulled model:</p>
-          <label>Model <select id="ollama-model"></select></label>
-          <button id="use-ollama">Use this model</button>
+          <p class="hint" data-i18n="backend.found">Found Ollama running locally. Pick a pulled model:</p>
+          <label><span data-i18n="backend.model">Model</span> <select id="ollama-model"></select></label>
+          <button id="use-ollama" data-i18n="backend.useModel">Use this model</button>
         </div>
         <div id="backend-cloud" hidden>
           <p class="hint">
-            No local Ollama detected. You can either
-            <a href="#" id="retry-ollama">install Ollama and retry</a>,
-            or paste a free/cheap cloud API key (e.g. a
-            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Groq</a> key —
-            OpenAI-compatible, generous free tier) to mine with a hosted model instead:
+            <span data-i18n="backend.cloudIntro">No local Ollama detected. You can either</span>
+            <a href="#" id="retry-ollama" data-i18n="backend.retry">install Ollama and retry</a><span data-i18n="backend.cloudMid">, or paste a free/cheap cloud API key (e.g. a</span>
+            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Groq</a>
+            <span data-i18n="backend.cloudEnd">key — OpenAI-compatible, generous free tier) to mine with a hosted model instead:</span>
           </p>
           <form id="cloud-form">
-            <label>API base URL <input type="text" id="cloud-base-url" placeholder="https://api.groq.com/openai/v1" required /></label>
-            <label>API key <input type="password" id="cloud-api-key" placeholder="gsk_..." /></label>
-            <label>Model <input type="text" id="cloud-model" placeholder="llama-3.3-70b-versatile" required /></label>
-            <button type="submit">Use this endpoint</button>
+            <label><span data-i18n="backend.baseUrl">API base URL</span> <input type="text" id="cloud-base-url" placeholder="https://api.groq.com/openai/v1" required /></label>
+            <label><span data-i18n="backend.apiKey">API key</span> <input type="password" id="cloud-api-key" placeholder="gsk_..." /></label>
+            <label><span data-i18n="backend.model2">Model</span> <input type="text" id="cloud-model" placeholder="llama-3.3-70b-versatile" required /></label>
+            <button type="submit" data-i18n="backend.useEndpoint">Use this endpoint</button>
           </form>
         </div>
         <p class="error" id="backend-error" hidden></p>
@@ -71,33 +73,35 @@
         </div>
 
         <div class="stats">
-          <div><span class="stat-value" id="stat-completed">0</span><span class="stat-label">completed</span></div>
-          <div><span class="stat-value" id="stat-failed">0</span><span class="stat-label">failed</span></div>
-          <div><span class="stat-value" id="stat-balance">—</span><span class="stat-label">USDC earned</span></div>
+          <div><span class="stat-value" id="stat-completed">0</span><span class="stat-label" data-i18n="stat.completed">completed</span></div>
+          <div><span class="stat-value" id="stat-failed">0</span><span class="stat-label" data-i18n="stat.failed">failed</span></div>
+          <div><span class="stat-value" id="stat-balance">—</span><span class="stat-label" data-i18n="stat.balance">USDC earned</span></div>
+          <div><span class="stat-value" id="stat-credit">—</span><span class="stat-label" data-i18n="stat.credit">credit score</span></div>
         </div>
 
         <div class="controls">
-          <button id="start-btn">Start mining</button>
-          <button id="stop-btn" hidden>Stop mining</button>
+          <button id="start-btn" data-i18n="mine.start">Start mining</button>
+          <button id="stop-btn" data-i18n="mine.stop" hidden>Stop mining</button>
         </div>
 
         <pre id="log" aria-live="polite"></pre>
 
         <details id="withdraw-section">
-          <summary>Withdraw earnings</summary>
-          <p class="hint">Sends this worker's USDC balance to any wallet address you control (e.g. copy your
+          <summary data-i18n="withdraw.title">Withdraw earnings</summary>
+          <p class="hint" data-i18n="withdraw.hint">Sends this worker's USDC balance to any wallet address you control (e.g. copy your
             MetaMask account address). Your account password is required to move money — the worker's own
             key alone can never withdraw. Testnet USDC for now.</p>
           <form id="withdraw-form">
-            <label>Destination address <input type="text" id="withdraw-to" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" /></label>
-            <label>Account password <input type="password" id="withdraw-password" required autocomplete="current-password" /></label>
-            <button type="submit" id="withdraw-submit">Withdraw</button>
+            <label><span data-i18n="withdraw.to">Destination address</span> <input type="text" id="withdraw-to" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" /></label>
+            <label><span data-i18n="withdraw.password">Account password</span> <input type="password" id="withdraw-password" required autocomplete="current-password" /></label>
+            <button type="submit" id="withdraw-submit" data-i18n="withdraw.submit">Withdraw</button>
           </form>
           <p class="error" id="withdraw-error" hidden></p>
           <p class="success" id="withdraw-result" hidden></p>
         </details>
 
-        <button id="forget-btn" class="link-btn">Use a different account</button>
+        <p class="hint tray-hint" data-i18n="mine.trayHint">Closing this window keeps mining in the system tray — reopen it from the tray icon.</p>
+        <button id="forget-btn" class="link-btn" data-i18n="mine.forget">Use a different account</button>
       </section>
     </main>
 

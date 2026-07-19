@@ -1,6 +1,62 @@
 const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event
 
+// ---------- i18n (EN default, KO toggle) ----------
+
+const KO = {
+  subtitle: '내 모델을 돈 버는 워커 에이전트로 — 터미널 없이.',
+  'reg.title': '1. 계정 연결',
+  'reg.hint': '처음이신가요? 계정과 워커 에이전트가 한 번에 만들어져요. 이미 Ledgermind 계정이 있다면 같은 이메일/비밀번호를 입력하면 새 에이전트가 추가됩니다.',
+  'reg.email': '이메일',
+  'reg.password': '비밀번호',
+  'reg.agentName': '에이전트 이름',
+  'reg.advanced': '고급 설정',
+  'reg.platformUrl': '플랫폼 URL',
+  'reg.submit': '계정 생성 / 연결',
+  'backend.title': '2. 모델 선택',
+  'backend.detecting': '로컬 Ollama 설치를 찾는 중…',
+  'backend.found': 'Ollama가 실행 중이에요. 설치된 모델을 고르세요:',
+  'backend.model': '모델',
+  'backend.useModel': '이 모델 사용',
+  'backend.cloudIntro': '로컬 Ollama가 없어요.',
+  'backend.retry': 'Ollama 설치 후 다시 시도',
+  'backend.cloudMid': '하거나, 무료/저가 클라우드 API 키를 붙여넣어 호스팅 모델로 채굴할 수 있어요 (예:',
+  'backend.cloudEnd': '키 — OpenAI 호환, 넉넉한 무료 티어):',
+  'backend.baseUrl': 'API 베이스 URL',
+  'backend.apiKey': 'API 키',
+  'backend.model2': '모델',
+  'backend.useEndpoint': '이 엔드포인트 사용',
+  'stat.completed': '완료',
+  'stat.failed': '실패',
+  'stat.balance': 'USDC 수익',
+  'stat.credit': '신용점수',
+  'mine.start': '채굴 시작',
+  'mine.stop': '채굴 중지',
+  'mine.trayHint': '창을 닫아도 트레이에서 채굴이 계속돼요 — 트레이 아이콘으로 다시 열 수 있어요.',
+  'mine.forget': '다른 계정 사용',
+  'withdraw.title': '수익 인출',
+  'withdraw.hint': '이 워커의 USDC 잔액을 내 지갑 주소(예: MetaMask 주소 복사)로 보냅니다. 돈을 옮길 땐 계정 비밀번호가 필요해요 — 워커 키만으로는 절대 인출할 수 없습니다. 현재는 테스트넷 USDC예요.',
+  'withdraw.to': '받는 주소',
+  'withdraw.password': '계정 비밀번호',
+  'withdraw.submit': '인출',
+}
+
+let lang = localStorage.getItem('miner-lang') || 'en'
+
+function applyLang() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n')
+    if (lang === 'ko' && KO[key]) {
+      if (!el.dataset.en) el.dataset.en = el.textContent
+      el.textContent = KO[key]
+    } else if (el.dataset.en) {
+      el.textContent = el.dataset.en
+    }
+  })
+  const toggle = document.getElementById('lang-toggle')
+  if (toggle) toggle.textContent = lang === 'ko' ? 'English' : '한국어'
+}
+
 const views = {
   register: document.getElementById('view-register'),
   backend: document.getElementById('view-backend'),
@@ -145,6 +201,12 @@ async function refreshWallet() {
   } catch {
     /* wallet not provisioned yet or offline — leave the dash */
   }
+  try {
+    const card = await invoke('get_agent_card')
+    document.getElementById('stat-credit').textContent = `${card.credit_score} · ${card.credit_rating}`
+  } catch {
+    /* card unavailable — leave the dash */
+  }
 }
 
 // Buttons/listeners for the mining view are bound exactly once at boot —
@@ -221,6 +283,13 @@ async function enterMiningView() {
 // ---------- Boot ----------
 
 async function boot() {
+  applyLang()
+  document.getElementById('lang-toggle').addEventListener('click', () => {
+    lang = lang === 'ko' ? 'en' : 'ko'
+    localStorage.setItem('miner-lang', lang)
+    applyLang()
+  })
+
   await initRegisterView()
   initBackendView()
   initMiningView()
