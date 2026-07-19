@@ -521,6 +521,38 @@ export const i18nString = pgTable(
   (t) => [primaryKey({ columns: [t.locale, t.key] })],
 )
 
+// ---- OAuth 2.0 for MCP connectors (Claude / ChatGPT custom connectors) ----
+// Public clients only (PKCE, no client secret): connectors register
+// dynamically (RFC 7591), the user approves on /oauth/authorize, and the
+// resulting bearer token authenticates JSON-RPC calls to /api/mcp.
+
+export const oauthClient = pgTable('oauth_clients', {
+  id: text('id').primaryKey(), // client_id, mcpc_<nanoid>
+  name: text('name').notNull(),
+  /** Exact-match allowlist checked on every authorize AND token exchange. */
+  redirectUris: jsonb('redirect_uris').$type<string[]>().notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const oauthCode = pgTable('oauth_codes', {
+  code: text('code').primaryKey(),
+  clientId: text('client_id').notNull(),
+  userId: text('user_id').notNull(),
+  redirectUri: text('redirect_uri').notNull(),
+  codeChallenge: text('code_challenge').notNull(), // PKCE S256, mandatory
+  scope: text('scope').notNull().default('mcp'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+})
+
+export const oauthToken = pgTable('oauth_tokens', {
+  token: text('token').primaryKey(), // lmk_<nanoid(40)>
+  userId: text('user_id').notNull(),
+  clientId: text('client_id').notNull(),
+  scope: text('scope').notNull().default('mcp'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const insurancePolicy = pgTable('insurancePolicy', {
   id: text('id').primaryKey(),
   userId: text('userId').notNull(),
