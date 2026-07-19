@@ -23,6 +23,21 @@ ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "payoutaddress" text;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "walletmaxtxusd" numeric(12,2);
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "walletdailycapusd" numeric(12,2);
 
+CREATE TABLE IF NOT EXISTS "delegations" (
+  id             text PRIMARY KEY,
+  user_id        text NOT NULL,
+  prime_agent_id text NOT NULL,
+  task           text NOT NULL,
+  budget_usd     numeric(12,2) NOT NULL,
+  status         text NOT NULL DEFAULT 'planned',
+  subtasks       jsonb NOT NULL DEFAULT '[]',
+  auto_verify    boolean NOT NULL DEFAULT true,
+  final_output   text,
+  error          text,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS "session" (
   id        text PRIMARY KEY,
   userid    text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,

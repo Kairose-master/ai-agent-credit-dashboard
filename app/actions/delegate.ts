@@ -1,0 +1,185 @@
+'use server'
+
+/**
+ * Delegation actions — the owner-facing wrapper over lib/delegation.ts.
+ * plan (nothing escrowed) → confirm (jobs posted, budget escrowed) →
+ * status reads (which double as the completion/verification tick, same
+ * no-cron pattern as the Worker Console's cloud auto-mine sweep).
+ */
+import { getSession } from '@/lib/get-session'
+import { db } from '@/lib/db'
+import { agent, delegation } from '@/lib/db/schema'
+import { desc, eq } from 'drizzle-orm'
+import { nanoid } from 'nanoid'
+import { revalidatePath } from 'next/cache'
+import { asActionError } from '@/lib/action-error'
+import {
+  planDelegation,
+  postDelegationJobs,
+  tickDelegation,
+  subtaskViews,
+  MAX_SUBTASKS,
+  type DelegationSubtask,
+} from '@/lib/delegation'
+
+const MAX_BUDGET_USD = 500 // per delegation — matches the scale testnet jobs actually run at
+
+async function requireUser() {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+  return session.user.id
+}
+
+async function requireOwnedDelegation(id: string, userId: string) {
+  const [row] = await db.select().from(delegation).where(eq(delegation.id, id))
+  if (!row || row.userId !== userId) throw new Error('Delegation not found')
+  return row
+}
+
+/** Step 1: decompose. Stores the plan as 'planned' — the owner sees the
+ *  exact subtasks and bounties before a single cent is escrowed. */
+export async function createDelegationPlan(input: {
+  primeAgentId: string
+  task: string
+  budgetUsd: number
+  autoVerify: boolean
+}) {
+  const userId = await requireUser()
+  const [prime] = await db.select().from(agent).where(eq(agent.id, input.primeAgentId))
+  if (!prime || prime.userId !== userId) throw new Error('Agent not found')
+  if (!prime.smartAccountAddress) throw new Error('Provision the prime agent first — it escrows the bounties')
+
+  const task = input.task.trim()
+  if (task.length < 20) throw new Error('Describe the task in at least 20 characters')
+  if (!Number.isFinite(input.budgetUsd) || input.budgetUsd < 2) throw new Error('Budget must be at least $2')
+  if (input.budgetUsd > MAX_BUDGET_USD) throw new Error(`Budget is capped at $${MAX_BUDGET_USD} per delegation`)
+
+  try {
+    const subtasks = await planDelegation(userId, task, input.budgetUsd)
+    const id = `dlg-${nanoid(10)}`
+    await db.insert(delegation).values({
+      id,
+      userId,
+      primeAgentId: input.primeAgentId,
+      task,
+      budgetUsd: input.budgetUsd.toFixed(2),
+      status: 'planned',
+      subtasks,
+      autoVerify: input.autoVerify,
+    })
+    revalidatePath('/delegate')
+    return { id, subtasks }
+  } catch (error) {
+    throw asActionError(error, 'createDelegationPlan')
+  }
+}
+
+/** Step 2: the owner confirmed the reviewed plan — post the jobs for real.
+ *  This is the moment money moves (escrow per subtask, prime's wallet). */
+export async function confirmDelegation(id: string) {
+  const userId = await requireUser()
+  const row = await requireOwnedDelegation(id, userId)
+  if (row.status !== 'planned') throw new Error('Already confirmed')
+
+  try {
+    const subtasks = await postDelegationJobs(
+      row.primeAgentId,
+      Number(row.budgetUsd),
+      row.subtasks as DelegationSubtask[],
+    )
+    await db
+      .update(delegation)
+      .set({ status: 'posted', subtasks, updatedAt: new Date() })
+      .where(eq(delegation.id, id))
+    revalidatePath('/delegate')
+    return { posted: subtasks.length }
+  } catch (error) {
+    // Partial posting is possible (posted 2 of 4, then a tx failed) —
+    // persist what DID post so a retry of confirm skips those and the
+    // status view stays truthful.
+    await db
+      .update(delegation)
+      .set({ subtasks: row.subtasks, error: error instanceof Error ? error.message : String(error), updatedAt: new Date() })
+      .where(eq(delegation.id, id))
+    throw asActionError(error, 'confirmDelegation')
+  }
+}
+
+/** Discard a plan that was never confirmed (nothing was escrowed). */
+export async function discardDelegation(id: string) {
+  const userId = await requireUser()
+  const row = await requireOwnedDelegation(id, userId)
+  if (row.status !== 'planned') throw new Error('Only unconfirmed plans can be discarded')
+  await db.delete(delegation).where(eq(delegation.id, id))
+  revalidatePath('/delegate')
+  return { ok: true }
+}
+
+/** The status read the /delegate page polls — doubles as the tick that
+ *  verifies submissions and finalizes completed delegations. */
+export async function getMyDelegations() {
+  const userId = await requireUser()
+
+  const rows = await db
+    .select()
+    .from(delegation)
+    .where(eq(delegation.userId, userId))
+    .orderBy(desc(delegation.createdAt))
+    .limit(20)
+
+  // One on-chain read shared by every tick and status view below — this
+  // action polls every ~8s while the page is open, so per-row reads
+  // would multiply RPC load for nothing.
+  const hasActive = rows.some((r) => r.status === 'posted')
+  const { readJobs } = await import('@/lib/onchain/labor')
+  const jobs = hasActive ? await readJobs().catch(() => []) : []
+
+  // Tick active delegations opportunistically (bounded: they're capped at
+  // MAX_SUBTASKS jobs each, and verification only runs on Submitted work).
+  for (const row of rows) {
+    if (row.status === 'posted') {
+      await tickDelegation(row, jobs).catch((e) => console.error('[delegate] tick failed:', e))
+    }
+  }
+
+  // Re-read anything the tick may have finalized, then attach live views.
+  const fresh = await db
+    .select()
+    .from(delegation)
+    .where(eq(delegation.userId, userId))
+    .orderBy(desc(delegation.createdAt))
+    .limit(20)
+
+  const agents = await db.select().from(agent).where(eq(agent.userId, userId))
+  const agentName = new Map(agents.map((a) => [a.id, a.name]))
+
+  return Promise.all(
+    fresh.map(async (row) => ({
+      id: row.id,
+      primeAgentId: row.primeAgentId,
+      primeAgentName: agentName.get(row.primeAgentId) ?? 'Unknown agent',
+      task: row.task,
+      budgetUsd: Number(row.budgetUsd),
+      status: row.status,
+      autoVerify: row.autoVerify,
+      finalOutput: row.finalOutput,
+      error: row.error,
+      createdAt: row.createdAt.toISOString(),
+      subtasks:
+        row.status === 'planned'
+          ? (row.subtasks as DelegationSubtask[]).map((st) => ({ ...st, jobStatus: null, workerLabel: null }))
+          : await subtaskViews(row, jobs),
+    })),
+  )
+}
+
+/** Prime-agent candidates for the delegate form (provisioned = can escrow). */
+export async function getDelegationAgents() {
+  const userId = await requireUser()
+  const agents = await db.select().from(agent).where(eq(agent.userId, userId))
+  return agents.map((a) => ({ id: a.id, name: a.name, provisioned: Boolean(a.smartAccountAddress) }))
+}
+
+export async function delegationLimits() {
+  return { maxSubtasks: MAX_SUBTASKS, maxBudgetUsd: MAX_BUDGET_USD }
+}

@@ -298,6 +298,39 @@ export const agentTemplatePurchase = pgTable('agent_template_purchases', {
 })
 
 /**
+ * delegations — a big task handed to a "prime" agent, which decomposes it
+ * and subcontracts the pieces as real Labor Market jobs (escrowed from the
+ * prime agent's own wallet, bounded by the budget the owner set here).
+ * Client → Prime → market workers: the hierarchical-delegation primitive.
+ *
+ * Subtask identity lives in the subtasks jsonb (specHash + onchainJobId
+ * per entry); their live status is always derived from the on-chain job +
+ * job_specs at read time, never cached here — only terminal results
+ * (output snapshots, final assembly) are written back.
+ */
+export const delegation = pgTable('delegations', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  primeAgentId: text('prime_agent_id').notNull(),
+  task: text('task').notNull(),
+  budgetUsd: decimal('budget_usd', { precision: 12, scale: 2 }).notNull(),
+  /** planned → posted → completed | failed. 'planned' rows have a plan the
+   *  owner hasn't confirmed yet — nothing has been escrowed. */
+  status: text('status').notNull().default('planned'),
+  /** [{ title, description, acceptanceCriteria, bountyUsd, testCode?,
+   *     specHash?, onchainJobId?, output?, failed? }] */
+  subtasks: jsonb('subtasks').$type<unknown[]>().notNull().default([]),
+  /** Owner's standing consent for the prime agent to LLM-review Submitted
+   *  work and release escrow on a pass — the delegation-level analogue of
+   *  a job's autoApprove, chosen explicitly at creation. */
+  autoVerify: boolean('auto_verify').notNull().default(true),
+  finalOutput: text('final_output'),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * job_specs — off-chain metadata for on-chain jobs.
  * The LaborMarket contract stores only a specHash; the human-readable title
  * and description live here, keyed by that hash. On-chain = money/state,
