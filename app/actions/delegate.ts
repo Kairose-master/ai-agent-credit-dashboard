@@ -12,7 +12,6 @@ import { agent, delegation } from '@/lib/db/schema'
 import { desc, eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { revalidatePath } from 'next/cache'
-import { asActionError } from '@/lib/action-error'
 import {
   planDelegation,
   postDelegationJobs,
@@ -70,7 +69,11 @@ export async function createDelegationPlan(input: {
     revalidatePath('/delegate')
     return { id, subtasks }
   } catch (error) {
-    throw asActionError(error, 'createDelegationPlan')
+    // Returned (not thrown) so the REAL message survives production —
+    // Next.js masks thrown server-action errors ("The specific message is
+    // omitted..."), which is exactly what the first live user hit.
+    console.error('[createDelegationPlan]', error)
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -79,7 +82,7 @@ export async function createDelegationPlan(input: {
 export async function confirmDelegation(id: string) {
   const userId = await requireUser()
   const row = await requireOwnedDelegation(id, userId)
-  if (row.status !== 'planned') throw new Error('Already confirmed')
+  if (row.status !== 'planned') return { error: 'Already confirmed' }
 
   try {
     const subtasks = await postDelegationJobs(
@@ -89,19 +92,22 @@ export async function confirmDelegation(id: string) {
     )
     await db
       .update(delegation)
-      .set({ status: 'posted', subtasks, updatedAt: new Date() })
+      .set({ status: 'posted', subtasks, error: null, updatedAt: new Date() })
       .where(eq(delegation.id, id))
     revalidatePath('/delegate')
     return { posted: subtasks.length }
   } catch (error) {
     // Partial posting is possible (posted 2 of 4, then a tx failed) —
     // persist what DID post so a retry of confirm skips those and the
-    // status view stays truthful.
+    // status view stays truthful. Error returned, not thrown: thrown
+    // server-action errors get masked in production.
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[confirmDelegation]', error)
     await db
       .update(delegation)
-      .set({ subtasks: row.subtasks, error: error instanceof Error ? error.message : String(error), updatedAt: new Date() })
+      .set({ subtasks: row.subtasks, error: message, updatedAt: new Date() })
       .where(eq(delegation.id, id))
-    throw asActionError(error, 'confirmDelegation')
+    return { error: message }
   }
 }
 
