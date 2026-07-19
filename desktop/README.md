@@ -85,9 +85,19 @@ Windows code-signing cert this project doesn't have), so:
 
 - **Windows:** SmartScreen shows "Windows protected your PC" on first run —
   click "More info" → "Run anyway".
-- **macOS:** Gatekeeper says the app "is damaged and can't be opened" —
-  right-click the app → Open (instead of double-clicking), or run
-  `xattr -cr "Ledgermind Miner.app"` once in Terminal.
+- **macOS:** Gatekeeper says the app "is damaged and can't be opened"
+  (손상되었기 때문에 열 수 없습니다). The file is fine — this is what
+  macOS shows for any unsigned, un-notarized app downloaded from a
+  browser, and right-click → Open does *not* bypass it. Drag the app
+  into Applications, then run this once in Terminal and open it
+  normally afterwards:
+
+  ```bash
+  xattr -cr "/Applications/Ledgermind Miner.app"
+  ```
+
+  (This strips the download-quarantine flag; the app itself is
+  untouched.)
 
 Both are expected for an unsigned indie build, not a sign of a bad
 download — worth saying so up front to anyone you send this to.
