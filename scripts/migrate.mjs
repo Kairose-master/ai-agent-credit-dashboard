@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS "user" (
 );
 
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "payoutaddress" text;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "walletmaxtxusd" numeric(12,2);
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "walletdailycapusd" numeric(12,2);
 
 CREATE TABLE IF NOT EXISTS "session" (
   id        text PRIMARY KEY,

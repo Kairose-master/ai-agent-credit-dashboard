@@ -73,6 +73,7 @@
         <div class="stats">
           <div><span class="stat-value" id="stat-completed">0</span><span class="stat-label">completed</span></div>
           <div><span class="stat-value" id="stat-failed">0</span><span class="stat-label">failed</span></div>
+          <div><span class="stat-value" id="stat-balance">—</span><span class="stat-label">USDC earned</span></div>
         </div>
 
         <div class="controls">
@@ -81,6 +82,20 @@
         </div>
 
         <pre id="log" aria-live="polite"></pre>
+
+        <details id="withdraw-section">
+          <summary>Withdraw earnings</summary>
+          <p class="hint">Sends this worker's USDC balance to any wallet address you control (e.g. copy your
+            MetaMask account address). Your account password is required to move money — the worker's own
+            key alone can never withdraw. Testnet USDC for now.</p>
+          <form id="withdraw-form">
+            <label>Destination address <input type="text" id="withdraw-to" placeholder="0x…" required pattern="0x[0-9a-fA-F]{40}" /></label>
+            <label>Account password <input type="password" id="withdraw-password" required autocomplete="current-password" /></label>
+            <button type="submit" id="withdraw-submit">Withdraw</button>
+          </form>
+          <p class="error" id="withdraw-error" hidden></p>
+          <p class="success" id="withdraw-result" hidden></p>
+        </details>
 
         <button id="forget-btn" class="link-btn">Use a different account</button>
       </section>

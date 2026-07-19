@@ -5,13 +5,59 @@
  * agent-initiated or manual — passes these checks, and every executed
  * transfer lands in the behavioral ledger as a WALLET_TRANSFER event. The
  * daily cap is computed from that ledger, so the ledger is also the enforcer.
+ *
+ * Caps are sized PER ACCOUNT: the platform env values are only the default
+ * for accounts that never touched their settings. The caps protect the
+ * owner's funds from a runaway/compromised agent, so the owner sets them
+ * (Worker Console → payout settings), bounded by a hard platform ceiling so
+ * "I typed 9 nine times" can't disable the guard entirely.
  */
 import { db } from '@/lib/db'
-import { agentEvent } from '@/lib/db/schema'
+import { agent, agentEvent, user } from '@/lib/db/schema'
 import { and, eq, gte } from 'drizzle-orm'
 
 export const WALLET_MAX_TX_USD = Number(process.env.WALLET_MAX_TX_USD ?? 100)
 export const WALLET_DAILY_CAP_USD = Number(process.env.WALLET_DAILY_CAP_USD ?? 500)
+
+/** Absolute ceiling a user-set cap may reach, whatever they type. */
+export const WALLET_CAP_HARD_MAX_USD = Number(process.env.WALLET_CAP_HARD_MAX_USD ?? 100_000)
+
+export interface SpendingPolicy {
+  maxPerTxUsd: number
+  dailyCapUsd: number
+}
+
+function normalizeCap(raw: string | null | undefined, fallback: number): number {
+  const n = raw == null ? NaN : Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return fallback
+  return Math.min(n, WALLET_CAP_HARD_MAX_USD)
+}
+
+/** The caps that apply to this USER (their own settings, else platform defaults). */
+export function policyForUserRow(row: { walletMaxTxUsd: string | null; walletDailyCapUsd: string | null } | undefined): SpendingPolicy {
+  return {
+    maxPerTxUsd: normalizeCap(row?.walletMaxTxUsd, WALLET_MAX_TX_USD),
+    dailyCapUsd: normalizeCap(row?.walletDailyCapUsd, WALLET_DAILY_CAP_USD),
+  }
+}
+
+/** The caps that apply to this AGENT — resolved through its owning user. */
+export async function policyForAgent(agentId: string): Promise<SpendingPolicy> {
+  try {
+    const [row] = await db
+      .select({ walletMaxTxUsd: user.walletMaxTxUsd, walletDailyCapUsd: user.walletDailyCapUsd })
+      .from(agent)
+      .innerJoin(user, eq(agent.userId, user.id))
+      .where(eq(agent.id, agentId))
+    return policyForUserRow(row)
+  } catch (error) {
+    // Deployed ahead of its migration the columns don't exist yet — fall
+    // back to platform defaults instead of blocking every transfer (same
+    // failure mode that once took down sign-in; see /api/signin).
+    console.error('[treasury-policy] per-user cap lookup failed (migration pending?):', error)
+    return { maxPerTxUsd: WALLET_MAX_TX_USD, dailyCapUsd: WALLET_DAILY_CAP_USD }
+  }
+}
 
 export function isValidAddress(value: string): value is `0x${string}` {
   return /^0x[0-9a-fA-F]{40}$/.test(value)
@@ -36,13 +82,14 @@ export async function spentLast24h(agentId: string): Promise<number> {
 /** Throws with a human-readable reason when the transfer violates policy. */
 export async function enforceSpendingPolicy(agentId: string, amountUsd: number): Promise<void> {
   if (!Number.isFinite(amountUsd) || amountUsd <= 0) throw new Error('Amount must be positive')
-  if (amountUsd > WALLET_MAX_TX_USD) {
-    throw new Error(`Per-transfer cap is $${WALLET_MAX_TX_USD} (requested $${amountUsd})`)
+  const policy = await policyForAgent(agentId)
+  if (amountUsd > policy.maxPerTxUsd) {
+    throw new Error(`Per-transfer cap is $${policy.maxPerTxUsd} (requested $${amountUsd}) — raise it in Worker Console payout settings`)
   }
   const spent = await spentLast24h(agentId)
-  if (spent + amountUsd > WALLET_DAILY_CAP_USD) {
+  if (spent + amountUsd > policy.dailyCapUsd) {
     throw new Error(
-      `Daily cap $${WALLET_DAILY_CAP_USD} would be exceeded (spent $${spent.toFixed(2)} in 24h)`,
+      `Daily cap $${policy.dailyCapUsd} would be exceeded (spent $${spent.toFixed(2)} in 24h) — raise it in Worker Console payout settings`,
     )
   }
 }
