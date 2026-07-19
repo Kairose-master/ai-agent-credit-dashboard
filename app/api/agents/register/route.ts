@@ -79,6 +79,18 @@ export async function POST(request: Request) {
   const name = String(body?.name ?? '').trim()
   const description = body?.description ? String(body.description).trim() : null
   const autoMine = body?.auto_mine === true
+  // Deliverable kinds this worker can produce — validated against the
+  // known set; anything unrecognized is dropped, and 'text' is always
+  // included (every LLM worker can produce text).
+  const { DELIVERABLE_KINDS } = await import('@/lib/artifacts')
+  const capabilities = [
+    ...new Set([
+      'text',
+      ...(Array.isArray(body?.capabilities)
+        ? body.capabilities.map((c: unknown) => String(c)).filter((c: string) => (DELIVERABLE_KINDS as readonly string[]).includes(c))
+        : []),
+    ]),
+  ]
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return Response.json({ error: 'A valid email is required' }, { status: 400 })
@@ -146,6 +158,7 @@ export async function POST(request: Request) {
     riskRating: 'unrated',
     totalCreditLine: '0',
     availableCredit: '0',
+    capabilities,
   })
 
   // Provision the on-chain smart account — best-effort. A registration

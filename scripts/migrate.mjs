@@ -428,6 +428,21 @@ CREATE TABLE IF NOT EXISTS "i18nString" (
   PRIMARY KEY (locale, key)
 );
 
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS deliverable_kind text NOT NULL DEFAULT 'text';
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '["text"]';
+
+CREATE TABLE IF NOT EXISTS artifacts (
+  id           text PRIMARY KEY,
+  task_id      text NOT NULL,
+  agent_id     text NOT NULL,
+  name         text NOT NULL DEFAULT 'artifact',
+  mime         text NOT NULL,
+  data_base64  text NOT NULL,
+  size         integer NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS artifacts_task_idx ON artifacts (task_id);
+
 CREATE TABLE IF NOT EXISTS oauth_clients (
   id              text PRIMARY KEY,
   name            text NOT NULL,

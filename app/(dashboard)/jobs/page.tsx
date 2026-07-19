@@ -38,6 +38,8 @@ type Job = {
   attachmentName: string | null
   hasTests: boolean
   testResult: { passed: boolean | null; output: string; gradedAt: string } | null
+  deliverableKind: string
+  artifacts: { id: string; name: string; mime: string }[]
 }
 
 type MyAgent = { id: string; name: string; provisioned: boolean }
@@ -91,6 +93,7 @@ export default function JobsPage() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [testCode, setTestCode] = useState('')
   const [autoApprove, setAutoApprove] = useState(true)
+  const [deliverableKind, setDeliverableKind] = useState('text')
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -167,6 +170,7 @@ export default function JobsPage() {
         attachmentName: attachment?.name,
         testCode: testCode.trim() || undefined,
         autoApprove,
+        deliverableKind,
       }).then(() => {
         setTitle('')
         setDescription('')
@@ -353,6 +357,15 @@ export default function JobsPage() {
                       </label>
                     )}
                   </div>
+                  <select
+                    value={deliverableKind}
+                    onChange={(e) => setDeliverableKind(e.target.value)}
+                    className="h-9 rounded-md border border-border bg-background px-3 text-sm md:col-span-2"
+                  >
+                    <option value="text">📝 Deliverable: text (writing, code, analysis)</option>
+                    <option value="image">🖼️ Deliverable: image (worker must attach an image — vision-graded)</option>
+                    <option value="file">📎 Deliverable: file (any attached artifact, manual review)</option>
+                  </select>
                   <input
                     value={bounty}
                     onChange={(e) => setBounty(e.target.value)}
@@ -391,6 +404,14 @@ export default function JobsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{job.title}</span>
+                        {job.deliverableKind !== 'text' && (
+                          <span
+                            className="rounded-md border border-border px-1.5 py-0.5 text-xs"
+                            title={`Deliverable: ${job.deliverableKind}`}
+                          >
+                            {job.deliverableKind === 'image' ? '🖼️' : '📎'}
+                          </span>
+                        )}
                         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[job.status]}`}>
                           {t(`jobs.status.${job.status}`)}
                         </span>
@@ -448,6 +469,32 @@ export default function JobsPage() {
                             <Bot className="size-3.5" /> {t('jobs.detail.outputTitle')}
                           </p>
                           <p className="whitespace-pre-wrap text-muted-foreground">{job.output}</p>
+                          {job.artifacts.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {job.artifacts.map((a) =>
+                                a.mime.startsWith('image/') ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <a key={a.id} href={`/api/artifacts/${a.id}`} target="_blank" rel="noreferrer">
+                                    <img
+                                      src={`/api/artifacts/${a.id}`}
+                                      alt={a.name}
+                                      className="max-h-48 rounded-md border border-border"
+                                    />
+                                  </a>
+                                ) : (
+                                  <a
+                                    key={a.id}
+                                    href={`/api/artifacts/${a.id}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded-md border border-border px-2 py-1 underline"
+                                  >
+                                    📎 {a.name}
+                                  </a>
+                                ),
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                       {job.testResult && (

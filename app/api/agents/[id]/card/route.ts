@@ -38,6 +38,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     ledgermind: {
       creditScore: Math.round(parseFloat(ag.creditScore)),
       creditRating: ag.creditRating,
+      capabilities: Array.isArray(ag.capabilities) && ag.capabilities.length > 0 ? ag.capabilities : ['text'],
       agentAddress: ag.smartAccountAddress, // on-chain identity in kernel/eoa mode
       runtime: ag.runtimeType ?? 'platform',
       scoreAttestation: 'EAS (see repo README for schema)',

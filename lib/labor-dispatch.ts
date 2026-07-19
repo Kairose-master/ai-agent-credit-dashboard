@@ -125,6 +125,19 @@ export async function acceptAndDispatchJob(
     )
   }
 
+  // Capability gate — covers BOTH manual accepts and auto-mine (which
+  // also pre-filters, but this is the single chokepoint before gas is
+  // spent on an accept the worker can't deliver on).
+  if (spec) {
+    const { workerCanDeliver } = await import('@/lib/artifacts')
+    const kind = spec.deliverableKind ?? 'text'
+    if (!workerCanDeliver(worker.capabilities, kind)) {
+      throw new Error(
+        `This job requires a ${kind} deliverable, which ${worker.name} hasn't declared as a capability (worker capabilities gate what can be claimed).`,
+      )
+    }
+  }
+
   // Take the off-chain work-unit claim before spending gas. Losing here is
   // the normal contention path — cheap and instant, like a mining pool
   // handing each work unit to exactly one rig.

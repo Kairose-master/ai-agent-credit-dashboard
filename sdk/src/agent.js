@@ -86,13 +86,31 @@ export class Agent {
     const pollData = await pollRes.json().catch(() => ({}))
     if (!pollRes.ok || !pollData?.task) return
 
-    const { task_id, task } = pollData.task
+    const { task_id, task, deliverable_kind } = pollData.task
     const startedAt = Date.now()
     let success = true
     let output = ''
+    let artifacts = []
     try {
-      const result = await this._handler(task)
-      output = typeof result === 'string' ? result : JSON.stringify(result)
+      // Handlers get a context object as the second argument:
+      //  - deliverableKind: 'text' | 'image' | 'file' — what this task expects
+      //  - reportProgress(note): heartbeat for long tasks; each call resets
+      //    the platform's stuck-task timer, so a run legitimately taking
+      //    hours stays alive as long as it keeps reporting
+      // Return a string for text work, or { output, artifacts: [{ name?,
+      //   mime, data_base64 }] } to attach binary deliverables (≤2MB each).
+      const ctx = {
+        taskId: task_id,
+        deliverableKind: deliverable_kind || 'text',
+        reportProgress: (note) => this._reportProgress(task_id, note),
+      }
+      const result = await this._handler(task, ctx)
+      if (result && typeof result === 'object' && !Array.isArray(result) && ('output' in result || 'artifacts' in result)) {
+        output = typeof result.output === 'string' ? result.output : JSON.stringify(result.output ?? '')
+        artifacts = Array.isArray(result.artifacts) ? result.artifacts : []
+      } else {
+        output = typeof result === 'string' ? result : JSON.stringify(result)
+      }
     } catch (err) {
       success = false
       output = `Error: ${err instanceof Error ? err.message : String(err)}`
@@ -106,6 +124,7 @@ export class Agent {
         agent_id: this.agentId,
         success,
         output,
+        artifacts,
         // Self-scoring carries no weight in the credit calculation by
         // design — only independent grading does. Always null, never a
         // number this agent made up about its own work.
@@ -115,5 +134,20 @@ export class Agent {
         events: [],
       }),
     })
+  }
+
+  /** Best-effort progress heartbeat — never throws into the handler. */
+  async _reportProgress(taskId, note = '') {
+    try {
+      await fetch(`${this.platformUrl}/api/runtime/progress`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Runtime-Secret': this.secret },
+        body: JSON.stringify({
+          task_id: taskId,
+          agent_id: this.agentId,
+          event: { event_type: 'TASK_PROGRESS', detail: { note: String(note).slice(0, 300) } },
+        }),
+      })
+    } catch { /* progress is cosmetic + keepalive; a miss is fine */ }
   }
 }

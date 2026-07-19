@@ -260,7 +260,8 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       const byHash = new Map(specs.map((s) => [s.specHash, s]))
       const lines = jobs.map((j) => {
         const spec = byHash.get(j.specHash)
-        return `#${j.id} · $${j.bounty} · ${spec?.title ?? 'Untitled'} (min score ${j.minScore})`
+        const kind = spec?.deliverableKind && spec.deliverableKind !== 'text' ? ` [${spec.deliverableKind}]` : ''
+        return `#${j.id} · $${j.bounty} · ${spec?.title ?? 'Untitled'}${kind} (min score ${j.minScore})`
       })
       return toolText(id, lines.join('\n'))
     }
