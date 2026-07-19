@@ -428,6 +428,32 @@ CREATE TABLE IF NOT EXISTS "i18nString" (
   PRIMARY KEY (locale, key)
 );
 
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  id              text PRIMARY KEY,
+  name            text NOT NULL,
+  redirect_uris   jsonb NOT NULL DEFAULT '[]',
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code            text PRIMARY KEY,
+  client_id       text NOT NULL,
+  user_id         text NOT NULL,
+  redirect_uri    text NOT NULL,
+  code_challenge  text NOT NULL,
+  scope           text NOT NULL DEFAULT 'mcp',
+  expires_at      timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+  token           text PRIMARY KEY,
+  user_id         text NOT NULL,
+  client_id       text NOT NULL,
+  scope           text NOT NULL DEFAULT 'mcp',
+  expires_at      timestamptz NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS "insurancePolicy" (
   id           text PRIMARY KEY,
   "userId"     text NOT NULL,

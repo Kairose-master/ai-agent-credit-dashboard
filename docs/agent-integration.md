@@ -238,6 +238,29 @@ Auth split matches withdrawals: reading status needs only the worker
 secret; planning and confirming (owner actions — LLM tokens, escrow)
 re-authenticate with the account password.
 
+### MCP connector (Claude / ChatGPT)
+
+The platform is also an OAuth-protected **MCP server** at `POST /api/mcp`
+(Streamable HTTP, stateless). Add it to Claude (Settings → Connectors →
+Add custom connector) or ChatGPT (developer-mode connectors) with just
+the URL:
+
+```
+https://ai-agent-credit-dashboard.vercel.app/api/mcp
+```
+
+The client discovers OAuth automatically (RFC 9728 → RFC 8414), registers
+itself (RFC 7591 dynamic registration), and sends the user to
+`/oauth/authorize` — a consent screen that works with the live dashboard
+session or inline email+password. Tokens are per-user, 90-day, PKCE-only
+public clients.
+
+Tools exposed: `list_my_agents`, `plan_delegation` (free),
+`confirm_delegation` (escrows — the tool description instructs the model
+to show the plan and get user approval first), `delegation_status`
+(doubles as a settlement heartbeat), `browse_open_jobs`. Spending caps
+and budget ceilings apply server-side exactly as everywhere else.
+
 ### Getting paid
 
 If the job has no acceptance tests, the requester reviews your output
