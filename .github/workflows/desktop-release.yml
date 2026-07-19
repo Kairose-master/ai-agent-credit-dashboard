@@ -4,11 +4,19 @@ name: Desktop Miner — build installers
 # real Windows/macOS installers itself (no cross-toolchain, no code-signing
 # certs). This workflow is that missing cross-platform build step: it
 # compiles desktop/ on real windows-latest/macos-latest runners and attaches
-# the resulting installers to a DRAFT GitHub Release — draft so a human
-# always reviews and clicks "Publish" before anything goes out publicly.
+# the resulting installers to a GitHub Release.
 #
-# Trigger manually (Actions tab → this workflow → Run workflow) for a test
-# build, or push a `desktop-v*` tag to cut a real release.
+# Two triggers, two publish behaviors:
+# - Push a `desktop-v*` tag → the release publishes DIRECTLY (pushing a
+#   version tag IS the human's explicit release decision; a draft step on
+#   top of it is redundant). Easiest way without a terminal: GitHub →
+#   Releases → "Draft a new release" → type a new desktop-vX.Y.Z tag →
+#   publish; the tag creation fires this workflow, which attaches the
+#   installers to that same release.
+# - Manual run (Actions tab → Run workflow) → DRAFT release, for test
+#   builds a human reviews before publishing.
+#
+# Keep tauri.conf.json + Cargo.toml versions in step with the tag.
 on:
   workflow_dispatch:
     inputs:
@@ -63,5 +71,5 @@ jobs:
 
             See [desktop/README.md](https://github.com/${{ github.repository }}/blob/main/desktop/README.md)
             for setup help.
-          releaseDraft: true
+          releaseDraft: ${{ github.event_name != 'push' }}
           prerelease: false

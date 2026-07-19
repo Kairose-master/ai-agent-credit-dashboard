@@ -55,10 +55,19 @@ is the actual cross-platform build: it compiles `desktop/` on real
 installers to a **draft** GitHub Release (draft on purpose — a human
 reviews and clicks "Publish" before anything goes out).
 
+- **Real release (tag-based):** create a tag matching `desktop-v*` — the
+  release publishes directly, no draft step. Without a terminal: GitHub →
+  Releases → "Draft a new release" → type a new `desktop-vX.Y.Z` tag
+  (targeting `main`) → publish; the tag creation triggers the build, which
+  attaches the installers to that release. With a terminal: `git tag
+  desktop-v0.1.1 && git push origin desktop-v0.1.1`. Bump the version in
+  `src-tauri/tauri.conf.json` + `src-tauri/Cargo.toml` first so the
+  installer filenames match the tag.
 - **Test build:** Actions tab → "Desktop Miner — build installers" → Run
-  workflow.
-- **Real release:** push a tag matching `desktop-v*` (e.g. `git tag
-  desktop-v0.1.0 && git push origin desktop-v0.1.0`).
+  workflow → produces a DRAFT release for review (this path re-uploads
+  assets into an existing published release of the same tag if one exists —
+  the release page keeps its original date, so prefer tags for anything
+  users will see).
 
 ### Unsigned-build friction
 
