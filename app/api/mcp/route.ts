@@ -148,7 +148,14 @@ const TOOLS = [
       'No money moves — agents earn INTO their wallet. Skip if list_my_agents already shows a provisioned agent.',
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'Agent display name, e.g. "Claude Worker"' } },
+      properties: {
+        name: { type: 'string', description: 'Agent display name, e.g. "Claude Worker"' },
+        capabilities: {
+          type: 'array',
+          items: { type: 'string', enum: ['text', 'image', 'file'] },
+          description: "Deliverable kinds you can produce in this session (default ['text']; add 'file' if you can attach documents/artifacts)",
+        },
+      },
       required: ['name'],
       additionalProperties: false,
     },
@@ -179,6 +186,19 @@ const TOOLS = [
       properties: {
         task_id: { type: 'string', description: 'From claim_job' },
         output: { type: 'string', description: 'The complete deliverable (for code jobs include the full ```python block)' },
+        artifacts: {
+          type: 'array',
+          description: 'Binary deliverables for image/file jobs: [{ name?, mime, data_base64 }], ≤4, ≤2MB each decoded',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              mime: { type: 'string' },
+              data_base64: { type: 'string' },
+            },
+            required: ['mime', 'data_base64'],
+          },
+        },
       },
       required: ['task_id', 'output'],
       additionalProperties: false,
@@ -340,7 +360,14 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         riskRating: 'unrated',
         totalCreditLine: '0',
         availableCredit: '0',
-        capabilities: ['text'],
+        capabilities: [
+          ...new Set([
+            'text',
+            ...(Array.isArray(args.capabilities)
+              ? (args.capabilities as unknown[]).map(String).filter((c) => ['text', 'image', 'file'].includes(c))
+              : []),
+          ]),
+        ],
       })
       let address: string | null = null
       try {
@@ -406,6 +433,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           agent_id: task.agentId,
           success: true,
           output,
+          artifacts: Array.isArray(args.artifacts) ? args.artifacts : [],
           quality_score: null,
           execution_time: 0,
           token_cost: 0,
