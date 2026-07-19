@@ -30,6 +30,16 @@ body {
 
 header h1 { font-size: 1.15rem; margin: 0 0 4px; }
 .subtitle { margin: 0 0 20px; color: var(--muted); font-size: 0.85rem; }
+.header-row { display: flex; align-items: center; justify-content: space-between; }
+.lang-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.72rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.tray-hint { margin-top: 12px; font-size: 0.72rem; }
 
 .view h2 { font-size: 1rem; margin: 0 0 10px; }
 

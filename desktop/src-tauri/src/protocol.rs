@@ -408,6 +408,37 @@ pub async fn withdraw(
     serde_json::from_value(parsed).map_err(|e| format!("unexpected withdraw response shape: {e}"))
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCardStats {
+    pub name: String,
+    pub credit_score: i64,
+    pub credit_rating: String,
+}
+
+/// GET /api/agents/:id/card — the agent's public ERC-8004-style card.
+/// No auth (registration files are the standard's discovery layer); we
+/// surface the Ledgermind underwriting extensions the Miner cares about.
+pub async fn agent_card(platform_url: &str, agent_id: &str) -> Result<AgentCardStats, String> {
+    let url = format!("{}/api/agents/{}/card", platform_url.trim_end_matches('/'), agent_id);
+    let res = client().get(&url).send().await.map_err(|e| format!("card lookup failed: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("card lookup responded {}", res.status()));
+    }
+    let body: serde_json::Value = res.json().await.map_err(|e| format!("unexpected card response: {e}"))?;
+    Ok(AgentCardStats {
+        name: body.get("name").and_then(|v| v.as_str()).unwrap_or("Agent").to_string(),
+        credit_score: body
+            .pointer("/ledgermind/creditScore")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+        credit_rating: body
+            .pointer("/ledgermind/creditRating")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unrated")
+            .to_string(),
+    })
+}
+
 /// Ollama's own local listing endpoint — used to auto-detect whether the
 /// user already has Ollama running, and which models are pulled, before
 /// asking them to configure anything by hand.

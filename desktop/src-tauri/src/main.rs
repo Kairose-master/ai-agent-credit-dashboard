@@ -14,6 +14,10 @@ use tokio::sync::Mutex;
 const DEFAULT_PLATFORM_URL: &str = "https://ai-agent-credit-dashboard.vercel.app";
 const POLL_INTERVAL_SECS: u64 = 4;
 
+/// Whether the system tray was successfully created — decides if closing
+/// the window hides to tray (true) or actually quits (false).
+static TRAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AgentConfig {
     platform_url: String,
@@ -76,6 +80,13 @@ enum MiningEvent {
 
 fn emit_event(app: &tauri::AppHandle, event: MiningEvent) {
     let _ = app.emit("mining-event", event);
+}
+
+/// Native OS notification — the window is usually hidden in the tray, so
+/// this is how completed work actually reaches the person. Best-effort.
+fn notify(app: &tauri::AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(title).body(body).show();
 }
 
 // ---- Commands the frontend calls via invoke() ----
@@ -248,9 +259,11 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                         if success {
                             completed += 1;
                             emit_event(&app, MiningEvent::Log { line: format!("Done in {elapsed}s — result submitted.") });
+                            notify(&app, "Ledgermind Miner", &format!("Task completed and submitted ({completed} this session) — independent grading decides the payout."));
                         } else {
                             failed += 1;
                             emit_event(&app, MiningEvent::Log { line: format!("FAILED: {output}") });
+                            notify(&app, "Ledgermind Miner", "A task failed — see the log for details.");
                         }
                     }
                     Err(e) => {
@@ -268,6 +281,7 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                         &app,
                         MiningEvent::Log { line: "5 consecutive failures — stopping. Check your connection and try again.".into() },
                     );
+                    notify(&app, "Ledgermind Miner", "Mining stopped after repeated connection failures — open the app to restart.");
                     break;
                 }
             }
@@ -286,8 +300,18 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
     *app.state::<AppState>().is_mining.lock().await = false;
 }
 
+/** Public credit stats for the configured agent — score/rating for the
+ *  in-app stats panel. */
+#[tauri::command]
+async fn get_agent_card(app: tauri::AppHandle) -> Result<protocol::AgentCardStats, String> {
+    let cfg = load_stored_config(&app);
+    let agent = cfg.agent.ok_or_else(|| "No agent registered yet.".to_string())?;
+    protocol::agent_card(&agent.platform_url, &agent.agent_id).await
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             default_platform_url,
@@ -300,7 +324,63 @@ fn main() {
             stop_mining,
             get_wallet,
             withdraw_earnings,
+            get_agent_card,
         ])
+        .setup(|app| {
+            // System tray: the Miner's real home. Closing the window hides
+            // it here and mining keeps running — a background earner, not a
+            // window you have to babysit. BEST-EFFORT: on Linux the tray
+            // needs libayatana-appindicator; if it can't be created, the
+            // app must still run (and close must actually quit — see
+            // on_window_event), never crash.
+            use tauri::menu::{Menu, MenuItem};
+            use tauri::tray::TrayIconBuilder;
+
+            let build_tray = || -> tauri::Result<()> {
+                let show = MenuItem::with_id(app, "show", "Open Ledgermind Miner", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit (stops mining)", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &quit])?;
+                let icon = app
+                    .default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| tauri::Error::AssetNotFound("window icon".into()))?;
+                TrayIconBuilder::with_id("main-tray")
+                    .icon(icon)
+                    .tooltip("Ledgermind Miner")
+                    .menu(&menu)
+                    .show_menu_on_left_click(true)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .build(app)?;
+                Ok(())
+            };
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(build_tray)) {
+                Ok(Ok(())) => TRAY_AVAILABLE.store(true, Ordering::SeqCst),
+                Ok(Err(e)) => eprintln!("[miner] tray unavailable ({e}) — running without one"),
+                Err(_) => eprintln!("[miner] tray unavailable (missing system appindicator library) — running without one"),
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // With a tray: hide, mining continues in the background.
+                // Without one there is nothing to reopen from — hiding
+                // would strand an invisible process, so let close mean quit.
+                if TRAY_AVAILABLE.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Ledgermind Miner");
 }

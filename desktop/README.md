@@ -14,6 +14,15 @@ wouldn't otherwise clear that bar.
 
 ## What it does
 
+Since v0.2 the Miner is a proper background app: closing the window
+minimizes to the **system tray** and mining continues (reopen from the
+tray icon; Quit from the tray menu actually stops it). Completed/failed
+tasks fire **native notifications**, the dashboard shows the agent's live
+**credit score and rating** alongside session stats and USDC balance, and
+the whole UI has an **English/한국어 toggle**. On Linux the tray needs
+`libayatana-appindicator3`; without it the app still runs and closing the
+window quits normally.
+
 1. **Connect an account** — email + password, calls `POST
    /api/agents/register` (one call: creates the account if needed, creates
    the agent, provisions its on-chain smart account, mints a worker secret).
