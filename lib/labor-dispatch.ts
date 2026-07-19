@@ -163,3 +163,72 @@ export async function acceptAndDispatchJob(
 
   return { txHash }
 }
+
+/**
+ * Accept a job for an EXTERNAL live worker — an MCP session (Claude /
+ * ChatGPT connected via the connector) that will do the work itself,
+ * inside its own conversation, and submit via the normal callback path.
+ *
+ * Same gates as acceptAndDispatchJob (failed-lineage block, capability
+ * match, off-chain claim, on-chain accept); the difference is dispatch:
+ * there is no runtime to send the task TO — the caller IS the runtime —
+ * so the agent task is created directly in 'running' and the composed
+ * prompt is handed back for the session to execute. Submission then flows
+ * through /api/runtime/callback exactly like every other worker, so
+ * grading, credit, and settlement cannot drift.
+ */
+export async function acceptJobForExternalWorker(
+  worker: AgentRow,
+  jobId: number,
+): Promise<{ taskId: string; prompt: string; bounty: number }> {
+  const { acceptJob, readJobs } = await import('@/lib/onchain/labor')
+
+  const jobs = await readJobs({ maxAgeMs: 0 })
+  const job = jobs.find((j) => j.id === jobId)
+  if (!job) throw new Error('Job not found on-chain')
+  if (job.status !== 'Open') throw new Error(`Job #${jobId} is ${job.status}, not Open`)
+  const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
+  if (!spec) throw new Error('Job has no off-chain spec — nothing to actually do')
+
+  if (spec.failedWorkerIds?.includes(worker.id)) {
+    throw new Error("This agent already failed this job's acceptance tests — the repost is reserved for a different worker.")
+  }
+  {
+    const { workerCanDeliver } = await import('@/lib/artifacts')
+    const kind = spec.deliverableKind ?? 'text'
+    if (!workerCanDeliver(worker.capabilities, kind)) {
+      throw new Error(`This job requires a ${kind} deliverable — agent ${worker.name} hasn't declared that capability.`)
+    }
+  }
+  if (Math.round(parseFloat(worker.creditScore)) < job.minScore) {
+    throw new Error(`Job requires credit score ≥ ${job.minScore}; ${worker.name} has ${Math.round(parseFloat(worker.creditScore))}.`)
+  }
+  if (!(await claimJobSpec(spec.specHash, worker.id))) {
+    throw new Error('Another worker is already claiming this job — try a different one.')
+  }
+
+  try {
+    await acceptJob(worker.id, jobId)
+  } catch (error) {
+    await releaseJobClaim(spec.specHash, worker.id)
+    throw error
+  }
+
+  const { nanoid } = await import('nanoid')
+  const { agentTask } = await import('@/lib/db/schema')
+  const taskId = `task-${nanoid(10)}`
+  const prompt = buildJobTaskPrompt(spec)
+  await db.insert(agentTask).values({
+    id: taskId,
+    userId: worker.userId,
+    agentId: worker.id,
+    task: prompt,
+    status: 'running',
+  })
+  await db
+    .update(jobSpec)
+    .set({ workerAgentId: worker.id, onchainJobId: jobId, agentTaskId: taskId })
+    .where(eq(jobSpec.specHash, spec.specHash))
+
+  return { taskId, prompt, bounty: job.bounty }
+}
