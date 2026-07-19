@@ -189,7 +189,9 @@ export async function postDelegationJobs(
     await postJob(primeAgentId, st.bountyUsd, 0, specHash)
 
     // postJob doesn't return the job id — resolve it via the specHash.
-    const jobs = await readJobs()
+    // maxAgeMs: 0 — we JUST wrote this job; a cached read from before the
+    // tx would miss it and leave the subtask untracked.
+    const jobs = await readJobs({ maxAgeMs: 0 })
     const posted = jobs.find((j) => j.specHash === specHash)
     st.specHash = specHash
     st.onchainJobId = posted?.id
