@@ -69,6 +69,7 @@ export async function POST(request: Request) {
           name: a.name,
           mime: a.mime,
           dataBase64: a.dataBase64,
+          url: a.url,
           size: a.size,
         })),
       )

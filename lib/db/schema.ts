@@ -379,6 +379,10 @@ export const jobSpec = pgTable('job_specs', {
   // artifact(s); graded by a vision LLM when a key is available, else
   // manual review), or 'file' (arbitrary attached artifact, manual review).
   deliverableKind: text('deliverable_kind').notNull().default('text'),
+  // Tool capabilities the worker must declare to claim ('web' live web
+  // access, 'code' code execution, 'gpu' heavy compute). Matched at every
+  // accept gate alongside deliverableKind.
+  requiredCapabilities: jsonb('required_capabilities').$type<string[]>().notNull().default([]),
   // Failed-tests auto-return: how many times this spec lineage has been
   // auto-reposted, and which workers already failed it (blocked from
   // re-accepting the repost).
@@ -544,7 +548,10 @@ export const artifact = pgTable('artifacts', {
   agentId: text('agent_id').notNull(),
   name: text('name').notNull().default('artifact'),
   mime: text('mime').notNull(),
-  dataBase64: text('data_base64').notNull(),
+  /** Inline form — null when the artifact lives in blob storage instead. */
+  dataBase64: text('data_base64'),
+  /** Blob form (Vercel Blob public URL) — null for inline artifacts. */
+  url: text('url'),
   size: integer('size').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

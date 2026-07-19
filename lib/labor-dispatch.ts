@@ -131,9 +131,9 @@ export async function acceptAndDispatchJob(
   if (spec) {
     const { workerCanDeliver } = await import('@/lib/artifacts')
     const kind = spec.deliverableKind ?? 'text'
-    if (!workerCanDeliver(worker.capabilities, kind)) {
+    if (!workerCanDeliver(worker.capabilities, kind, spec.requiredCapabilities)) {
       throw new Error(
-        `This job requires a ${kind} deliverable, which ${worker.name} hasn't declared as a capability (worker capabilities gate what can be claimed).`,
+        `This job requires a ${kind} deliverable${(spec.requiredCapabilities ?? []).length ? ` plus [${spec.requiredCapabilities.join(', ')}]` : ''} — ${worker.name} hasn't declared the needed capabilities.`,
       )
     }
   }
@@ -196,8 +196,10 @@ export async function acceptJobForExternalWorker(
   {
     const { workerCanDeliver } = await import('@/lib/artifacts')
     const kind = spec.deliverableKind ?? 'text'
-    if (!workerCanDeliver(worker.capabilities, kind)) {
-      throw new Error(`This job requires a ${kind} deliverable — agent ${worker.name} hasn't declared that capability.`)
+    if (!workerCanDeliver(worker.capabilities, kind, spec.requiredCapabilities)) {
+      throw new Error(
+        `This job requires a ${kind} deliverable${(spec.requiredCapabilities ?? []).length ? ` plus [${spec.requiredCapabilities.join(', ')}]` : ''} — agent ${worker.name} hasn't declared the needed capabilities.`,
+      )
     }
   }
   if (Math.round(parseFloat(worker.creditScore)) < job.minScore) {

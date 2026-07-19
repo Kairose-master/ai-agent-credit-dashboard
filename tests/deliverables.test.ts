@@ -3,6 +3,7 @@ import {
   validateArtifacts,
   workerCanDeliver,
   normalizeDeliverableKind,
+  normalizeCapabilities,
   MAX_ARTIFACTS_PER_SUBMISSION,
 } from '@/lib/artifacts'
 import { parsePlannerOutput } from '@/lib/delegation'
@@ -38,8 +39,33 @@ describe('validateArtifacts', () => {
     expect(() => validateArtifacts(many)).toThrow(/too many/)
   })
 
-  it('rejects non-base64 payloads', () => {
-    expect(() => validateArtifacts([{ mime: 'image/png', data_base64: 'not base64 !!!' }])).toThrow(/base64/)
+  it('rejects payloads that are neither base64 nor a url', () => {
+    expect(() => validateArtifacts([{ mime: 'image/png', data_base64: 'not base64 !!!' }])).toThrow(/data_base64|url/)
+  })
+
+  it('accepts audio and video mimes', () => {
+    const arts = validateArtifacts([
+      { mime: 'audio/mpeg', data_base64: png(100) },
+      { mime: 'video/mp4', data_base64: png(100) },
+    ])
+    expect(arts.map((a) => a.mime)).toEqual(['audio/mpeg', 'video/mp4'])
+  })
+
+  it('accepts blob URLs only from the platform blob host', () => {
+    const [a] = validateArtifacts([
+      { mime: 'video/mp4', url: 'https://abc123.public.blob.vercel-storage.com/render-xyz.mp4', name: 'render.mp4' },
+    ])
+    expect(a.url).toContain('vercel-storage.com')
+    expect(a.dataBase64).toBeNull()
+    expect(() => validateArtifacts([{ mime: 'video/mp4', url: 'https://evil.example.com/x.mp4' }])).toThrow(/blob/)
+    expect(() => validateArtifacts([{ mime: 'video/mp4', url: 'http://x.public.blob.vercel-storage.com/x.mp4' }])).toThrow(/https/)
+  })
+})
+
+describe('normalizeCapabilities', () => {
+  it('always includes text and drops unknown names', () => {
+    expect(normalizeCapabilities(undefined)).toEqual(['text'])
+    expect(normalizeCapabilities(['image', 'WEB', 'hacking', 'audio'])).toEqual(['text', 'image', 'web', 'audio'])
   })
 })
 
@@ -55,13 +81,23 @@ describe('workerCanDeliver', () => {
     expect(workerCanDeliver(['text'], 'image')).toBe(false)
     expect(workerCanDeliver(['image'], 'text')).toBe(false) // declared sets are authoritative
   })
+
+  it('enforces required tool capabilities on top of the deliverable kind', () => {
+    expect(workerCanDeliver(['text', 'web'], 'text', ['web'])).toBe(true)
+    expect(workerCanDeliver(['text'], 'text', ['web'])).toBe(false)
+    expect(workerCanDeliver(['text', 'web'], 'text', ['web', 'code'])).toBe(false)
+    expect(workerCanDeliver(['text'], 'text', [])).toBe(true)
+    expect(workerCanDeliver(null, 'text', ['web'])).toBe(false) // legacy agents have no tools
+  })
 })
 
 describe('normalizeDeliverableKind', () => {
   it('defaults anything unknown to text', () => {
     expect(normalizeDeliverableKind(undefined)).toBe('text')
     expect(normalizeDeliverableKind('IMAGE')).toBe('image')
-    expect(normalizeDeliverableKind('video')).toBe('text')
+    expect(normalizeDeliverableKind('audio')).toBe('audio')
+    expect(normalizeDeliverableKind('video')).toBe('video')
+    expect(normalizeDeliverableKind('hologram')).toBe('text')
     expect(normalizeDeliverableKind('file')).toBe('file')
   })
 })

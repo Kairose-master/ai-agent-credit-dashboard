@@ -429,7 +429,10 @@ CREATE TABLE IF NOT EXISTS "i18nString" (
 );
 
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS deliverable_kind text NOT NULL DEFAULT 'text';
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS required_capabilities jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE agent ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '["text"]';
+ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS url text;
+ALTER TABLE artifacts ALTER COLUMN data_base64 DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id           text PRIMARY KEY,

@@ -129,6 +129,7 @@ export async function getJobs() {
       hasTests: Boolean(spec?.testCode),
       testResult: spec?.testResult ?? null,
       deliverableKind: spec?.deliverableKind ?? 'text',
+      requiredCapabilities: spec?.requiredCapabilities ?? [],
       artifacts: spec?.agentTaskId ? (artifactsByTask.get(spec.agentTaskId) ?? []) : [],
     }
   })
@@ -154,10 +155,13 @@ export async function postJobAction(input: {
    *  worker's submitted code block is run against these on the platform
    *  runtime (grader ≠ solver) and the result recorded as evidence. */
   testCode?: string
-  /** What the worker must deliver: 'text' (default) | 'image' | 'file'.
-   *  Image jobs are only matched to image-capable workers and are graded
-   *  by the vision reviewer on submission. */
+  /** What the worker must deliver: text (default) | image | audio |
+   *  video | file. Non-text jobs only match workers declaring the
+   *  capability; image is vision-graded, audio/video/file are manual
+   *  review (plus Python tests when provided). */
   deliverableKind?: string
+  /** Tool capabilities the worker must declare: 'web' | 'code' | 'gpu'. */
+  requiredCapabilities?: string[]
   /** Only meaningful alongside testCode: release escrow the instant the
    *  platform grader reports a pass, with no separate "Approve & pay"
    *  click. This is the requester's own explicit choice, made right now
@@ -199,6 +203,9 @@ export async function postJobAction(input: {
       testCode: input.testCode?.trim() || null,
       autoApprove: input.autoApprove ?? true,
       deliverableKind: (await import('@/lib/artifacts')).normalizeDeliverableKind(input.deliverableKind),
+      requiredCapabilities: Array.isArray(input.requiredCapabilities)
+        ? input.requiredCapabilities.filter((c) => ['web', 'code', 'gpu'].includes(c))
+        : [],
     })
 
     const { postJob } = await import('@/lib/onchain/labor')

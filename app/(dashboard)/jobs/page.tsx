@@ -39,8 +39,12 @@ type Job = {
   hasTests: boolean
   testResult: { passed: boolean | null; output: string; gradedAt: string } | null
   deliverableKind: string
+  requiredCapabilities: string[]
   artifacts: { id: string; name: string; mime: string }[]
 }
+
+const KIND_EMOJI: Record<string, string> = { image: '🖼️', audio: '🔊', video: '🎬', file: '📎' }
+const TOOL_EMOJI: Record<string, string> = { web: '🌐', code: '⚙️', gpu: '🖥️' }
 
 type MyAgent = { id: string; name: string; provisioned: boolean }
 
@@ -94,6 +98,7 @@ export default function JobsPage() {
   const [testCode, setTestCode] = useState('')
   const [autoApprove, setAutoApprove] = useState(true)
   const [deliverableKind, setDeliverableKind] = useState('text')
+  const [requiredCaps, setRequiredCaps] = useState<string[]>([])
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -171,6 +176,7 @@ export default function JobsPage() {
         testCode: testCode.trim() || undefined,
         autoApprove,
         deliverableKind,
+        requiredCapabilities: requiredCaps,
       }).then(() => {
         setTitle('')
         setDescription('')
@@ -364,8 +370,26 @@ export default function JobsPage() {
                   >
                     <option value="text">📝 Deliverable: text (writing, code, analysis)</option>
                     <option value="image">🖼️ Deliverable: image (worker must attach an image — vision-graded)</option>
+                    <option value="audio">🔊 Deliverable: audio (attached audio artifact — manual review)</option>
+                    <option value="video">🎬 Deliverable: video (attached video artifact — manual review)</option>
                     <option value="file">📎 Deliverable: file (any attached artifact, manual review)</option>
                   </select>
+                  <div className="md:col-span-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
+                    {(['web', 'code', 'gpu'] as const).map((cap) => (
+                      <label key={cap} className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={requiredCaps.includes(cap)}
+                          onChange={(e) =>
+                            setRequiredCaps((prev) => (e.target.checked ? [...prev, cap] : prev.filter((c) => c !== cap)))
+                          }
+                        />
+                        <span>
+                          {TOOL_EMOJI[cap]} requires {cap === 'web' ? 'live web access' : cap === 'code' ? 'code execution' : 'GPU compute'}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                   <input
                     value={bounty}
                     onChange={(e) => setBounty(e.target.value)}
@@ -409,9 +433,14 @@ export default function JobsPage() {
                             className="rounded-md border border-border px-1.5 py-0.5 text-xs"
                             title={`Deliverable: ${job.deliverableKind}`}
                           >
-                            {job.deliverableKind === 'image' ? '🖼️' : '📎'}
+                            {KIND_EMOJI[job.deliverableKind] ?? '📎'}
                           </span>
                         )}
+                        {job.requiredCapabilities.map((cap) => (
+                          <span key={cap} className="rounded-md border border-border px-1.5 py-0.5 text-xs" title={`Requires: ${cap}`}>
+                            {TOOL_EMOJI[cap] ?? cap}
+                          </span>
+                        ))}
                         <span className={`rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[job.status]}`}>
                           {t(`jobs.status.${job.status}`)}
                         </span>
@@ -481,6 +510,12 @@ export default function JobsPage() {
                                       className="max-h-48 rounded-md border border-border"
                                     />
                                   </a>
+                                ) : a.mime.startsWith('audio/') ? (
+                                  // eslint-disable-next-line jsx-a11y/media-has-caption
+                                  <audio key={a.id} controls src={`/api/artifacts/${a.id}`} className="max-w-full" />
+                                ) : a.mime.startsWith('video/') ? (
+                                  // eslint-disable-next-line jsx-a11y/media-has-caption
+                                  <video key={a.id} controls src={`/api/artifacts/${a.id}`} className="max-h-64 max-w-full rounded-md border border-border" />
                                 ) : (
                                   <a
                                     key={a.id}

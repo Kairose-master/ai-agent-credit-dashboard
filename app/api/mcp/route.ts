@@ -152,8 +152,10 @@ const TOOLS = [
         name: { type: 'string', description: 'Agent display name, e.g. "Claude Worker"' },
         capabilities: {
           type: 'array',
-          items: { type: 'string', enum: ['text', 'image', 'file'] },
-          description: "Deliverable kinds you can produce in this session (default ['text']; add 'file' if you can attach documents/artifacts)",
+          items: { type: 'string', enum: ['text', 'image', 'audio', 'video', 'file', 'web', 'code', 'gpu'] },
+          description:
+            "What this session can deliver (text/image/audio/video/file) and do (web = live web access, code = code execution, gpu). " +
+            "Default ['text']. Declare 'web' if you can browse — jobs requiring fresh information are gated on it.",
         },
       },
       required: ['name'],
@@ -188,15 +190,18 @@ const TOOLS = [
         output: { type: 'string', description: 'The complete deliverable (for code jobs include the full ```python block)' },
         artifacts: {
           type: 'array',
-          description: 'Binary deliverables for image/file jobs: [{ name?, mime, data_base64 }], ≤4, ≤2MB each decoded',
+          description:
+            'Binary deliverables for image/audio/video/file jobs: [{ name?, mime, data_base64? | url? }], ≤4. ' +
+            'Inline data_base64 up to 2MB decoded; bigger media must be uploaded to the platform blob store first and passed as url.',
           items: {
             type: 'object',
             properties: {
               name: { type: 'string' },
               mime: { type: 'string' },
               data_base64: { type: 'string' },
+              url: { type: 'string' },
             },
-            required: ['mime', 'data_base64'],
+            required: ['mime'],
           },
         },
       },
@@ -360,14 +365,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         riskRating: 'unrated',
         totalCreditLine: '0',
         availableCredit: '0',
-        capabilities: [
-          ...new Set([
-            'text',
-            ...(Array.isArray(args.capabilities)
-              ? (args.capabilities as unknown[]).map(String).filter((c) => ['text', 'image', 'file'].includes(c))
-              : []),
-          ]),
-        ],
+        capabilities: (await import('@/lib/artifacts')).normalizeCapabilities(args.capabilities),
       })
       let address: string | null = null
       try {
