@@ -5,7 +5,14 @@ import Link from 'next/link'
 import { Pickaxe, Cpu, CircleDollarSign, ShieldCheck, Briefcase, ArrowRight, Loader2, Zap, Wallet, Cloud } from 'lucide-react'
 import { getWorkerConsole } from '@/app/actions/worker-console'
 import { startMining, startMiningCloud, setAutoMine } from '@/app/actions/mining'
-import { getPayoutAddress, setPayoutAddress, withdrawAllEarnings } from '@/app/actions/treasury'
+import {
+  getPayoutAddress,
+  setPayoutAddress,
+  withdrawAllEarnings,
+  withdrawAgentEarnings,
+  getSpendingSettings,
+  setSpendingSettings,
+} from '@/app/actions/treasury'
 import { Celebration } from '@/components/celebration'
 import { useI18n } from '@/lib/i18n'
 import { CLOUD_PRESETS } from '@/lib/cloud-providers'
@@ -430,6 +437,90 @@ function PayoutCard({ hasProvisionedWorker }: { hasProvisionedWorker: boolean })
       {saved && !error && <p className="mt-2 text-sm text-success">{t('mine.payout.saved')}</p>}
       {result && <p className="mt-2 text-sm text-success">{result}</p>}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <SpendingCapsSettings />
+    </div>
+  )
+}
+
+/**
+ * The per-account spending caps, editable where they actually bite: right
+ * under the withdraw button whose failures ("Daily transfer cap reached")
+ * they explain. Empty input = platform default.
+ */
+function SpendingCapsSettings() {
+  const { t } = useI18n()
+  const [maxTx, setMaxTx] = useState('')
+  const [dailyCap, setDailyCap] = useState('')
+  const [defaults, setDefaults] = useState<{ maxPerTxUsd: number; dailyCapUsd: number } | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    getSpendingSettings()
+      .then((s) => {
+        setMaxTx(s.maxTxUsd != null ? String(s.maxTxUsd) : '')
+        setDailyCap(s.dailyCapUsd != null ? String(s.dailyCapUsd) : '')
+        setDefaults(s.defaults)
+      })
+      .catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    setSaved(false)
+    setError(null)
+    try {
+      await setSpendingSettings({
+        maxTxUsd: maxTx.trim() === '' ? null : Number(maxTx),
+        dailyCapUsd: dailyCap.trim() === '' ? null : Number(dailyCap),
+      })
+      setSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <p className="text-sm font-semibold">{t('mine.payout.capsTitle')}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{t('mine.payout.capsDescription')}</p>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="text-xs text-muted-foreground">
+          {t('mine.payout.maxTxLabel')}
+          <input
+            type="number"
+            min="1"
+            value={maxTx}
+            onChange={(e) => setMaxTx(e.target.value)}
+            placeholder={defaults ? t('mine.payout.capsDefault', { value: String(defaults.maxPerTxUsd) }) : ''}
+            className="mt-1 block w-40 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          />
+        </label>
+        <label className="text-xs text-muted-foreground">
+          {t('mine.payout.dailyCapLabel')}
+          <input
+            type="number"
+            min="1"
+            value={dailyCap}
+            onChange={(e) => setDailyCap(e.target.value)}
+            placeholder={defaults ? t('mine.payout.capsDefault', { value: String(defaults.dailyCapUsd) }) : ''}
+            className="mt-1 block w-40 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+          />
+        </label>
+        <button
+          onClick={save}
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {t('mine.payout.capsSave')}
+        </button>
+      </div>
+      {saved && !error && <p className="mt-2 text-sm text-success">{t('mine.payout.capsSaved')}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   )
 }
@@ -437,8 +528,31 @@ function PayoutCard({ hasProvisionedWorker }: { hasProvisionedWorker: boolean })
 function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () => void }) {
   const { t } = useI18n()
   const [toggling, setToggling] = useState(false)
+  const [withdrawing, setWithdrawing] = useState(false)
+  const [withdrawNote, setWithdrawNote] = useState<{ ok: boolean; text: string } | null>(null)
   const graded = w.testsPassed + w.testsFailed + w.verifiedPassed + w.verifiedFailed
   const gradedPassRate = graded > 0 ? Math.round(((w.testsPassed + w.verifiedPassed) / graded) * 100) : null
+
+  const withdrawOne = async () => {
+    setWithdrawing(true)
+    setWithdrawNote(null)
+    try {
+      const { result } = await withdrawAgentEarnings(w.id)
+      if (result.sent > 0) {
+        setWithdrawNote({ ok: true, text: t('mine.worker.withdrawSent', { amount: result.sent.toFixed(2) }) })
+        if (result.error) setWithdrawNote({ ok: true, text: `${t('mine.worker.withdrawSent', { amount: result.sent.toFixed(2) })} — ${result.error}` })
+        onChanged()
+      } else if (result.error) {
+        setWithdrawNote({ ok: false, text: result.error })
+      } else {
+        setWithdrawNote({ ok: true, text: t('mine.worker.withdrawNothing') })
+      }
+    } catch (e) {
+      setWithdrawNote({ ok: false, text: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setWithdrawing(false)
+    }
+  }
 
   const toggleAutoMine = async () => {
     setToggling(true)
@@ -503,10 +617,24 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
             {toggling ? '…' : w.autoMine ? t('mine.autoMine.on') : t('mine.autoMine.off')}
           </button>
         )}
+        {w.provisioned && (
+          <button
+            onClick={withdrawOne}
+            disabled={withdrawing}
+            title={t('mine.worker.withdraw')}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-secondary disabled:opacity-50"
+          >
+            {withdrawing ? <Loader2 className="size-3 animate-spin" /> : <Wallet className="size-3" />}
+            {withdrawing ? t('mine.worker.withdrawing') : t('mine.worker.withdraw')}
+          </button>
+        )}
         <span className="ml-auto font-mono text-sm text-muted-foreground">
           {w.creditScore} · {w.rating}
         </span>
       </div>
+      {withdrawNote && (
+        <p className={`mt-2 text-xs ${withdrawNote.ok ? 'text-success' : 'text-destructive'}`}>{withdrawNote.text}</p>
+      )}
 
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         <div>

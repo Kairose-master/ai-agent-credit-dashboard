@@ -12,6 +12,13 @@ export const user = pgTable('user', {
   // owned agent's USDC balance to one address with a single click instead
   // of re-typing a recipient per agent, per withdrawal.
   payoutAddress: text('payoutaddress'),
+  // Per-account spending-policy overrides (null = platform default from
+  // WALLET_MAX_TX_USD / WALLET_DAILY_CAP_USD). The caps protect the OWNER's
+  // funds from a runaway/compromised agent, so the owner is the right
+  // person to size them — an operator env var can't know one user wants a
+  // $50 leash on an experiment and another wants to sweep $5k of earnings.
+  walletMaxTxUsd: decimal('walletmaxtxusd', { precision: 12, scale: 2 }),
+  walletDailyCapUsd: decimal('walletdailycapusd', { precision: 12, scale: 2 }),
   createdAt: timestamp('createdat', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updatedat', { withTimezone: true }).notNull().defaultNow(),
 })

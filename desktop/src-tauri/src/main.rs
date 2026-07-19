@@ -20,6 +20,10 @@ struct AgentConfig {
     agent_id: String,
     secret: String,
     name: String,
+    /// Account email, kept for withdrawal (which re-authenticates with the
+    /// account password — never stored — rather than the worker secret).
+    #[serde(default)]
+    email: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -110,6 +114,7 @@ async fn register_agent(
         agent_id: res.agent_id.clone(),
         secret: res.secret.clone(),
         name: req.name.clone(),
+        email: req.email.clone(),
     });
     save_stored_config(&app, &cfg)?;
     Ok(res)
@@ -134,6 +139,26 @@ fn save_backend(app: tauri::AppHandle, backend: ModelBackend) -> Result<(), Stri
     let mut cfg = load_stored_config(&app);
     cfg.backend = Some(backend);
     save_stored_config(&app, &cfg)
+}
+
+#[tauri::command]
+async fn get_wallet(app: tauri::AppHandle) -> Result<protocol::WalletInfo, String> {
+    let cfg = load_stored_config(&app);
+    let agent = cfg.agent.ok_or_else(|| "No agent registered yet.".to_string())?;
+    protocol::wallet_info(&agent.platform_url, &agent.agent_id, &agent.secret).await
+}
+
+/// Withdraw earnings to `to` (a MetaMask or any EVM address). `password`
+/// is passed straight through to the platform for re-authentication and
+/// never touches the config file.
+#[tauri::command]
+async fn withdraw_earnings(app: tauri::AppHandle, to: String, password: String) -> Result<protocol::WithdrawResult, String> {
+    let cfg = load_stored_config(&app);
+    let agent = cfg.agent.ok_or_else(|| "No agent registered yet.".to_string())?;
+    if agent.email.is_empty() {
+        return Err("This install predates withdrawal support — use \"Use a different account\" and reconnect once.".to_string())
+    }
+    protocol::withdraw(&agent.platform_url, &agent.email, &password, &to, Some(&agent.agent_id)).await
 }
 
 #[tauri::command]
@@ -273,6 +298,8 @@ fn main() {
             save_backend,
             start_mining,
             stop_mining,
+            get_wallet,
+            withdraw_earnings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ledgermind Miner");

@@ -323,6 +323,91 @@ pub async fn warmup_model(backend: &ModelBackend, mut on_attempt: impl FnMut(u32
     unreachable!()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletInfo {
+    pub address: Option<String>,
+    pub usdc: Option<f64>,
+    #[serde(default)]
+    pub spent24h: f64,
+    pub policy: Option<WalletPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletPolicy {
+    #[serde(rename = "maxPerTx")]
+    pub max_per_tx: f64,
+    #[serde(rename = "dailyCap")]
+    pub daily_cap: f64,
+}
+
+/// POST /api/worker/wallet — read-only earnings/balance view, same
+/// per-agent secret the poll loop uses. Read-only by design: the secret
+/// authorizes doing work, not moving money.
+pub async fn wallet_info(platform_url: &str, agent_id: &str, secret: &str) -> Result<WalletInfo, String> {
+    let url = format!("{}/api/worker/wallet", platform_url.trim_end_matches('/'));
+    let res = client()
+        .post(&url)
+        .header("X-Runtime-Secret", secret)
+        .json(&json!({ "agent_id": agent_id }))
+        .send()
+        .await
+        .map_err(|e| format!("wallet lookup failed: {e}"))?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("wallet lookup responded {status}: {}", body.chars().take(300).collect::<String>()));
+    }
+    res.json().await.map_err(|e| format!("unexpected wallet response: {e}"))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithdrawResult {
+    pub to: String,
+    pub total_sent: f64,
+    pub results: Vec<WithdrawAgentResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WithdrawAgentResult {
+    pub name: String,
+    pub sent: f64,
+    pub error: Option<String>,
+}
+
+/// POST /api/wallet/withdraw — sweeps earnings to `to` (e.g. a MetaMask
+/// address). Requires the account PASSWORD, deliberately not the worker
+/// secret: money movement re-authenticates as the human owner. The
+/// password goes only to the platform (same call the login form makes)
+/// and is never stored by this app.
+pub async fn withdraw(
+    platform_url: &str,
+    email: &str,
+    password: &str,
+    to: &str,
+    agent_id: Option<&str>,
+) -> Result<WithdrawResult, String> {
+    let url = format!("{}/api/wallet/withdraw", platform_url.trim_end_matches('/'));
+    let mut body = json!({ "email": email, "password": password, "to": to });
+    if let Some(id) = agent_id {
+        body["agent_id"] = json!(id);
+    }
+    let res = client()
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("withdraw failed: {e}"))?;
+
+    let status = res.status();
+    let parsed: serde_json::Value = res.json().await.map_err(|e| format!("unexpected withdraw response: {e}"))?;
+    if !status.is_success() {
+        let msg = parsed.get("error").and_then(|v| v.as_str()).unwrap_or("withdraw failed");
+        return Err(msg.to_string());
+    }
+    serde_json::from_value(parsed).map_err(|e| format!("unexpected withdraw response shape: {e}"))
+}
+
 /// Ollama's own local listing endpoint — used to auto-detect whether the
 /// user already has Ollama running, and which models are pulled, before
 /// asking them to configure anything by hand.

@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { agent, agentEvent } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import { enforceSpendingPolicy, isValidAddress, spentLast24h, WALLET_DAILY_CAP_USD, WALLET_MAX_TX_USD } from '@/lib/treasury-policy'
+import { enforceSpendingPolicy, isValidAddress, policyForAgent, spentLast24h } from '@/lib/treasury-policy'
 
 export const maxDuration = 120
 
@@ -38,10 +38,11 @@ export async function POST(request: Request) {
     if (action === 'balance') {
       const balance = await usdcBalanceOf(ag.smartAccountAddress as `0x${string}`)
       const spent = await spentLast24h(agentId)
+      const policy = await policyForAgent(agentId)
       return Response.json({
         address: ag.smartAccountAddress,
         usdc: balance,
-        policy: { maxPerTx: WALLET_MAX_TX_USD, dailyCap: WALLET_DAILY_CAP_USD, spent24h: spent },
+        policy: { maxPerTx: policy.maxPerTxUsd, dailyCap: policy.dailyCapUsd, spent24h: spent },
       })
     }
 

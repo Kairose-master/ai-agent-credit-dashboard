@@ -131,10 +131,59 @@ function onMiningEvent(payload) {
   }
 }
 
+let walletTimer = null
+
+async function refreshWallet() {
+  try {
+    const w = await invoke('get_wallet')
+    const el = document.getElementById('stat-balance')
+    if (w.usdc === null || w.usdc === undefined) {
+      el.textContent = '—'
+    } else {
+      el.textContent = `$${w.usdc.toFixed(2)}`
+    }
+  } catch {
+    /* wallet not provisioned yet or offline — leave the dash */
+  }
+}
+
 // Buttons/listeners for the mining view are bound exactly once at boot —
 // enterMiningView() (called on every view transition into it) only
 // populates data, so re-entering never double-registers a handler.
 function initMiningView() {
+  document.getElementById('withdraw-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const errEl = document.getElementById('withdraw-error')
+    const okEl = document.getElementById('withdraw-result')
+    errEl.hidden = true
+    okEl.hidden = true
+    const btn = document.getElementById('withdraw-submit')
+    btn.disabled = true
+    btn.textContent = 'Withdrawing…'
+    try {
+      const to = document.getElementById('withdraw-to').value.trim()
+      const password = document.getElementById('withdraw-password').value
+      const r = await invoke('withdraw_earnings', { to, password })
+      document.getElementById('withdraw-password').value = ''
+      if (r.total_sent > 0) {
+        const notes = r.results.filter((x) => x.error).map((x) => x.error)
+        okEl.textContent = `Sent $${r.total_sent.toFixed(2)} to ${to.slice(0, 6)}…${to.slice(-4)}` + (notes.length ? ` (${notes.join('; ')})` : '')
+        okEl.hidden = false
+        appendLog(`Withdrew $${r.total_sent.toFixed(2)} to ${to.slice(0, 6)}…${to.slice(-4)}`)
+        refreshWallet()
+      } else {
+        const notes = r.results.map((x) => x.error).filter(Boolean)
+        errEl.textContent = notes.length ? notes.join('; ') : 'Nothing to withdraw yet.'
+        errEl.hidden = false
+      }
+    } catch (err) {
+      errEl.textContent = String(err)
+      errEl.hidden = false
+    } finally {
+      btn.disabled = false
+      btn.textContent = 'Withdraw'
+    }
+  })
   document.getElementById('start-btn').addEventListener('click', async () => {
     appendLog('Starting…')
     try {
@@ -164,6 +213,9 @@ async function enterMiningView() {
   showView('mining')
   setText('agent-name-display', cfg.agent.name)
   setText('backend-label-display', backendLabel(cfg.backend))
+
+  refreshWallet()
+  if (!walletTimer) walletTimer = setInterval(refreshWallet, 60_000)
 }
 
 // ---------- Boot ----------

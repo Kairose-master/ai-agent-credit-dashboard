@@ -6,8 +6,18 @@ import { agent, agentEvent, user } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
-import { enforceSpendingPolicy, isValidAddress, spentLast24h, WALLET_DAILY_CAP_USD, WALLET_MAX_TX_USD } from '@/lib/treasury-policy'
+import {
+  enforceSpendingPolicy,
+  isValidAddress,
+  policyForAgent,
+  policyForUserRow,
+  spentLast24h,
+  WALLET_CAP_HARD_MAX_USD,
+  WALLET_DAILY_CAP_USD,
+  WALLET_MAX_TX_USD,
+} from '@/lib/treasury-policy'
 import { asActionError } from '@/lib/action-error'
+import { doTransfer, sweepAgentToAddress, type SweepResult } from '@/lib/treasury-sweep'
 
 async function requireOwnedAgent(agentId: string) {
   const session = await getSession()
@@ -26,14 +36,15 @@ async function requireUserId() {
 export async function getTreasury(agentId: string) {
   const ag = await requireOwnedAgent(agentId)
   const { isAgentAccountConfigured } = await import('@/lib/onchain/config')
+  const policy = await policyForAgent(agentId)
 
   const info = {
     configured: isAgentAccountConfigured() && Boolean(ag.smartAccountAddress),
     address: ag.smartAccountAddress,
     usdc: null as number | null,
     spent24h: 0,
-    maxPerTx: WALLET_MAX_TX_USD,
-    dailyCap: WALLET_DAILY_CAP_USD,
+    maxPerTx: policy.maxPerTxUsd,
+    dailyCap: policy.dailyCapUsd,
   }
   if (info.configured) {
     try {
@@ -47,29 +58,6 @@ export async function getTreasury(agentId: string) {
   return info
 }
 
-/** Shared transfer core: balance check, on-chain transfer, ledger event.
- *  Callers are responsible for ownership + spending-policy checks first. */
-async function doTransfer(agentId: string, smartAccountAddress: string, to: string, amountUsd: number, memo: string) {
-  const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
-  const balance = await usdcBalanceOf(smartAccountAddress as `0x${string}`)
-  if (amountUsd > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
-
-  const txHash = await transferUsdc(agentId, to as `0x${string}`, amountUsd)
-
-  await db.insert(agentEvent).values({
-    id: nanoid(),
-    agentId,
-    taskId: `wallet-${nanoid(8)}`,
-    eventType: 'WALLET_TRANSFER',
-    success: true,
-    executionTime: 0,
-    tokenCost: 0,
-    qualityScore: null,
-    detail: { amountUsd, to, memo, txHash, initiator: 'owner' },
-  })
-
-  return txHash
-}
 
 /** Owner-initiated withdrawal/payment to any external address. Same policy
  *  and same ledger as agent-initiated transfers. */
@@ -110,6 +98,76 @@ export async function setPayoutAddress(address: string) {
   return { payoutAddress: trimmed || null }
 }
 
+/** The account's own spending caps (per-transfer / per-24h, per agent),
+ *  plus the platform defaults for display. */
+export async function getSpendingSettings() {
+  const userId = await requireUserId()
+  let row: { walletMaxTxUsd: string | null; walletDailyCapUsd: string | null } | undefined
+  try {
+    ;[row] = await db
+      .select({ walletMaxTxUsd: user.walletMaxTxUsd, walletDailyCapUsd: user.walletDailyCapUsd })
+      .from(user)
+      .where(eq(user.id, userId))
+  } catch (error) {
+    // Columns may not exist until the migration runs — show defaults.
+    console.error('[treasury] spending settings read failed (migration pending?):', error)
+  }
+  const effective = policyForUserRow(row)
+  return {
+    maxTxUsd: row?.walletMaxTxUsd ? Number(row.walletMaxTxUsd) : null,
+    dailyCapUsd: row?.walletDailyCapUsd ? Number(row.walletDailyCapUsd) : null,
+    effective,
+    defaults: { maxPerTxUsd: WALLET_MAX_TX_USD, dailyCapUsd: WALLET_DAILY_CAP_USD },
+    hardMaxUsd: WALLET_CAP_HARD_MAX_USD,
+  }
+}
+
+/** Set (or clear, with null) the account's own spending caps. The caps
+ *  guard the owner's funds against a runaway agent — sizing them is the
+ *  owner's call, not the deployment operator's. Bounded by a hard platform
+ *  ceiling so the guard can't be typo'd away entirely. */
+export async function setSpendingSettings(input: { maxTxUsd: number | null; dailyCapUsd: number | null }) {
+  const userId = await requireUserId()
+
+  const validate = (v: number | null, label: string) => {
+    if (v === null) return null
+    if (!Number.isFinite(v) || v <= 0) throw new Error(`${label} must be a positive number`)
+    if (v > WALLET_CAP_HARD_MAX_USD) throw new Error(`${label} cannot exceed $${WALLET_CAP_HARD_MAX_USD.toLocaleString()}`)
+    return v.toFixed(2)
+  }
+  const maxTx = validate(input.maxTxUsd, 'Per-transfer cap')
+  const dailyCap = validate(input.dailyCapUsd, 'Daily cap')
+  if (maxTx !== null && dailyCap !== null && Number(maxTx) > Number(dailyCap)) {
+    throw new Error('Per-transfer cap cannot exceed the daily cap')
+  }
+
+  try {
+    await db
+      .update(user)
+      .set({ walletMaxTxUsd: maxTx, walletDailyCapUsd: dailyCap, updatedAt: new Date() })
+      .where(eq(user.id, userId))
+  } catch {
+    throw new Error('Saving caps requires a pending database migration — ask the operator to run /api/admin/migrate')
+  }
+  revalidatePath('/mine')
+  return getSpendingSettings()
+}
+
+/** Sweep a single agent's earnings to the saved payout address — the
+ *  granular alternative to withdraw-all when only one worker matters. */
+export async function withdrawAgentEarnings(agentId: string) {
+  const ag = await requireOwnedAgent(agentId)
+  const userId = await requireUserId()
+  const [row] = await db.select({ payoutAddress: user.payoutAddress }).from(user).where(eq(user.id, userId))
+  const to = row?.payoutAddress
+  if (!to) throw new Error('Set a payout wallet first')
+
+  const result = await sweepAgentToAddress(ag, to, 'Withdraw earnings')
+  revalidatePath('/mine')
+  revalidatePath('/profile')
+  return { to, result: result ?? { agentId: ag.id, name: ag.name, sent: 0, error: undefined } }
+}
+
 /**
  * One click, every worker settled: sweeps each owned agent's USDC balance
  * to the saved payout address, respecting the same per-tx/24h caps as a
@@ -130,47 +188,11 @@ export async function withdrawAllEarnings() {
     .where(eq(agent.userId, userId))
   const provisioned = agents.filter((a) => a.smartAccountAddress)
 
-  const results: { agentId: string; name: string; sent: number; txHash?: string; error?: string }[] = []
+  const results: SweepResult[] = []
 
   for (const ag of provisioned) {
-    try {
-      const { usdcBalanceOf } = await import('@/lib/onchain/treasury')
-      const balance = await usdcBalanceOf(ag.smartAccountAddress as `0x${string}`)
-      if (balance <= 0) continue
-
-      const spent = await spentLast24h(ag.id)
-      // Guard against a misconfigured WALLET_MAX_TX_USD/WALLET_DAILY_CAP_USD
-      // (a non-numeric env value produces NaN, which every `<= 0`/`>` cap
-      // check below silently treats as false rather than as "invalid") —
-      // fail with a clear per-agent error instead of passing NaN downstream.
-      if (!Number.isFinite(WALLET_MAX_TX_USD) || !Number.isFinite(WALLET_DAILY_CAP_USD) || !Number.isFinite(spent)) {
-        results.push({ agentId: ag.id, name: ag.name, sent: 0, error: 'Spending cap misconfigured — contact the operator' })
-        continue
-      }
-      const remainingCap = Math.max(0, Math.min(WALLET_MAX_TX_USD, WALLET_DAILY_CAP_USD - spent))
-      const amount = Math.min(balance, remainingCap)
-      if (amount <= 0) {
-        results.push({ agentId: ag.id, name: ag.name, sent: 0, error: 'Daily transfer cap reached' })
-        continue
-      }
-
-      const txHash = await doTransfer(ag.id, ag.smartAccountAddress!, to, amount, 'Withdraw all earnings')
-      const capped = amount < balance
-      results.push({
-        agentId: ag.id,
-        name: ag.name,
-        sent: amount,
-        txHash,
-        ...(capped ? { error: `Only $${amount.toFixed(2)} of $${balance.toFixed(2)} sent (cap) — rest available tomorrow` } : {}),
-      })
-    } catch (error) {
-      results.push({
-        agentId: ag.id,
-        name: ag.name,
-        sent: 0,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+    const r = await sweepAgentToAddress(ag, to, 'Withdraw all earnings')
+    if (r) results.push(r) // null = zero balance, skipped silently (same as before)
   }
 
   revalidatePath('/mine')

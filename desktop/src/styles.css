@@ -76,6 +76,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 
 .error { color: var(--danger); font-size: 0.82rem; margin-top: 10px; }
+.success { color: var(--ok); font-size: 0.82rem; margin-top: 10px; }
+
+#withdraw-section { margin-top: 14px; font-size: 0.85rem; color: var(--fg); }
+#withdraw-section summary { cursor: pointer; color: var(--muted); }
+#withdraw-section .hint { margin-top: 8px; }
 
 details { font-size: 0.82rem; color: var(--muted); }
 details summary { cursor: pointer; }
