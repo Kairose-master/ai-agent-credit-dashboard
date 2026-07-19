@@ -106,33 +106,64 @@ export async function resolveDispute(jobId: number, releaseToWorker: boolean): P
   })
 }
 
-/** Read all jobs from the contract (small N — fine for a prototype). */
-export async function readJobs(): Promise<OnchainJob[]> {
-  const client = publicClient()
-  const count = (await client.readContract({
-    address: onchainEnv.laborMarketAddress as Address,
-    abi: LABOR_MARKET_ABI,
-    functionName: 'jobCount',
-  })) as bigint
+// readJobs used to issue one eth_call PER JOB, sequentially — with N jobs
+// on the board and four pages polling every 4-10s, one open browser tab
+// burned enough compute units to trip Alchemy's free-tier rate limit and
+// kill unrelated settlement transactions mid-flight (observed live). Two
+// fixes, ~98% fewer upstream calls together:
+//   1. Multicall3 batching: all N job reads in one RPC round-trip.
+//   2. A short in-memory cache with in-flight dedup: concurrent pollers
+//      within the TTL share one result instead of each re-reading the
+//      chain. Per-warm-lambda, which is exactly where the polling
+//      hot-path concentrates.
+const READ_JOBS_TTL_MS = 4000
+let jobsCache: { at: number; jobs: OnchainJob[] } | null = null
+let jobsInFlight: Promise<OnchainJob[]> | null = null
 
-  const jobs: OnchainJob[] = []
-  for (let i = 1n; i <= count; i++) {
-    const j = (await client.readContract({
-      address: onchainEnv.laborMarketAddress as Address,
-      abi: LABOR_MARKET_ABI,
-      functionName: 'jobs',
-      args: [i],
-    })) as readonly [Address, Address, bigint, bigint, number, Hex, Hex]
-    jobs.push({
-      id: Number(i),
-      requester: j[0],
-      worker: j[1],
-      bounty: fromUnits(j[2]),
-      minScore: Number(j[3]),
-      status: JOB_STATUS[j[4]] ?? 'Open',
-      specHash: j[5],
-      resultHash: j[6],
-    })
-  }
+async function fetchJobsUncached(): Promise<OnchainJob[]> {
+  const client = publicClient()
+  const market = { address: onchainEnv.laborMarketAddress as Address, abi: LABOR_MARKET_ABI } as const
+
+  const count = (await client.readContract({ ...market, functionName: 'jobCount' })) as bigint
+  if (count === 0n) return []
+
+  const ids = Array.from({ length: Number(count) }, (_, i) => BigInt(i + 1))
+  const results = (await client.multicall({
+    contracts: ids.map((id) => ({ ...market, functionName: 'jobs', args: [id] })),
+    allowFailure: false,
+  })) as unknown as readonly (readonly [Address, Address, bigint, bigint, number, Hex, Hex])[]
+
+  const jobs = results.map((j, idx) => ({
+    id: Number(ids[idx]),
+    requester: j[0],
+    worker: j[1],
+    bounty: fromUnits(j[2]),
+    minScore: Number(j[3]),
+    status: JOB_STATUS[j[4]] ?? 'Open',
+    specHash: j[5],
+    resultHash: j[6],
+  }))
   return jobs.reverse() // newest first
+}
+
+/** Read all jobs. Cached for a few seconds by default — pass
+ *  { maxAgeMs: 0 } when the caller just wrote on-chain and must see its
+ *  own write (e.g. resolving a freshly posted job's id). Status-guarded
+ *  writers (approve/accept) tolerate the default staleness: acting on a
+ *  stale status makes the tx revert harmlessly, it never double-moves. */
+export async function readJobs(opts?: { maxAgeMs?: number }): Promise<OnchainJob[]> {
+  const maxAge = opts?.maxAgeMs ?? READ_JOBS_TTL_MS
+  const now = Date.now()
+  if (jobsCache && now - jobsCache.at < maxAge) return jobsCache.jobs
+  if (jobsInFlight && maxAge > 0) return jobsInFlight
+
+  jobsInFlight = fetchJobsUncached()
+    .then((jobs) => {
+      jobsCache = { at: Date.now(), jobs }
+      return jobs
+    })
+    .finally(() => {
+      jobsInFlight = null
+    })
+  return jobsInFlight
 }
