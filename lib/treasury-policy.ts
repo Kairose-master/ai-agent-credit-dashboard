@@ -16,11 +16,23 @@ import { db } from '@/lib/db'
 import { agent, agentEvent, user } from '@/lib/db/schema'
 import { and, eq, gte } from 'drizzle-orm'
 
-export const WALLET_MAX_TX_USD = Number(process.env.WALLET_MAX_TX_USD ?? 100)
-export const WALLET_DAILY_CAP_USD = Number(process.env.WALLET_DAILY_CAP_USD ?? 500)
+/** An env cap must be a positive number to count — an EMPTY env var
+ *  (present in Vercel but blank) coerces to 0 via Number(''), which
+ *  silently turned the daily cap into "$0/day, every withdrawal blocked
+ *  from the first attempt" in production. A cap of 0 is never a sane
+ *  configuration (freeze transfers by other means), so <= 0 and NaN both
+ *  fall back to the default. */
+function envCap(name: string, fallback: number): number {
+  const raw = process.env[name]
+  const n = raw == null || raw.trim() === '' ? NaN : Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+export const WALLET_MAX_TX_USD = envCap('WALLET_MAX_TX_USD', 100)
+export const WALLET_DAILY_CAP_USD = envCap('WALLET_DAILY_CAP_USD', 500)
 
 /** Absolute ceiling a user-set cap may reach, whatever they type. */
-export const WALLET_CAP_HARD_MAX_USD = Number(process.env.WALLET_CAP_HARD_MAX_USD ?? 100_000)
+export const WALLET_CAP_HARD_MAX_USD = envCap('WALLET_CAP_HARD_MAX_USD', 100_000)
 
 export interface SpendingPolicy {
   maxPerTxUsd: number
