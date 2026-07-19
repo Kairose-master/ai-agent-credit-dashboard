@@ -47,6 +47,10 @@ export async function getJobs() {
   await reapStuckTasks()
   const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
   await tickCloudAutoMineAgents(await callbackUrl())
+  // Re-drive any settlement that died mid-flight on a transient RPC
+  // failure (throttled internally; re-checks on-chain state before acting).
+  const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
+  await sweepStuckGradedJobs()
 
   const specs = await db.select().from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))

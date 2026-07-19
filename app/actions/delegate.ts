@@ -149,6 +149,14 @@ export async function getMyDelegations() {
   const { readJobs } = await import('@/lib/onchain/labor')
   const jobs = hasActive ? await readJobs().catch(() => []) : []
 
+  // Re-drive any mechanically-graded settlement that died on a transient
+  // RPC failure — a delegation's testCode subtasks depend on that path
+  // completing, and the delegate page is the screen its owner watches.
+  if (hasActive) {
+    const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
+    await sweepStuckGradedJobs()
+  }
+
   // Tick active delegations opportunistically (bounded: they're capped at
   // MAX_SUBTASKS jobs each, and verification only runs on Submitted work).
   for (const row of rows) {
