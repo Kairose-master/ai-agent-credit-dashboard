@@ -13,8 +13,8 @@
  */
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
-import { agent, delegation, jobSpec } from '@/lib/db/schema'
-import { eq, inArray } from 'drizzle-orm'
+import { agent, artifact, delegation, jobSpec } from '@/lib/db/schema'
+import { desc, eq, inArray } from 'drizzle-orm'
 
 export interface WorldAgent {
   id: string
@@ -65,9 +65,21 @@ export interface WorldPoll {
   onchain: { address: string; phase: number; commitCount: number; revealCount: number } | null
 }
 
+/** A real deliverable one of the viewer's agents produced — an image
+ *  thumbnail or a playable audio clip, straight from the artifact store. */
+export interface WorldArtifact {
+  id: string
+  kind: 'image' | 'audio'
+  mime: string
+  name: string
+  title: string
+  agentName: string
+}
+
 export interface WorldState {
   agents: WorldAgent[]
   openJobs: WorldJob[]
+  gallery: WorldArtifact[]
   delegations: WorldDelegation[]
   gov: {
     balance: number
@@ -93,7 +105,7 @@ export async function getWorldState(): Promise<WorldState> {
   if (!session?.user) throw new Error('Unauthorized')
   const userId = session.user.id
 
-  const state: WorldState = { agents: [], openJobs: [], delegations: [], gov: null, at: new Date().toISOString() }
+  const state: WorldState = { agents: [], openJobs: [], gallery: [], delegations: [], gov: null, at: new Date().toISOString() }
 
   // ---- agents + on-chain job board -------------------------------------
   const myAgents = await db.select().from(agent).where(eq(agent.userId, userId)).catch(() => [])
@@ -157,6 +169,41 @@ export async function getWorldState(): Promise<WorldState> {
       kind: specByHash.get(j.specHash)?.kind ?? 'text',
       mine: myAddresses.has(j.requester?.toLowerCase?.() ?? ''),
     }))
+
+  // ---- loot vault: real image/audio deliverables the viewer's agents made -
+  // Scoped to the viewer's own agents (privacy) — the multimodal output of
+  // the economy, rendered as thumbnails and players instead of a status row.
+  const myAgentIds = myAgents.map((a) => a.id)
+  if (myAgentIds.length) {
+    const nameById = new Map(myAgents.map((a) => [a.id, a.name]))
+    const arts = await db
+      .select({ id: artifact.id, mime: artifact.mime, name: artifact.name, taskId: artifact.taskId, agentId: artifact.agentId })
+      .from(artifact)
+      .where(inArray(artifact.agentId, myAgentIds))
+      .orderBy(desc(artifact.createdAt))
+      .limit(24)
+      .catch(() => [] as { id: string; mime: string; name: string; taskId: string; agentId: string }[])
+
+    const media = arts.filter((a) => a.mime.startsWith('image/') || a.mime.startsWith('audio/'))
+    const titleByTask = new Map<string, string>()
+    if (media.length) {
+      const taskIds = [...new Set(media.map((a) => a.taskId))]
+      const titleRows = await db
+        .select({ agentTaskId: jobSpec.agentTaskId, title: jobSpec.title })
+        .from(jobSpec)
+        .where(inArray(jobSpec.agentTaskId, taskIds))
+        .catch(() => [] as { agentTaskId: string | null; title: string }[])
+      for (const r of titleRows) if (r.agentTaskId) titleByTask.set(r.agentTaskId, r.title)
+    }
+    state.gallery = media.slice(0, 8).map((a) => ({
+      id: a.id,
+      kind: a.mime.startsWith('image/') ? ('image' as const) : ('audio' as const),
+      mime: a.mime,
+      name: a.name,
+      title: titleByTask.get(a.taskId) ?? a.name,
+      agentName: nameById.get(a.agentId) ?? 'agent',
+    }))
+  }
 
   // ---- delegations as quest trees --------------------------------------
   try {

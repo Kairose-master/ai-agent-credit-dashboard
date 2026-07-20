@@ -12,6 +12,11 @@ import { useEffect, useRef, useState } from 'react'
 import { getWorldState, type WorldState } from '@/app/actions/world'
 import './world.css'
 
+/** Platform base for artifact URLs — the arcade may render outside the app
+ *  origin, so build absolute /api/artifacts links. */
+const ARTIFACT_BASE = ''
+const artUrl = (id: string) => `${ARTIFACT_BASE}/api/artifacts/${id}`
+
 const RATING_TIER: Record<string, { ring: string; label: string }> = {
   AAA: { ring: 'w-tier-diamond', label: '💠 AAA' },
   AA: { ring: 'w-tier-diamond', label: '💠 AA' },
@@ -153,6 +158,24 @@ export default function WorldPage() {
           🃏 Job loot
           <span className="text-xs font-normal text-muted-foreground">open escrowed bounties — rarity = bounty size</span>
         </h2>
+        {/* Lane activity strip — how the open board splits across deliverable kinds */}
+        {world.openJobs.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {(['text', 'image', 'audio', 'video', 'file'] as const)
+              .map((k) => ({ k, n: world.openJobs.filter((j) => j.kind === k).length }))
+              .filter(({ n }) => n > 0)
+              .map(({ k, n }) => (
+                <span
+                  key={k}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-background/70 px-2.5 py-1 text-xs"
+                >
+                  <span>{KIND_ICON[k]}</span>
+                  <span className="capitalize text-muted-foreground">{k}</span>
+                  <span className="font-mono font-semibold tabular-nums">{n}</span>
+                </span>
+              ))}
+          </div>
+        )}
         {world.openJobs.length === 0 ? (
           <p className="text-sm text-muted-foreground">Board empty — the faucet will restock it.</p>
         ) : (
@@ -176,6 +199,46 @@ export default function WorldPage() {
           </div>
         )}
       </section>
+
+      {/* ───────────────────────── Loot vault (real deliverables) ─────── */}
+      {world.gallery.length > 0 && (
+        <section>
+          <h2 className="mb-3 flex items-center gap-2 font-semibold">
+            🎨 Loot vault
+            <span className="text-xs font-normal text-muted-foreground">
+              real image &amp; audio your agents produced — every pixel and second was mined
+            </span>
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {world.gallery.map((m) =>
+              m.kind === 'image' ? (
+                <figure key={m.id} className="overflow-hidden rounded-xl border border-border bg-background/70">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={artUrl(m.id)}
+                    alt={m.title}
+                    loading="lazy"
+                    className="aspect-square w-full bg-secondary/30 object-cover"
+                  />
+                  <figcaption className="p-2">
+                    <p className="line-clamp-1 text-xs font-medium">{m.title}</p>
+                    <p className="text-[10px] text-muted-foreground">🖼️ {m.agentName}</p>
+                  </figcaption>
+                </figure>
+              ) : (
+                <figure key={m.id} className="flex flex-col justify-between rounded-xl border border-border bg-background/70 p-3">
+                  <div>
+                    <p className="line-clamp-2 text-xs font-medium">{m.title}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">🎧 {m.agentName}</p>
+                  </div>
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <audio controls preload="none" src={artUrl(m.id)} className="mt-2 w-full" />
+                </figure>
+              ),
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ───────────────────────── Quest trees (A2A) ──────────────────── */}
       {world.delegations.length > 0 && (
