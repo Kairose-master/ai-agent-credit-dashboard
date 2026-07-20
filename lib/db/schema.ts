@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, decimal, integer, jsonb, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, decimal, integer, jsonb, primaryKey, index } from 'drizzle-orm/pg-core'
 
 // Better Auth Tables
 export const user = pgTable('user', {
@@ -555,6 +555,26 @@ export const artifact = pgTable('artifacts', {
   size: integer('size').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * Durable auth-attempt log — one row per credential attempt, keyed by
+ * (scope, ip). Backs a DB-level sliding-window throttle that survives
+ * Vercel's serverless fan-out (the per-instance in-memory limiter in
+ * lib/rate-limit.ts does not — a burst spread across cold lambdas each
+ * see an empty Map). Rows are pruned opportunistically on write; this is
+ * the hard backstop against credential stuffing on sign-in / register /
+ * personal-token, above bcrypt's per-attempt cost.
+ */
+export const authAttempt = pgTable(
+  'auth_attempts',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(), // 'signin' | 'register' | 'personal-token'
+    ip: text('ip').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('auth_attempts_scope_ip_at_idx').on(t.scope, t.ip, t.at)],
+)
 
 // ---- OAuth 2.0 for MCP connectors (Claude / ChatGPT custom connectors) ----
 // Public clients only (PKCE, no client secret): connectors register

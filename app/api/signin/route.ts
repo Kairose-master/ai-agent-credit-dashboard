@@ -7,6 +7,11 @@ import { cookies } from 'next/headers'
 
 export async function POST(req: Request) {
   try {
+    const { authThrottled, throttleIp } = await import('@/lib/auth-throttle')
+    if (await authThrottled('signin', throttleIp(req))) {
+      return Response.json({ error: 'Too many attempts — try again in a few minutes' }, { status: 429 })
+    }
+
     const { email, password } = await req.json()
 
     if (!email || !password) {

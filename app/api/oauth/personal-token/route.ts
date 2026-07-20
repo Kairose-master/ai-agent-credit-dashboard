@@ -3,7 +3,7 @@ import { user, oauthToken } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import bcrypt from 'bcryptjs'
 import { nanoid } from 'nanoid'
-import { rateLimited, clientIp } from '@/lib/rate-limit'
+import { authThrottled, throttleIp } from '@/lib/auth-throttle'
 
 const TOKEN_TTL_DAYS = 90
 
@@ -19,9 +19,9 @@ const TOKEN_TTL_DAYS = 90
  * Body: { email, password, label? }
  */
 export async function POST(request: Request) {
-  // This is an unauthenticated credential check — rate-limit per IP so it
-  // can't be a password-stuffing oracle.
-  if (rateLimited(clientIp(request), { bucket: 'personal-token', windowMs: 10 * 60 * 1000, max: 10 })) {
+  // Unauthenticated credential check — durable per-IP throttle (survives
+  // serverless fan-out) so it can't be a password-stuffing oracle.
+  if (await authThrottled('personal-token', throttleIp(request))) {
     return Response.json({ error: 'Too many attempts — try again later' }, { status: 429 })
   }
 

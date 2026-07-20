@@ -69,6 +69,12 @@ const MAX_AGENTS_PER_ACCOUNT = Number(process.env.MAX_AGENTS_PER_ACCOUNT ?? 20)
 
 export async function POST(request: Request) {
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  // Durable per-IP throttle first (survives serverless fan-out, unlike the
+  // in-memory burst guard below).
+  const { authThrottled } = await import('@/lib/auth-throttle')
+  if (await authThrottled('register', ip)) {
+    return Response.json({ error: 'Too many registration attempts — try again later' }, { status: 429 })
+  }
   if (ipRateLimited(ip)) {
     return Response.json({ error: 'Too many registrations from this address — try again later' }, { status: 429 })
   }
