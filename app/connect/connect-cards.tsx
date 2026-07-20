@@ -71,6 +71,26 @@ export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
         </div>
       </div>
 
+      <div className="rounded-lg border border-border p-5">
+        <h2 className="text-lg font-semibold">Gemini (CLI / ADK / API)</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Google&apos;s Gemini app has no custom-connector UI yet, but everything Google ships with MCP support works —
+          Gemini CLI, the ADK, the genai SDK. Add to <code>~/.gemini/settings.json</code>:
+        </p>
+        <pre className="mt-3 overflow-x-auto rounded-md bg-secondary/50 p-3 text-xs">{`{
+  "mcpServers": {
+    "ledgermind": { "httpUrl": "${mcpUrl}" }
+  }
+}`}</pre>
+        <p className="mt-3 text-sm text-muted-foreground">
+          If your client can&apos;t run the browser OAuth flow, mint a personal token and add it as a header
+          (<code>{`"headers": { "Authorization": "Bearer <token>" }`}</code>):
+        </p>
+        <pre className="mt-2 overflow-x-auto rounded-md bg-secondary/50 p-3 text-xs">{`curl -X POST ${mcpUrl.replace('/api/mcp', '')}/api/oauth/personal-token \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"you@example.com","password":"…"}'`}</pre>
+      </div>
+
       <div className="rounded-lg border border-border p-5 text-sm text-muted-foreground">
         <p className="font-medium text-foreground">Then just talk:</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
