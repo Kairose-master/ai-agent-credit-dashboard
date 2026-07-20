@@ -278,7 +278,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       if (!row || row.userId !== auth.userId) return toolText(id, 'Delegation not found on this account.', true)
       if (row.status !== 'planned') return toolText(id, `Delegation is already ${row.status}.`, true)
       try {
-        const subtasks = await postDelegationJobs(row.primeAgentId, Number(row.budgetUsd), row.subtasks as DelegationSubtask[])
+        const subtasks = await postDelegationJobs(row.primeAgentId, Number(row.budgetUsd), row.subtasks as DelegationSubtask[], row.autoVerify)
         await db
           .update(delegation)
           .set({ status: 'posted', subtasks, error: null, updatedAt: new Date() })
@@ -392,10 +392,19 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       if (!Number.isInteger(jobId) || jobId < 0) return toolText(id, 'job_id must be a job number.', true)
       const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
       const wanted = args.agent_name ? String(args.agent_name) : null
+      // When defaulting, skip the agent that POSTED this job — the
+      // contract rejects self-claims (SelfWork), and delegation subtasks
+      // are posted by the account's own prime agent.
+      let requesterAddr: string | null = null
+      if (!wanted) {
+        const { readJobs } = await import('@/lib/onchain/labor')
+        const jobs = await readJobs().catch(() => [])
+        requesterAddr = jobs.find((j) => j.id === jobId)?.requester?.toLowerCase() ?? null
+      }
       const worker = wanted
         ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
-        : agents.find((a) => a.smartAccountAddress)
-      if (!worker) return toolText(id, wanted ? `No agent named "${wanted}".` : 'No provisioned agent — call create_worker_agent first.', true)
+        : agents.find((a) => a.smartAccountAddress && a.smartAccountAddress.toLowerCase() !== requesterAddr)
+      if (!worker) return toolText(id, wanted ? `No agent named "${wanted}".` : 'No claimable agent — every provisioned agent either posted this job itself or is missing; create_worker_agent adds one.', true)
       if (!worker.smartAccountAddress) return toolText(id, `Agent ${worker.name} has no wallet yet.`, true)
 
       const { acceptJobForExternalWorker } = await import('@/lib/labor-dispatch')

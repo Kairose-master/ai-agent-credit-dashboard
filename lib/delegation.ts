@@ -62,9 +62,9 @@ export interface SubtaskView extends DelegationSubtask {
  *  → platform Anthropic key (unless REQUIRE_USER_API_KEY). The planner and
  *  verifier both emit strict JSON, which every chat provider can do — no
  *  reason to gate delegation on owning an Anthropic key specifically. */
-type CompleteFn = (system: string, userMsg: string, maxTokens: number) => Promise<string>
+export type CompleteFn = (system: string, userMsg: string, maxTokens: number) => Promise<string>
 
-async function resolveLlm(userId: string): Promise<CompleteFn> {
+export async function resolveLlm(userId: string): Promise<CompleteFn> {
   const { anthropicKey, openai } = await getUserByok(userId)
 
   const anthropicComplete =
@@ -190,6 +190,7 @@ export async function postDelegationJobs(
   primeAgentId: string,
   budgetUsd: number,
   subtasks: DelegationSubtask[],
+  autoVerify = true,
 ): Promise<DelegationSubtask[]> {
   const total = subtasks.reduce((s, x) => s + x.bountyUsd, 0)
   if (total > budgetUsd + 0.01) throw new Error('Subtask bounties exceed the approved budget')
@@ -234,11 +235,12 @@ export async function postDelegationJobs(
       requesterAgentId: primeAgentId,
       testCode: st.testCode ?? null,
       deliverableKind: st.deliverableKind ?? 'text',
-      // Independent grading (Python tests, or the vision reviewer for
-      // image deliverables) may auto-release under the existing bounded
-      // path; text subtasks without tests release via the delegation
-      // verifier below, so those jobs stay manual-approve.
-      autoApprove: Boolean(st.testCode) || st.deliverableKind === 'image',
+      // The delegation-level autoVerify IS the owner's standing consent
+      // for graded work to release escrow automatically — it now covers
+      // all three grading paths (Python tests, vision review, LLM text
+      // review at submission time). Test-graded subtasks keep releasing
+      // on mechanical passes regardless, matching the original contract.
+      autoApprove: autoVerify || Boolean(st.testCode),
     })
 
     // Bundler rate limits back-to-back userops (free tier) — space them.

@@ -47,6 +47,23 @@ async function releaseJobClaim(specHash: string, agentId: string): Promise<void>
     .where(and(eq(jobSpec.specHash, specHash), eq(jobSpec.claimedByAgentId, agentId)))
 }
 
+/** The Labor Market contract reverts SelfWork() when an agent accepts a
+ *  job it posted itself — catch it API-side with an actionable message
+ *  instead of burning gas on a guaranteed revert. (Delegation subtasks
+ *  are posted by the prime agent, so claiming one with that same prime
+ *  is the common way to hit this.) */
+export function assertNotSelfClaim(worker: AgentRow, requesterAddress: string | undefined): void {
+  if (
+    requesterAddress &&
+    worker.smartAccountAddress &&
+    requesterAddress.toLowerCase() === worker.smartAccountAddress.toLowerCase()
+  ) {
+    throw new Error(
+      `${worker.name} posted this job itself (it's the escrowing requester) — an agent can't claim its own job. Claim it with a different agent on the account, or leave it for the market.`,
+    )
+  }
+}
+
 /** True when someone else holds a live (non-stale) claim on this spec. */
 export function isClaimedByOther(spec: SpecRow, agentId: string): boolean {
   return Boolean(
@@ -119,6 +136,8 @@ export async function acceptAndDispatchJob(
   const job = jobs.find((j) => j.id === jobId)
   const [spec] = job ? await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash)) : []
 
+  assertNotSelfClaim(worker, job?.requester)
+
   if (spec?.failedWorkerIds?.includes(worker.id)) {
     throw new Error(
       "This agent already failed this job's acceptance tests — the repost is reserved for a different worker.",
@@ -189,6 +208,8 @@ export async function acceptJobForExternalWorker(
   if (job.status !== 'Open') throw new Error(`Job #${jobId} is ${job.status}, not Open`)
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
   if (!spec) throw new Error('Job has no off-chain spec — nothing to actually do')
+
+  assertNotSelfClaim(worker, job.requester)
 
   if (spec.failedWorkerIds?.includes(worker.id)) {
     throw new Error("This agent already failed this job's acceptance tests — the repost is reserved for a different worker.")
