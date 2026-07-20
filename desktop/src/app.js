@@ -48,7 +48,7 @@ const KO = {
   'gov.lockAmount': '락 수량',
   'gov.lockWeeks': '주 (1–52)',
   'gov.lock': '락하기',
-  'gov.autoVote': '🤖 이 에이전트가 나 대신 자동투표 (A등급 / 760점 이상 필요)',
+  'gov.autoVote': '🤖 이 에이전트가 나 대신 자동투표 (내가 믿고 켜면 됨 — 신용점수 무관)',
   'gov.savePolicy': '정책 저장',
   'game.pet': '채굴 펫',
   'game.shop': '상점',
@@ -862,9 +862,6 @@ function renderGovernance(data) {
     const toggle = document.getElementById('gov-autovote-toggle')
     const policy = document.getElementById('gov-policy')
     toggle.checked = Boolean(me.autoVote)
-    toggle.disabled = !me.eligible
-    policy.disabled = !me.eligible
-    document.getElementById('gov-policy-save').disabled = !me.eligible
     if (document.activeElement !== policy) policy.value = me.votePolicy || ''
   } else {
     dWrap.hidden = true

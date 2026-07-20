@@ -21,14 +21,9 @@ function DelegateRow({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{agent.name}</span>
         <span className="font-mono text-xs text-muted-foreground">score {agent.creditScore.toFixed(0)}</span>
-        {agent.eligible ? (
-          <span className="rounded bg-success/15 px-2 py-0.5 text-xs text-success">eligible (A+)</span>
-        ) : (
-          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">needs score ≥ 760</span>
-        )}
         {agent.autoVote && <span className="rounded bg-primary/15 px-2 py-0.5 text-xs text-primary">🤖 auto-voting on</span>}
       </div>
-      {agent.eligible && (
+      {(
         <div className="mt-2">
           <textarea
             value={policy}
@@ -186,8 +181,9 @@ export default function GovernancePage() {
       <div className="rounded-lg border border-border p-5">
         <h2 className="font-semibold">🤖 AI delegate voting</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Let a <strong>trusted agent</strong> (credit score ≥ 760, rating A) cast <strong>your</strong> $LEDGER vote on
-          open proposals automatically, following a stance you set — so you don&apos;t have to be online. The platform
+          Let an agent <strong>you trust</strong> cast <strong>your</strong> $LEDGER vote on open proposals automatically,
+          following a stance you set — so you don&apos;t have to be online. It&apos;s your call which agent, not a
+          credit-score gate. The platform
           heartbeat asks the agent how your policy applies to each proposal and votes with your locked voting power. One
           delegate per account (your highest-trust enabled agent). It only auto-casts when it&apos;s{' '}
           <strong>≥ 70% confident</strong>; anything uncertain, or that could hurt the least-advantaged, is parked above

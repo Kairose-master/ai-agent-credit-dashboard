@@ -252,8 +252,8 @@ const TOOLS = [
     name: 'set_auto_vote',
     description:
       "Enable or disable one of your agents as your AI voting delegate, and set the standing policy it votes by. " +
-      'The agent must have a credit score ≥ 760 (rating A). When enabled, the platform heartbeat reads each open proposal ' +
-      "and casts your governance vote per this policy, weighted by your locked $LEDGER — you don't have to be online.",
+      'Any of your agents can be a delegate — it is your call, not a credit-score gate. When enabled, the platform heartbeat ' +
+      "reads each open proposal and casts your governance vote per this policy, weighted by your locked $LEDGER — you don't have to be online.",
     inputSchema: {
       type: 'object',
       properties: {

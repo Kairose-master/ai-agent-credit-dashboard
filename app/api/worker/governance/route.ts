@@ -64,7 +64,7 @@ export async function POST(request: Request) {
             yourVote: p.yourVote,
           })),
           reviews,
-          me: me && { eligible: me.eligible, autoVote: me.autoVote, votePolicy: me.votePolicy, creditScore: me.creditScore },
+          me: me && { autoVote: me.autoVote, votePolicy: me.votePolicy, creditScore: me.creditScore },
         })
       }
 
