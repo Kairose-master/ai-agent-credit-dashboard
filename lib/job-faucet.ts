@@ -309,6 +309,36 @@ export async function setFaucetOwnerAnthropicKey(plaintext: string): Promise<{ o
   return { ok: true, keyTail: key.slice(-4) }
 }
 
+/** Store an OpenAI-compatible key (Groq, for Whisper transcription) on the
+ *  faucet owner account so house audio jobs can be transcription-graded via
+ *  resolveUserOpenAiKey. Encrypted at rest; returns the masked tail only. */
+export async function setFaucetOwnerOpenAiKey(
+  plaintext: string,
+  baseUrl = 'https://api.groq.com/openai/v1',
+  model = 'whisper-large-v3-turbo',
+): Promise<{ ok: true; keyTail: string }> {
+  const key = plaintext.trim()
+  if (!key) throw new Error('empty key')
+
+  const faucet = await ensureFaucetAgent()
+  if (!faucet) throw new Error('faucet account unavailable')
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, FAUCET_EMAIL))
+  if (!owner) throw new Error('faucet owner missing')
+
+  const { encryptSecret } = await import('@/lib/crypto')
+  const { userApiKey } = await import('@/lib/db/schema')
+  const enc = encryptSecret(key)
+  await db
+    .insert(userApiKey)
+    .values({ userId: owner.id, openaiKeyEnc: enc, openaiBaseUrl: baseUrl, openaiModel: model })
+    .onConflictDoUpdate({
+      target: userApiKey.userId,
+      set: { openaiKeyEnc: enc, openaiBaseUrl: baseUrl, openaiModel: model, updatedAt: new Date() },
+    })
+
+  return { ok: true, keyTail: key.slice(-4) }
+}
+
 /** Image starter jobs — posted on demand (not on the heartbeat) via the
  *  admin endpoint. Unlike the Python-graded faucet templates these are
  *  vision-graded, so the acceptance criteria are written to be FAIR: one
@@ -351,6 +381,21 @@ export const IMAGE_JOB_TEMPLATES: ImageJobTemplate[] = [
     bountyUsd: 2,
   },
 ]
+
+/** Audio starter jobs — the worker speaks the exact script (TTS) and the
+ *  server transcribes it back (Whisper) to check it matches. The script is
+ *  BOTH the thing to read (in the description, behind a "Script to read:"
+ *  marker the audio lane extracts) and the grader's target (acceptanceCriteria
+ *  holds the exact sentence). Kept short and plainly worded so a TTS→STT
+ *  round-trip lands cleanly. */
+export const AUDIO_JOB_SCRIPTS: string[] = [
+  'The quick brown fox jumps over the lazy dog.',
+  'Please remember to water the plants before you leave.',
+  'The meeting is scheduled for three o clock on Tuesday.',
+  'A gentle rain fell over the quiet mountain village.',
+]
+
+export const AUDIO_JOB_BOUNTY_USD = 2
 
 export interface ImagePostReport {
   posted: number
@@ -409,6 +454,66 @@ export async function postHouseImageJobs(count = 3): Promise<ImagePostReport> {
       await logPlatformEvent('JOB_POSTED', `Job Faucet posted image job "${template.title}" — $${template.bountyUsd} bounty`)
     } catch (error) {
       console.error('[faucet] image post failed:', error)
+      report.skipped = error instanceof Error ? error.message : String(error)
+      break
+    }
+  }
+  return report
+}
+
+/** Post `count` transcription-graded audio jobs from the house faucet wallet.
+ *  Mirrors postHouseImageJobs but for the audio lane: the worker reads the
+ *  script aloud, the server transcribes it back and checks the match. */
+export async function postHouseAudioJobs(count = 3): Promise<ImagePostReport> {
+  const n = Math.max(1, Math.min(count, AUDIO_JOB_SCRIPTS.length * 3))
+
+  const { isLaborMarketConfigured, isAgentAccountConfigured } = await import('@/lib/onchain/config')
+  if (!isLaborMarketConfigured() || !isAgentAccountConfigured()) {
+    return { posted: 0, jobs: [], skipped: 'onchain not configured' }
+  }
+
+  const faucet = await ensureFaucetAgent()
+  if (!faucet?.smartAccountAddress) return { posted: 0, jobs: [], skipped: 'no faucet wallet' }
+
+  try {
+    const { usdcBalanceOf, mintTestUsdc } = await import('@/lib/onchain/treasury')
+    const balance = await usdcBalanceOf(faucet.smartAccountAddress as `0x${string}`)
+    if (balance < MIN_BALANCE_USD) {
+      await mintTestUsdc(faucet.id, REFUEL_USD, faucet.smartAccountAddress as `0x${string}`)
+    }
+  } catch (error) {
+    console.error('[faucet] audio refuel failed (posting may still succeed):', error)
+  }
+
+  const { keccak256, toHex } = await import('viem')
+  const { postJob } = await import('@/lib/onchain/labor')
+  const report: ImagePostReport = { posted: 0, jobs: [] }
+  for (let i = 0; i < n; i++) {
+    const script = AUDIO_JOB_SCRIPTS[i % AUDIO_JOB_SCRIPTS.length]
+    const title = 'Read a short sentence aloud (text-to-speech)'
+    try {
+      const specHash = keccak256(
+        toHex(JSON.stringify({ title, script, agent: faucet.id, nonce: nanoid() })),
+      )
+      await db.insert(jobSpec).values({
+        specHash,
+        title,
+        // The audio lane extracts the text after "Script to read:" and speaks
+        // only that — see generate_audio in the desktop worker.
+        description: `Produce clear spoken audio of the following line, nothing else.\n\nScript to read: "${script}"`,
+        // The grader's exact target — the transcript is checked against this.
+        acceptanceCriteria: script,
+        requesterAgentId: faucet.id,
+        autoApprove: true, // a passing transcription review releases escrow with no manual step
+        deliverableKind: 'audio',
+      })
+      if (report.posted > 0) await new Promise((r) => setTimeout(r, 2000)) // bundler rate limit
+      await postJob(faucet.id, AUDIO_JOB_BOUNTY_USD, 0, specHash)
+      report.posted++
+      report.jobs.push({ title: `${title} — "${script}"`, specHash, bountyUsd: AUDIO_JOB_BOUNTY_USD })
+      await logPlatformEvent('JOB_POSTED', `Job Faucet posted audio job — $${AUDIO_JOB_BOUNTY_USD} bounty`)
+    } catch (error) {
+      console.error('[faucet] audio post failed:', error)
       report.skipped = error instanceof Error ? error.message : String(error)
       break
     }

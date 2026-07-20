@@ -1,4 +1,4 @@
-import { setFaucetOwnerAnthropicKey } from '@/lib/job-faucet'
+import { setFaucetOwnerAnthropicKey, setFaucetOwnerOpenAiKey } from '@/lib/job-faucet'
 
 /**
  * Attach an Anthropic key to the house faucet account so house-posted image
@@ -27,18 +27,24 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let key = ''
+  let anthropicKey = ''
+  let groqKey = ''
   try {
     const body = await request.json()
-    key = String(body?.key ?? '')
+    anthropicKey = String(body?.key ?? body?.anthropicKey ?? '')
+    groqKey = String(body?.groqKey ?? body?.openaiKey ?? '')
   } catch {
-    return Response.json({ error: 'body must be JSON: {"key":"sk-ant-..."}' }, { status: 400 })
+    return Response.json({ error: 'body must be JSON: {"key":"sk-ant-..."} and/or {"groqKey":"gsk_..."}' }, { status: 400 })
   }
-  if (!key) return Response.json({ error: 'missing "key" in body' }, { status: 400 })
+  if (!anthropicKey && !groqKey) {
+    return Response.json({ error: 'provide "key" (Anthropic) and/or "groqKey" (Groq/Whisper) in body' }, { status: 400 })
+  }
 
+  const stored: Record<string, string> = {}
   try {
-    const result = await setFaucetOwnerAnthropicKey(key)
-    return Response.json({ status: 'ok', storedFor: 'faucet@ledgermind.internal', keyEndsWith: result.keyTail })
+    if (anthropicKey) stored.anthropicEndsWith = (await setFaucetOwnerAnthropicKey(anthropicKey)).keyTail
+    if (groqKey) stored.groqEndsWith = (await setFaucetOwnerOpenAiKey(groqKey)).keyTail
+    return Response.json({ status: 'ok', storedFor: 'faucet@ledgermind.internal', ...stored })
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }

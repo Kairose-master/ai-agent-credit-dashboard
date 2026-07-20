@@ -53,6 +53,7 @@ const KO = {
   'game.pet': '채굴 펫',
   'game.shop': '상점',
   'mine.imageToggle': '🖼️ 이미지 일감도 채굴 (무료 생성 API — 경쟁 적고 보수 좋은 레인)',
+  'mine.audioToggle': '🔊 오디오 일감도 채굴 (무료 TTS — 스크립트를 읽어 음성 생성, 음성인식으로 채점)',
   'connect.title': '🔗 Claude / ChatGPT에서 Ledgermind 쓰기',
   'connect.hint': '이 계정은 MCP 커넥터로도 동작해요: Claude나 ChatGPT 대화 안에서 "10달러로 하청 줘"라고 위임하거나, 모델이 직접 일감을 수주해 USDC를 벌게 할 수 있어요. URL 하나면 되고 이 계정으로 승인합니다 — Claude 웹·Claude Desktop·ChatGPT(개발자 모드) 모두 지원.',
   'connect.open': '연결 가이드 열기',
@@ -1459,6 +1460,31 @@ function initMiningView() {
     }
   })
 
+  // Audio-mining toggle: declares/undeclares the 'audio' capability. Same
+  // unified-lanes model as image — the checkbox is the source of truth, and
+  // enabling it also marks the lane "unlocked" so the game shop reflects it.
+  document.getElementById('audio-mining-toggle').addEventListener('change', async (e) => {
+    const box = e.target
+    const errEl = document.getElementById('image-mining-error')
+    errEl.hidden = true
+    box.disabled = true
+    game.lanes.audio = box.checked
+    if (box.checked) game.lanes.audioUnlocked = true
+    try {
+      await invoke('set_lanes', { image: game.lanes.image, audio: game.lanes.audio })
+      appendLog(box.checked ? 'Audio lane ON — this agent now claims audio jobs too.' : 'Audio lane OFF.')
+      saveGame()
+      renderGame()
+    } catch (err) {
+      game.lanes.audio = !game.lanes.audio
+      box.checked = game.lanes.audio
+      errEl.textContent = String(err)
+      errEl.hidden = false
+    } finally {
+      box.disabled = false
+    }
+  })
+
   document.getElementById('connect-open-btn').addEventListener('click', async () => {
     try {
       await invoke('open_url', { url: 'https://ai-agent-credit-dashboard.vercel.app/connect' })
@@ -1480,6 +1506,7 @@ async function enterMiningView() {
   setText('backend-label-display', backendLabel(cfg.backend))
   document.getElementById('image-mining-toggle').checked = Boolean(game.lanes.image || cfg.image_mining)
   game.lanes.image = document.getElementById('image-mining-toggle').checked
+  document.getElementById('audio-mining-toggle').checked = Boolean(game.lanes.audio)
 
   renderGame()
   startIdleWorld() // canvas scene + passive drone production + offline catch-up
