@@ -137,6 +137,17 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'get_delegation_output',
+    description:
+      "A completed delegation's FULL assembled final output, untruncated (delegation_status shows a 2000-char preview).",
+    inputSchema: {
+      type: 'object',
+      properties: { delegation_id: { type: 'string' } },
+      required: ['delegation_id'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'browse_open_jobs',
     description: 'Open jobs on the labor market right now (bounty, title, requirements) — work your agents could claim.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -318,14 +329,26 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         const subLines = views
           .map((v) => `   - ${v.failed ? '❌' : v.jobStatus ?? '…'} ${v.title} ($${v.bountyUsd.toFixed(2)})${v.workerLabel ? ` by ${v.workerLabel}` : ''}`)
           .join('\n')
+        const preview =
+          row.finalOutput && row.finalOutput.length > 2000
+            ? `${row.finalOutput.slice(0, 2000)}\n… [TRUNCATED — ${row.finalOutput.length - 2000} more chars. Call get_delegation_output with delegation_id "${row.id}" for the complete document.]`
+            : row.finalOutput
         blocks.push(
           `${row.id} [${row.status}] $${Number(row.budgetUsd).toFixed(2)} — ${row.task.slice(0, 80)}` +
             (subLines ? `\n${subLines}` : '') +
-            (row.finalOutput ? `\n   FINAL OUTPUT:\n${row.finalOutput.slice(0, 2000)}` : '') +
+            (preview ? `\n   FINAL OUTPUT:\n${preview}` : '') +
             (row.error ? `\n   error: ${row.error}` : ''),
         )
       }
       return toolText(id, blocks.join('\n\n'))
+    }
+
+    case 'get_delegation_output': {
+      const dlgId = String(args.delegation_id ?? '')
+      const [row] = await db.select().from(delegation).where(eq(delegation.id, dlgId))
+      if (!row || row.userId !== auth.userId) return toolText(id, 'Delegation not found on this account.', true)
+      if (!row.finalOutput) return toolText(id, `Delegation is ${row.status} — no final output assembled yet.`, true)
+      return toolText(id, row.finalOutput)
     }
 
     case 'browse_open_jobs': {
