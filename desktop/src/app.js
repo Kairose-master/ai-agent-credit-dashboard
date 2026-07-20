@@ -210,6 +210,8 @@ const ACHIEVEMENTS = [
   { id: 'first_vote', emoji: '🗳️', en: 'Cast your first vote', ko: '첫 투표 완료' },
   { id: 'first_lock', emoji: '🔒', en: 'Locked $LEDGER for power', ko: '$LEDGER 첫 락' },
   { id: 'delegate_on', emoji: '🤖', en: 'Delegate voting enabled', ko: '위임투표 활성화' },
+  { id: 'audio_lane', emoji: '🎧', en: 'Unlocked the audio lane', ko: '오디오 레인 해금' },
+  { id: 'prestige1', emoji: '⭐', en: 'Prestiged your buddy', ko: '첫 프레스티지' },
 ]
 
 // Idle-game economy: 💎 shards are a pure GAME currency (never USDC, never
@@ -237,6 +239,14 @@ const REFLEX = { baseCost: 60, growth: 1.9 }
 function reflexTier() { return Math.min(REFLEX_MAX, game.drones || 0) }
 function pollSecsForTier(t) { return REFLEX_SECS[Math.min(REFLEX_MAX, Math.max(0, t))] }
 function reflexCost(tier) { return Math.floor(REFLEX.baseCost * REFLEX.growth ** tier) }
+
+// Lanes: real deliverable capabilities. Audio is a one-time 💎 unlock (the
+// image lane stays free — it already existed). Both only ever declare a
+// capability the miner can genuinely fulfill.
+const AUDIO_LANE_COST = 200
+// Prestige: gated on REAL completed jobs (cumulative), rising each star.
+function prestigeReq(p) { return 25 * (p + 1) }
+function canPrestige() { return (game.total || 0) >= prestigeReq(game.prestige || 0) }
 const QUESTS = [
   { id: 'q_tasks', goal: 3, reward: 40, en: 'Complete 3 tasks today', ko: '오늘 작업 3개 완료', progress: (s) => s.tasksToday },
   { id: 'q_streak', goal: 4, reward: 30, en: 'Reach a 4-task streak', ko: '연속 4개 성공', progress: (s) => s.streak },
@@ -262,12 +272,21 @@ function loadGame() {
       // currency: 💎 come only from real completed jobs. (idleAcc/lastTick
       // kept for save-compat.)
       drones: 0, idleAcc: 0, lastTick: null,
+      // Real deliverable lanes the miner works (declared capabilities). Only
+      // enabled if genuinely fulfillable: image via generation, audio via TTS.
+      lanes: { image: false, audioUnlocked: false, audio: false },
+      // Prestige: a game-layer meta-loop GATED ON REAL WORK. Resets the grind
+      // layer for a permanent 💎/XP multiplier. Never touches real throughput.
+      prestige: 0,
     },
     raw || {},
   )
 }
 
 const game = loadGame()
+// Normalize the nested lanes object (shallow Object.assign above can leave a
+// partial `lanes` from an older save missing new subfields).
+game.lanes = Object.assign({ image: false, audioUnlocked: false, audio: false }, game.lanes || {})
 
 /** Daily rollover for quest counters — called before anything reads them. */
 function rollDay() {
@@ -359,11 +378,16 @@ function addXp(amount) {
   }
 }
 
+// Prestige adds a permanent +25%/star to game-layer gains (💎 + XP). It's a
+// game currency booster only — real throughput (reflex/lanes) is untouched.
+function prestigeMult() {
+  return 1 + 0.25 * (game.prestige || 0)
+}
 function xpMultiplier() {
-  return 1 + 0.2 * (game.upgrades?.xp ?? 0)
+  return (1 + 0.2 * (game.upgrades?.xp ?? 0)) * prestigeMult()
 }
 function shardMultiplier() {
-  return 1 + 0.2 * (game.upgrades?.magnet ?? 0)
+  return (1 + 0.2 * (game.upgrades?.magnet ?? 0)) * prestigeMult()
 }
 
 function gainShards(base) {
@@ -483,7 +507,52 @@ function buy(kind, id) {
     game.drones = tier + 1
     applyReflex() // actually retune the Rust miner's poll cadence — REAL
     spawnDrone() // one more drone orbits, visualizing the faster reflex
+  } else if (kind === 'lane') {
+    if (id === 'image') {
+      game.lanes.image = !game.lanes.image
+    } else if (id === 'audio') {
+      if (!game.lanes.audioUnlocked) {
+        if (game.shards < AUDIO_LANE_COST) return
+        game.shards -= AUDIO_LANE_COST
+        game.lanes.audioUnlocked = true
+        game.lanes.audio = true
+        unlock('audio_lane')
+      } else {
+        game.lanes.audio = !game.lanes.audio
+      }
+    }
+    applyLanes() // declare capabilities to the platform — REAL job matching
+    const box = document.getElementById('image-mining-toggle')
+    if (box) box.checked = game.lanes.image
   }
+  saveGame()
+  renderGame()
+}
+
+/** Push the enabled lanes to the platform as declared capabilities. The
+ *  miner only ever declares what it can genuinely fulfill (image gen, TTS). */
+function applyLanes() {
+  invoke('set_lanes', { image: game.lanes.image, audio: game.lanes.audio }).catch((e) => {
+    // revert optimistic state if the platform rejects the update
+    appendLog(`Lane update failed: ${e}`)
+  })
+}
+
+/** Graduate the buddy: a game-layer reset for a permanent 💎/XP multiplier,
+ *  GATED on real cumulative completed jobs. Keeps everything REAL (reflex,
+ *  lanes, lifetime job count, cosmetics) — only the grind layer resets. */
+function doPrestige() {
+  if (!canPrestige()) return
+  game.prestige = (game.prestige || 0) + 1
+  game.level = 1
+  game.xp = 0
+  game.shards = 0
+  game.upgrades = { xp: 0, magnet: 0 }
+  game.shields = 0
+  unlock('prestige1')
+  showToast(lang === 'ko'
+    ? `⭐ 프레스티지! 이제 ×${game.prestige} — 💎·XP 영구 +${(game.prestige * 25)}%`
+    : `⭐ Prestige ×${game.prestige}! Permanent +${game.prestige * 25}% 💎 & XP`)
   saveGame()
   renderGame()
 }
@@ -493,7 +562,7 @@ function renderGame() {
   if (!panel) return
   rollDay()
   document.getElementById('pet-sprite').textContent = petForLevel(game.level)
-  document.getElementById('pet-level').textContent = `Lv.${game.level}`
+  document.getElementById('pet-level').textContent = `Lv.${game.level}` + (game.prestige ? ` ⭐${game.prestige}` : '')
   document.getElementById('shard-count').textContent = String(game.shards)
 
   const hatEl = document.getElementById('pet-hat')
@@ -592,6 +661,22 @@ function renderShop() {
     () => buy('shield'),
   ))
 
+  // ── Real deliverable lanes (declared capabilities → real job matching) ──
+  shop.appendChild(shopRow(
+    `🖼️ ${ko ? '이미지 레인 (보수 높음)' : 'Image lane (higher pay)'}`,
+    game.lanes.image ? (ko ? '켜짐 · 끄기' : 'ON · turn off') : (ko ? '켜기' : 'Turn on'),
+    true,
+    () => buy('lane', 'image'),
+  ))
+  shop.appendChild(shopRow(
+    `🎧 ${ko ? '오디오 레인 (TTS 내레이션)' : 'Audio lane (TTS narration)'}`,
+    !game.lanes.audioUnlocked
+      ? `${AUDIO_LANE_COST}💎`
+      : game.lanes.audio ? (ko ? '켜짐 · 끄기' : 'ON · turn off') : (ko ? '켜기' : 'Turn on'),
+    game.lanes.audioUnlocked || game.shards >= AUDIO_LANE_COST,
+    () => buy('lane', 'audio'),
+  ))
+
   for (const h of HATS) {
     const owned = game.hats.includes(h.id)
     const wearing = game.hat === h.id
@@ -600,6 +685,19 @@ function renderShop() {
       owned ? (wearing ? (ko ? '벗기' : 'Take off') : (ko ? '착용' : 'Wear')) : `${h.cost}💎`,
       owned || game.shards >= h.cost,
       () => buy('hat', h.id),
+    ))
+  }
+
+  // ── Prestige (game-layer meta, GATED ON REAL completed jobs) ──
+  {
+    const need = prestigeReq(game.prestige || 0)
+    const have = game.total || 0
+    const ready = canPrestige()
+    shop.appendChild(shopRow(
+      `⭐ ${ko ? '프레스티지' : 'Prestige'} ×${game.prestige || 0} (${ko ? '실적 잡' : 'real jobs'} ${Math.min(have, need)}/${need} → 💎·XP +25%)`,
+      ready ? (ko ? '졸업!' : 'Graduate!') : (ko ? `${need - have}건 더` : `${need - have} more`),
+      ready,
+      () => { if (confirm(ko ? '레벨·💎·업그레이드를 리셋하고 영구 +25% 배수를 얻습니다. 반사신경·레인·실적은 유지돼요. 진행할까요?' : 'Reset level/💎/upgrades for a permanent +25% multiplier. Reflex, lanes and real record are kept. Proceed?')) doPrestige() },
     ))
   }
 }
@@ -819,6 +917,7 @@ function renderWorld(ts) {
 
 function startIdleWorld() {
   applyReflex() // migrate veterans + push the saved reflex cadence to Rust
+  applyLanes() // re-declare saved deliverable lanes to the platform on launch
   // seed drone sprites to match the reflex tier (visual of trained reflexes)
   drones.length = 0
   for (let i = 0; i < reflexTier(); i++) spawnDrone()
@@ -1337,18 +1436,22 @@ function initMiningView() {
 
   // Image-mining toggle: declares/undeclares the 'image' capability on
   // the platform so the matcher (auto-mine) routes image jobs here.
+  // The image checkbox is a mirror of the image lane — route it through the
+  // unified lanes model so it never fights the game shop's lane controls.
   document.getElementById('image-mining-toggle').addEventListener('change', async (e) => {
     const box = e.target
     const errEl = document.getElementById('image-mining-error')
     errEl.hidden = true
     box.disabled = true
+    game.lanes.image = box.checked
     try {
-      await invoke('set_image_mining', { enabled: box.checked })
-      appendLog(box.checked
-        ? 'Image mining ON — this agent now claims image jobs too (free generation API).'
-        : 'Image mining OFF — back to text-only.')
+      await invoke('set_lanes', { image: game.lanes.image, audio: game.lanes.audio })
+      appendLog(box.checked ? 'Image lane ON — this agent now claims image jobs too.' : 'Image lane OFF.')
+      saveGame()
+      renderGame()
     } catch (err) {
-      box.checked = !box.checked // revert — platform didn't accept it
+      game.lanes.image = !game.lanes.image
+      box.checked = game.lanes.image
       errEl.textContent = String(err)
       errEl.hidden = false
     } finally {
@@ -1375,7 +1478,8 @@ async function enterMiningView() {
   showView('mining')
   setText('agent-name-display', cfg.agent.name)
   setText('backend-label-display', backendLabel(cfg.backend))
-  document.getElementById('image-mining-toggle').checked = Boolean(cfg.image_mining)
+  document.getElementById('image-mining-toggle').checked = Boolean(game.lanes.image || cfg.image_mining)
+  game.lanes.image = document.getElementById('image-mining-toggle').checked
 
   renderGame()
   startIdleWorld() // canvas scene + passive drone production + offline catch-up

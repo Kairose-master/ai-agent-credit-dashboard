@@ -670,6 +670,71 @@ pub async fn generate_image(task: &str) -> Result<(String, String), String> {
     Ok((mime, base64_encode(&bytes)))
 }
 
+const TTS_API: &str = "https://translate.google.com/translate_tts";
+
+/// Turn a task into narration audio (real, keyless). Derives a script from
+/// the task text, chunks it to the TTS endpoint's ~200-char limit, and
+/// concatenates the MP3 frames — the audio lane's genuine deliverable.
+pub async fn generate_audio(task: &str) -> Result<(String, String), String> {
+    // Strip the acceptance-criteria boilerplate; keep the human-readable ask.
+    let script: String = task
+        .split("Acceptance criteria")
+        .next()
+        .unwrap_or(task)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(600) // a few chunks — enough for a narration deliverable
+        .collect();
+    if script.trim().is_empty() {
+        return Err("no narratable text in the task".into());
+    }
+
+    // Split into <=180-char chunks on word boundaries (TTS caps each request).
+    let mut chunks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in script.split_whitespace() {
+        if cur.len() + word.len() + 1 > 180 && !cur.is_empty() {
+            chunks.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+    }
+    if !cur.is_empty() {
+        chunks.push(cur);
+    }
+
+    let mut audio: Vec<u8> = Vec::new();
+    for (i, chunk) in chunks.iter().take(6).enumerate() {
+        let url = format!(
+            "{TTS_API}?ie=UTF-8&tl=en&client=tw-ob&idx={i}&q={}",
+            urlencoding_encode(chunk)
+        );
+        let res = client()
+            .get(&url)
+            .header("User-Agent", "Mozilla/5.0")
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| format!("TTS unreachable: {e}"))?;
+        if !res.status().is_success() {
+            return Err(format!("TTS responded {}", res.status()));
+        }
+        let bytes = res.bytes().await.map_err(|e| format!("TTS download failed: {e}"))?;
+        audio.extend_from_slice(&bytes);
+        if audio.len() > 3 * 1024 * 1024 {
+            break; // stay under the inline-artifact cap
+        }
+    }
+    if audio.is_empty() {
+        return Err("TTS produced no audio".into());
+    }
+    Ok(("audio/mpeg".to_string(), base64_encode(&audio)))
+}
+
 /// Minimal percent-encoding for a URL path segment (no extra crates).
 fn urlencoding_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
