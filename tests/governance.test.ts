@@ -6,7 +6,6 @@ import {
   isAutoVoteEligible,
   pickDelegateByUser,
   mustEscalate,
-  AUTO_VOTE_MIN_SCORE,
   CONFIDENCE_THRESHOLD,
   MAX_LOCK_WEEKS,
   WEEK_MS,
@@ -25,7 +24,7 @@ const mkDecision = (o: Partial<DelegateDecision> = {}): DelegateDecision => ({
 })
 
 const mkAgent = (o: Partial<AutoVoteAgent> & { id: string; userId: string }): AutoVoteAgent => ({
-  creditScore: AUTO_VOTE_MIN_SCORE,
+  creditScore: 500,
   votePolicy: 'favor lower fees',
   autoVote: true,
   ...o,
@@ -108,32 +107,33 @@ describe('tallyVotes', () => {
   })
 })
 
-describe('isAutoVoteEligible (delegate trust gate)', () => {
-  it('requires opt-in, trust ≥ floor, and a non-empty policy', () => {
+describe('isAutoVoteEligible (owner opt-in only — NOT a credit gate)', () => {
+  it('requires opt-in and a non-empty policy; credit score is irrelevant', () => {
     expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u' }))).toBe(true)
+    // A low credit score does NOT disqualify — trusting the delegate is the owner's call.
+    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', creditScore: 300 }))).toBe(true)
     expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', autoVote: false }))).toBe(false)
-    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', creditScore: AUTO_VOTE_MIN_SCORE - 1 }))).toBe(false)
     expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', votePolicy: '   ' }))).toBe(false)
     expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', votePolicy: null }))).toBe(false)
   })
 })
 
 describe('pickDelegateByUser (one delegate per owner)', () => {
-  it('picks the highest-trust eligible agent per owner and skips ineligible ones', () => {
+  it('picks one delegate per owner; credit score is only a deterministic tie-break', () => {
     const agents = [
       mkAgent({ id: 'a1', userId: 'alice', creditScore: 800 }),
-      mkAgent({ id: 'a2', userId: 'alice', creditScore: 950 }), // higher → wins for alice
+      mkAgent({ id: 'a2', userId: 'alice', creditScore: 950 }), // higher → tie-break wins for alice
       mkAgent({ id: 'a3', userId: 'alice', creditScore: 999, autoVote: false }), // opted out → ignored
-      mkAgent({ id: 'b1', userId: 'bob', creditScore: 700 }), // below floor → bob has no delegate
+      mkAgent({ id: 'b1', userId: 'bob', creditScore: 320 }), // low score still eligible → bob has a delegate
     ]
     const picked = pickDelegateByUser(agents)
     expect(picked.get('alice')?.id).toBe('a2')
-    expect(picked.has('bob')).toBe(false)
-    expect(picked.size).toBe(1)
+    expect(picked.get('bob')?.id).toBe('b1')
+    expect(picked.size).toBe(2)
   })
 
-  it('returns an empty map when nobody is eligible', () => {
-    expect(pickDelegateByUser([mkAgent({ id: 'a', userId: 'u', creditScore: 100 })]).size).toBe(0)
+  it('returns an empty map when nobody opted in', () => {
+    expect(pickDelegateByUser([mkAgent({ id: 'a', userId: 'u', autoVote: false })]).size).toBe(0)
   })
 })
 

@@ -183,10 +183,11 @@ export const agent = pgTable('agent', {
   messagingSuspendedReason: text('messagingSuspendedReason'),
   erc8004Id: integer('erc8004Id'), // this agent's id in the ERC-8004 Identity Registry, once registered
   autoMine: boolean('autoMine').notNull().default(false), // auto-accept qualifying open jobs when this local worker polls idle
-  // Governance: a high-trust agent (creditScore ≥ AUTO_VOTE_MIN_SCORE) can
-  // act as its owner's AI voting delegate — the cron heartbeat reads open
-  // proposals and casts the owner's $LEDGER vote per votePolicy. Off unless
-  // the owner explicitly opts in AND sets a stance.
+  // Governance: any agent the owner opts in can act as its AI voting
+  // delegate — the cron heartbeat reads open proposals and casts the owner's
+  // $LEDGER vote per votePolicy. Off unless the owner explicitly opts in AND
+  // sets a stance. Not gated on credit score (that's a labor-market signal,
+  // unrelated to who the owner trusts to vote for them).
   autoVote: boolean('autoVote').notNull().default(false),
   votePolicy: text('votePolicy'), // the standing stance the delegate votes by
   // Deliverable kinds this worker can produce ('text' | 'image' | 'file').

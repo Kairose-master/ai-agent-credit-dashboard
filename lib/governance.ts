@@ -27,11 +27,12 @@ export const MAX_LOCK_WEEKS = 52
 export const PROPOSAL_MIN_POWER = 10 // ve power needed to open a proposal
 export const DEFAULT_PROPOSAL_DAYS = 7
 export const QUORUM_POWER = 50 // min total power cast for a result to count
-// Trust gate for AI-delegate auto-voting: only agents rated A or better
-// (credit score ≥ 760 on the 300–990 scale) may vote on their owner's
-// behalf. High trust is the whole point — a flaky agent shouldn't move a
-// vote. Owner-configurable ceiling, platform-fixed floor.
-export const AUTO_VOTE_MIN_SCORE = 760
+// Auto-voting eligibility is a PERSONAL-trust decision, not a platform-trust
+// one: the owner opts in and sets a stance — that IS the authorization.
+// Credit score (a labor-market performance signal) is deliberately NOT a
+// gate here; conflating "good at completing jobs" with "may vote on my
+// behalf" was a category error. Credit only breaks ties when an owner has
+// several delegates enabled (see pickDelegateByUser).
 // A delegate must be at least this confident to auto-cast. Below it — or if
 // the proposal could harm the least-advantaged — the recommendation is
 // escalated to the owner instead of cast. Borrowed from the algorithmica
@@ -110,20 +111,21 @@ export interface AutoVoteAgent {
   autoVote: boolean
 }
 
-/** Is this agent allowed to auto-vote as its owner's delegate? Needs the
- *  opt-in flag, a trust score at/above the floor, and a non-empty stance —
- *  we never fabricate a position for an agent that has none. */
-export function isAutoVoteEligible(a: AutoVoteAgent, minScore = AUTO_VOTE_MIN_SCORE): boolean {
-  return a.autoVote && a.creditScore >= minScore && !!a.votePolicy && a.votePolicy.trim().length > 0
+/** May this agent auto-vote as its owner's delegate? Purely the owner's
+ *  call: the opt-in flag plus a non-empty stance (we never fabricate a
+ *  position for an agent that has none). Credit score is NOT a factor —
+ *  that's a labor-market signal, unrelated to who the owner trusts to vote. */
+export function isAutoVoteEligible(a: AutoVoteAgent): boolean {
+  return a.autoVote && !!a.votePolicy && a.votePolicy.trim().length > 0
 }
 
-/** One vote per owner per proposal — so a user with several eligible agents
- *  gets a single delegate: the highest-trust one. Pure so the tie-break is
- *  unit-tested. Returns userId → chosen delegate. */
-export function pickDelegateByUser(agents: AutoVoteAgent[], minScore = AUTO_VOTE_MIN_SCORE): Map<string, AutoVoteAgent> {
+/** One vote per owner per proposal — so a user with several enabled agents
+ *  gets a single delegate. Credit score is only a deterministic tie-break
+ *  (a stable pick, NOT a gate). Pure so it's unit-tested. */
+export function pickDelegateByUser(agents: AutoVoteAgent[]): Map<string, AutoVoteAgent> {
   const byUser = new Map<string, AutoVoteAgent>()
   for (const a of agents) {
-    if (!isAutoVoteEligible(a, minScore)) continue
+    if (!isAutoVoteEligible(a)) continue
     const cur = byUser.get(a.userId)
     if (!cur || a.creditScore > cur.creditScore) byUser.set(a.userId, a)
   }
@@ -331,13 +333,13 @@ export interface VotingAgentView {
   id: string
   name: string
   creditScore: number
-  eligible: boolean
   autoVote: boolean
   votePolicy: string
 }
 
-/** The caller's agents with their auto-vote eligibility + config (drives the
- *  delegate section of the /governance page). */
+/** The caller's agents with their delegate config (drives the delegate
+ *  section of the /governance page). Every agent can be a delegate — it's
+ *  the owner's call, not a credit gate. */
 export async function listVotingAgents(userId: string): Promise<VotingAgentView[]> {
   const rows = await db
     .select({ id: agent.id, name: agent.name, creditScore: agent.creditScore, autoVote: agent.autoVote, votePolicy: agent.votePolicy })
@@ -347,25 +349,20 @@ export async function listVotingAgents(userId: string): Promise<VotingAgentView[
     id: a.id,
     name: a.name,
     creditScore: Number(a.creditScore),
-    eligible: Number(a.creditScore) >= AUTO_VOTE_MIN_SCORE,
     autoVote: a.autoVote,
     votePolicy: a.votePolicy ?? '',
   }))
 }
 
 /** Enable/disable an agent as its owner's voting delegate. Owner-guarded;
- *  enabling requires a trust score at/above the floor AND a stated policy. */
+ *  enabling only requires a stated policy — trusting the delegate is the
+ *  owner's decision, so there is no credit-score gate. */
 export async function setAutoVote(agentId: string, ownerUserId: string, enabled: boolean, policy: string) {
   const [a] = await db.select().from(agent).where(eq(agent.id, agentId))
   if (!a || a.userId !== ownerUserId) throw new Error('Agent not found')
   const trimmed = (policy ?? '').trim()
-  if (enabled) {
-    if (Number(a.creditScore) < AUTO_VOTE_MIN_SCORE) {
-      throw new Error(
-        `${a.name} needs a credit score ≥ ${AUTO_VOTE_MIN_SCORE} (rating A) to auto-vote — it's at ${Number(a.creditScore).toFixed(0)}. Complete more graded work to raise it.`,
-      )
-    }
-    if (!trimmed) throw new Error('Set a voting policy so the delegate knows how to vote on your behalf')
+  if (enabled && !trimmed) {
+    throw new Error('Set a voting policy so the delegate knows how to vote on your behalf')
   }
   await db
     .update(agent)
