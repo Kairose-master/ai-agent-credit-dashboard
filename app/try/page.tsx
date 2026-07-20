@@ -8,6 +8,8 @@
  */
 import { useState } from 'react'
 
+const MCP_URL = 'https://ai-agent-credit-dashboard.vercel.app/api/mcp'
+
 type Kind = 'text' | 'image' | 'audio'
 
 interface DemoResult {
@@ -55,8 +57,19 @@ export default function TryPage() {
   const [error, setError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [leadSaved, setLeadSaved] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const active = KINDS.find((x) => x.k === kind)!
+
+  const copyMcp = async () => {
+    await navigator.clipboard.writeText(MCP_URL).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2500)
+  }
+  const connectClaude = async () => {
+    await copyMcp()
+    window.open('https://claude.ai/settings/connectors', '_blank', 'noreferrer')
+  }
 
   const run = async () => {
     if (prompt.trim().length < 3 || loading) return
@@ -115,8 +128,52 @@ export default function TryPage() {
           </p>
         </div>
 
+        {/* Core feature: Claude / ChatGPT connector */}
+        <div className="mt-8 rounded-2xl border border-primary/30 bg-primary/5 p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+              ⭐ 핵심 기능
+            </span>
+            <h2 className="text-lg font-semibold">Claude·ChatGPT 안에서 바로 부리세요</h2>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            커넥터 하나만 추가하면 채팅에서 <strong className="text-foreground">“Ledgermind에 $10로 이 작업 하청 줘”</strong>
+            라고 말하는 것만으로 에이전트가 일하고 결과가 대화에 조립돼요. 반대로 열린 일감을 캐서 USDC를 벌 수도 있고요.
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md bg-secondary/50 px-3 py-2 text-xs">{MCP_URL}</code>
+            <button
+              onClick={copyMcp}
+              className="shrink-0 rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-secondary/40"
+            >
+              {copied ? '복사됨!' : 'URL 복사'}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={connectClaude}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+            >
+              🔌 Claude에 연결
+            </button>
+            <a
+              href="/connect"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary/40"
+            >
+              ChatGPT · Gemini 연결법 →
+            </a>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            claude.ai(웹)·Claude 데스크탑 모두 지원 · 커넥터 설정에서 &quot;커스텀 커넥터 추가&quot;에 URL 붙여넣기
+          </p>
+        </div>
+
+        <p className="mt-8 text-center text-xs font-medium text-muted-foreground">
+          — 또는 가입 없이 지금 바로 맛보기 —
+        </p>
+
         {/* Kind tabs */}
-        <div className="mt-8 flex justify-center gap-2">
+        <div className="mt-4 flex justify-center gap-2">
           {KINDS.map((x) => (
             <button
               key={x.k}
@@ -193,6 +250,13 @@ export default function TryPage() {
             <p className="mt-3 text-xs text-muted-foreground">
               🧑‍⚖️ 독립 채점기 판정: <span className="italic">“{result.verdict.reason}”</span>
             </p>
+
+            <button
+              onClick={connectClaude}
+              className="mt-3 w-full rounded-lg border border-primary/40 bg-primary/10 py-2.5 text-sm font-semibold text-primary hover:bg-primary/15"
+            >
+              🔌 이걸 Claude 안에서 계속 쓰기 — 커넥터 연결
+            </button>
 
             {/* Lead capture */}
             {leadSaved ? (
