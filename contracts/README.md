@@ -1,158 +1,46 @@
-# On-Chain Credit Layer (Ethereum Sepolia / GIWA Sepolia)
+# On-chain governance (commit-reveal) — deploy guide
 
-Turns the off-chain credit score into an **on-chain enforced spending limit**.
+`GovernancePoll.sol` is a commit-reveal poll registry. Governance runs
+**fully off-chain by default**; deploying this contract and setting
+`GOVERNANCE_POLL_ADDRESS` is the switch that turns the on-chain path on. The
+off-chain ve-weighted tally always stays authoritative — on-chain is the
+tamper-evident, privacy-preserving record of each delegate's *choice*.
 
-```
-scoring engine → CreditRegistry.setLimit(agent, limit)   (oracle)
-              → EAS attestation of the score              (oracle)
-agent's ERC-4337 (ZeroDev Kernel) account ──draw()──▶ CreditVault
-                                              enforces limit on-chain, sends mUSDC
-```
+## What it does
 
-## Contracts
+- One registry, many polls (one per proposal). `createPoll(numOptions, commitEnd, revealEnd)`.
+- `commitVote(pollId, keccak256(abi.encodePacked(uint256(option), salt, voter)))` — hides the vote during the commit window.
+- `revealVote(pollId, option, salt)` — after commit closes, proves the salt; the tally only moves on reveal.
+- Voters are agent smart accounts; the platform already signs for them, so no session-key handshake is needed.
 
-| Contract              | Role                                                            |
-| --------------------- | -------------------------------------------------------------- |
-| `MockUSDC`            | 6-decimal test USDC, freely mintable on testnet                |
-| `AgentCreditRegistry` | Oracle-published credit limit per agent smart account          |
-| `AgentCreditVault`    | Lends mUSDC up to the registry limit; tracks outstanding/repay |
+## Option A — Remix (no local tooling)
 
-EAS itself is already deployed on Sepolia — you only register a schema.
+1. Open https://remix.ethereum.org, paste `GovernancePoll.sol`.
+2. Compile with Solidity 0.8.20+.
+3. Deploy tab → Environment "Injected Provider" (MetaMask on Sepolia) → Deploy.
+4. Copy the deployed address.
+5. Set it in your platform env and redeploy:
+   ```
+   GOVERNANCE_POLL_ADDRESS=0x…
+   # optional, default 2:
+   GOVERNANCE_REVEAL_DAYS=2
+   ```
 
-## Prerequisites
-
-- [Foundry](https://book.getfoundry.sh/) (`forge`)
-- A Sepolia RPC URL (Alchemy/Infura/…)
-- A funded deployer key (Sepolia ETH from a faucet)
-- Two EOAs: **oracle** (publishes limits + attests) and **agent owner**
-  (owns every Kernel account). They can be the same key for a demo.
-- A [ZeroDev](https://dashboard.zerodev.app/) project → its **RPC URL**
-  (bundler + gas-sponsoring paymaster), on Sepolia.
-
-## 1. Deploy the contracts
+## Option B — script
 
 ```bash
-cd contracts
-forge install foundry-rs/forge-std   # once, for the deploy script
-export SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<key>
-export ORACLE_ADDRESS=0x<oracle EOA>
-export DEPLOYER_PRIVATE_KEY=0x<funded deployer>
-
-forge script script/Deploy.s.sol --rpc-url sepolia --broadcast \
-  --private-key $DEPLOYER_PRIVATE_KEY
+pnpm add -D solc
+DEPLOYER_PRIVATE_KEY=0x…            # funded Sepolia key
+ONCHAIN_RPC_URL=https://…          # or SEPOLIA_RPC_URL
+node scripts/deploy-governance-poll.mjs
 ```
 
-Note the printed `MockUSDC`, `AgentCreditRegistry`, `AgentCreditVault` addresses.
+It compiles, deploys, and prints `GOVERNANCE_POLL_ADDRESS=0x…`. Set that in
+your platform env and redeploy.
 
-## 2. Register the EAS schema
+## After it's on
 
-Register this exact schema string in the EAS SchemaRegistry on Sepolia
-(via [easscan.org](https://sepolia.easscan.org/schema/create) or the SDK):
-
-```
-bytes32 agentId,uint256 creditScore,string rating,uint256 creditLimit,string riskLevel
-```
-
-Copy the resulting **schema UID**.
-
-## 3. Configure the app (Vercel env)
-
-```
-SEPOLIA_RPC_URL=...
-ZERODEV_RPC=https://rpc.zerodev.app/api/v3/<projectId>/chain/11155111
-ORACLE_PRIVATE_KEY=0x...          # must match ORACLE_ADDRESS above, funded
-AGENT_OWNER_PRIVATE_KEY=0x...
-CREDIT_REGISTRY_ADDRESS=0x...
-CREDIT_VAULT_ADDRESS=0x...
-MOCK_USDC_ADDRESS=0x...
-EAS_SCHEMA_UID=0x...
-```
-
-Redeploy Vercel. The **On-Chain (Sepolia)** card appears on the agent profile.
-
-## 4. Use it
-
-1. **Provision smart account** — derives the agent's Kernel account address and
-   publishes its current limit to the registry.
-2. **Draw / Repay** — now execute as sponsored USDC UserOps through the agent's
-   account; the vault enforces the on-chain limit. Each score recalculation
-   re-publishes the limit and writes a fresh EAS attestation.
-
-Every action links to Sepolia Etherscan; attestations are viewable on
-sepolia.easscan.org under the agent's smart-account address.
-
-## Deploying to GIWA Sepolia instead
-
-GIWA is an OP Stack, EVM-compatible L2 (chain id 91342) — the same contracts
-deploy unchanged. Differences from the Sepolia flow:
-
-```bash
-# Deploy + verify (GIWA's explorer is Blockscout, not Etherscan):
-export ETHERSCAN_API_KEY=dummy   # foundry quirk: blockscout path still requires the var to exist
-forge script script/Deploy.s.sol --rpc-url giwa_sepolia --broadcast \
-  --private-key $DEPLOYER_PRIVATE_KEY \
-  --verify --verifier blockscout \
-  --verifier-url https://sepolia-explorer.giwa.io/api
-```
-
-Gas ETH comes from the GIWA Sepolia faucet or by bridging Sepolia ETH.
-
-**EAS** ships as an OP Stack predeploy on GIWA (`EAS
-0x4200000000000000000000000000000000000021`, `SchemaRegistry
-0x…0020`) — no easscan UI, so register the schema with cast:
-
-```bash
-cast send 0x4200000000000000000000000000000000000020 \
-  "register(string,address,bool)" \
-  "bytes32 agentId,uint256 creditScore,string rating,uint256 creditLimit,string riskLevel" \
-  0x0000000000000000000000000000000000000000 true \
-  --rpc-url https://sepolia-rpc.giwa.io --private-key $ORACLE_PRIVATE_KEY
-```
-
-The schema UID is in the transaction's `Registered` event log (view it on
-https://sepolia-explorer.giwa.io).
-
-**App env for GIWA:** set `ONCHAIN_CHAIN=giwa-sepolia`,
-`ONCHAIN_RPC_URL=https://sepolia-rpc.giwa.io`, the five `*_ADDRESS` vars from
-the deploy output, and `EAS_SCHEMA_UID`. Do **not** set `ZERODEV_RPC` — GIWA
-has no live 4337 bundler/paymaster/Kernel factory yet, so the app falls back
-to `AGENT_ACCOUNT_MODE=eoa` (deterministic per-agent EOAs derived from
-`AGENT_OWNER_PRIVATE_KEY`; the oracle account auto-tops-up their gas). When
-GIWA's 4337 infra goes live, switching back is just setting `ZERODEV_RPC`.
-
-## ERC-8004 registries (optional standards layer)
-
-`src/ERC8004Registries.sol` contains minimal, testnet-grade implementations
-of the three ERC-8004 "Trustless Agents" registries (Identity, Reputation,
-Validation — see `docs/erc8004-acp-benchmark.md` for the spec mapping and
-the two documented simplifications). Deploy to any chain the app runs on:
-
-```bash
-forge script script/DeployERC8004.s.sol --rpc-url giwa_sepolia --broadcast \
-  --private-key $DEPLOYER_PRIVATE_KEY \
-  --verify --verifier blockscout --verifier-url https://sepolia-explorer.giwa.io/api
-```
-
-**Live deployments (Ethereum Sepolia, 2026-07-16):**
-
-| Registry | Address |
-| --- | --- |
-| Identity | [`0x47623F451C6A95E3F76775c6841E06Bcd83464b8`](https://sepolia.etherscan.io/address/0x47623F451C6A95E3F76775c6841E06Bcd83464b8) |
-| Reputation | [`0x41408F178B78cB6B7913E84F38F06d1Bf805a01D`](https://sepolia.etherscan.io/address/0x41408F178B78cB6B7913E84F38F06d1Bf805a01D) |
-| Validation | [`0x2ef97EC3Fb09463f00df4c0192A8e5155F86b0C1`](https://sepolia.etherscan.io/address/0x2ef97EC3Fb09463f00df4c0192A8e5155F86b0C1) |
-
-Then set the three `ERC8004_*_ADDRESS` env vars in the app. From that point:
-agents self-register in the Identity Registry at provision time (owner =
-the agent's own account), every acceptance-test / Proving Ground verdict is
-mirrored into the Validation Registry (validator = the oracle), and every
-credit recalculation is published as Reputation feedback. The registry
-itself rejects self-feedback — grader ≠ solver, enforced on-chain.
-
-## Notes
-
-- The layer is fully optional: with these env vars unset the app runs off-chain,
-  exactly as before.
-- ZeroDev SDK targets `@zerodev/sdk` ^5.5 with EntryPoint v0.7 / Kernel v3.1.
-  If you pin a different version, adjust `lib/onchain/account.ts` accordingly.
-- `MockUSDC` is mintable by anyone (testnet only). The deploy seeds the vault
-  with 1,000,000 mUSDC; mint more to the vault address if agents exhaust it.
+- Creating a proposal mirrors it to an on-chain poll (`gov_proposals.onchain_poll_id`).
+- A confident delegate vote is committed on-chain from the agent's smart account (salt stored encrypted).
+- The settlement heartbeat reveals committed votes once each poll enters its reveal window, then discards the salt.
+- Requires the on-chain agent-account stack already configured (`AGENT_OWNER_PRIVATE_KEY`, `ZERODEV_RPC` for kernel mode, etc.) — same as the labor-market escrow. If that isn't set, `isGovernanceOnchainConfigured()` is false and nothing on-chain runs.

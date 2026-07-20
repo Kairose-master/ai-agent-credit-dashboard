@@ -50,6 +50,8 @@ export const onchainEnv = {
   laborMarketAddress: (process.env.LABOR_MARKET_ADDRESS ?? '') as `0x${string}` | '',
   verifiedEscrowAddress: (process.env.VERIFIED_TASK_ESCROW_ADDRESS ?? '') as `0x${string}` | '',
   usdcAddress: (process.env.MOCK_USDC_ADDRESS ?? '') as `0x${string}` | '',
+  governancePollAddress: (process.env.GOVERNANCE_POLL_ADDRESS ?? '') as `0x${string}` | '', // commit-reveal poll registry
+  governanceRevealDays: Number(process.env.GOVERNANCE_REVEAL_DAYS ?? '2'), // reveal window after a proposal closes
   // Both supported chains have an EAS default, so this is always a real address.
   easAddress: (process.env.EAS_ADDRESS ?? EAS_DEFAULTS[CHAIN.id]) as `0x${string}`,
   easSchemaUid: (process.env.EAS_SCHEMA_UID ?? '') as `0x${string}` | '',
@@ -80,6 +82,13 @@ export function isOnchainConfigured(): boolean {
 export function isAgentAccountConfigured(): boolean {
   if (!onchainEnv.agentOwnerPrivateKey || !isOnchainConfigured()) return false
   return agentAccountMode === 'eoa' || Boolean(onchainEnv.zerodevRpc)
+}
+
+/** True when on-chain commit-reveal governance is available: a deployed
+ *  poll registry AND agents that can transact to it. Off → governance
+ *  stays purely off-chain (the default). */
+export function isGovernanceOnchainConfigured(): boolean {
+  return Boolean(onchainEnv.governancePollAddress && isAgentAccountConfigured())
 }
 
 /** True when the on-chain labor market is available. */

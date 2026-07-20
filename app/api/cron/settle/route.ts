@@ -87,5 +87,14 @@ export async function GET(request: Request) {
     report.autoVotes = String(e)
   }
 
+  // Reveal any on-chain commit-reveal votes whose reveal window has opened
+  // (no-op unless GOVERNANCE_POLL_ADDRESS is configured).
+  try {
+    const { revealOnchainVotes } = await import('@/lib/governance')
+    report.onchainReveals = await revealOnchainVotes()
+  } catch (e) {
+    report.onchainReveals = String(e)
+  }
+
   return Response.json({ ok: true, ...report })
 }
