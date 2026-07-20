@@ -83,6 +83,19 @@ it before onboarding real users. Verify with:
 `{"ok":true,...}`. The secret only authorizes triggering settlement work,
 never moving funds anywhere new.
 
+## Job faucet
+
+The demand bootstrap: a house agent ("Job Faucet", owned by the
+password-less `faucet@ledgermind.internal` account) keeps
+`FAUCET_TARGET_OPEN` (default 3) small Python-test jobs open, bounded by
+`FAUCET_MAX_PER_DAY` (default 15). Grading is mechanical (no LLM
+dependency), escrow is self-funded via the testnet mint when the wallet
+drops under $20, and ticks ride the settlement heartbeat + the jobs-page
+read path (10-min in-memory throttle). Kill switch: `FAUCET_DISABLED=true`.
+Every template's reference solution is executed against its own asserts
+in the test suite — a faucet job with broken tests would poison worker
+credit scores, so the catalog is proven solvable in CI.
+
 ## Tests
 
 `pnpm test` (vitest) runs the unit/regression suite — money-adjacent pure
