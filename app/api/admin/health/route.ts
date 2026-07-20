@@ -71,6 +71,35 @@ export async function GET() {
     health.tasks = { error: e instanceof Error ? e.message : String(e) }
   }
 
+  // On-chain governance (VeilPoll commit-reveal). Off unless the factory
+  // address + agent stack are configured; then reports the live factory
+  // poll count and how many delegate votes are mid-flight.
+  try {
+    const { isGovernanceOnchainConfigured, onchainEnv } = await import('@/lib/onchain/config')
+    if (!isGovernanceOnchainConfigured()) {
+      health.governanceOnchain = 'off (VEILPOLL_FACTORY_ADDRESS or agent stack not configured)'
+    } else {
+      const { publicClient } = await import('@/lib/onchain/clients')
+      const factory = onchainEnv.veilpollFactoryAddress as `0x${string}`
+      const pollCount = await publicClient()
+        .readContract({
+          address: factory,
+          abi: [{ type: 'function', name: 'pollCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] }],
+          functionName: 'pollCount',
+        })
+        .then((n) => Number(n))
+        .catch((e) => `read failed: ${e instanceof Error ? e.message : String(e)}`)
+      const { govOnchainVote, govProposal } = await import('@/lib/db/schema')
+      const { isNotNull } = await import('drizzle-orm')
+      const mirrored = (await db.select({ id: govProposal.id }).from(govProposal).where(isNotNull(govProposal.onchainPollAddress))).length
+      const committed = (await db.select({ pid: govOnchainVote.proposalId }).from(govOnchainVote).where(eq(govOnchainVote.status, 'committed'))).length
+      const revealed = (await db.select({ pid: govOnchainVote.proposalId }).from(govOnchainVote).where(eq(govOnchainVote.status, 'revealed'))).length
+      health.governanceOnchain = { factory, pollCount, mirroredProposals: mirrored, votesCommitted: committed, votesRevealed: revealed }
+    }
+  } catch (e) {
+    health.governanceOnchain = { error: e instanceof Error ? e.message : String(e) }
+  }
+
   // Settlement heartbeat wiring.
   health.cronSecretConfigured = Boolean(process.env.CRON_SECRET)
   health.faucetEnabled = process.env.FAUCET_DISABLED !== 'true'
