@@ -140,7 +140,7 @@ pub async fn submit_result(
     output: &str,
     execution_time_secs: u64,
     artifacts: &[Artifact],
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let url = format!("{}/api/runtime/callback", platform_url.trim_end_matches('/'));
     let res = client()
         .post(&url)
@@ -165,7 +165,10 @@ pub async fn submit_result(
         let body = res.text().await.unwrap_or_default();
         return Err(format!("callback responded {status}: {}", body.chars().take(300).collect::<String>()));
     }
-    Ok(())
+    // Return the parsed body so the caller can surface the grading verdict
+    // (paid / refunded / manual review) — the callback grades synchronously.
+    let body = res.text().await.unwrap_or_default();
+    Ok(serde_json::from_str(&body).unwrap_or(serde_json::Value::Null))
 }
 
 /// Where the model call itself goes — either a local Ollama daemon, or any
@@ -641,8 +644,10 @@ pub async fn generate_image(task: &str) -> Result<(String, String), String> {
         .chars()
         .take(400)
         .collect();
+    // 1024×1024: image jobs commonly require ≥1024px, and a 768px render
+    // fails that acceptance check outright (independent of visual quality).
     let url = format!(
-        "{IMAGE_API}{}?width=768&height=768&nologo=true",
+        "{IMAGE_API}{}?width=1024&height=1024&nologo=true",
         urlencoding_encode(&prompt)
     );
     let res = client()
