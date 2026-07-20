@@ -201,6 +201,22 @@ async fn set_image_mining(app: tauri::AppHandle, enabled: bool) -> Result<Vec<St
     Ok(confirmed)
 }
 
+/// Declare which deliverable lanes this miner works. Only lanes the miner can
+/// genuinely fulfill (image via generation, audio via TTS) should be enabled
+/// — a declared-but-unfulfillable lane just claims-and-fails jobs.
+#[tauri::command]
+async fn set_lanes(app: tauri::AppHandle, image: bool, audio: bool) -> Result<Vec<String>, String> {
+    let mut cfg = load_stored_config(&app);
+    let agent = cfg.agent.clone().ok_or_else(|| "No agent registered yet.".to_string())?;
+    let mut caps: Vec<&str> = vec!["text"];
+    if image { caps.push("image"); }
+    if audio { caps.push("audio"); }
+    let confirmed = protocol::update_capabilities(&agent.platform_url, &agent.agent_id, &agent.secret, &caps).await?;
+    cfg.image_mining = image; // keep the legacy flag in sync for the toggle
+    save_stored_config(&app, &cfg)?;
+    Ok(confirmed)
+}
+
 /// Open a URL in the system browser — used by the "Connect Claude/ChatGPT"
 /// section (the connector onboarding lives on the web, where OAuth can run).
 #[tauri::command]
@@ -310,6 +326,15 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                             }],
                         ),
                         Err(e) => (false, format!("Image generation failed: {e}"), vec![]),
+                    }
+                } else if task.deliverable_kind == "audio" {
+                    match protocol::generate_audio(&task.task).await {
+                        Ok((mime, data_base64)) => (
+                            true,
+                            "Narration audio attached (desktop miner, text-to-speech of the task script).".to_string(),
+                            vec![protocol::Artifact { name: "deliverable.mp3".into(), mime, data_base64 }],
+                        ),
+                        Err(e) => (false, format!("Audio generation failed: {e}"), vec![]),
                     }
                 } else {
                     match protocol::ask_model(&backend, &task.task).await {
@@ -456,6 +481,7 @@ fn main() {
             delegation_status,
             governance,
             set_image_mining,
+            set_lanes,
             open_url,
         ])
         .setup(|app| {
