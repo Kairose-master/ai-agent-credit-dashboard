@@ -284,6 +284,113 @@ async function ensureFaucetAgent(): Promise<typeof agent.$inferSelect | null> {
   return faucet
 }
 
+/** Image starter jobs — posted on demand (not on the heartbeat) via the
+ *  admin endpoint. Unlike the Python-graded faucet templates these are
+ *  vision-graded, so the acceptance criteria are written to be FAIR: one
+ *  clear subject, any art style, plain backgrounds allowed, and no text /
+ *  watermark demanded. A 1024px generation should pass on merit. */
+export interface ImageJobTemplate {
+  title: string
+  description: string
+  acceptanceCriteria: string
+  bountyUsd: number
+}
+
+export const IMAGE_JOB_TEMPLATES: ImageJobTemplate[] = [
+  {
+    title: 'A single red apple on a plain background',
+    description: 'Generate a clean product-style image of one shiny red apple centered on a plain, light background.',
+    acceptanceCriteria:
+      'The image clearly shows a single red apple as the main subject. Any photographic or illustrated style is fine. A plain or simple background is acceptable. No text or watermark is required.',
+    bountyUsd: 2,
+  },
+  {
+    title: 'A cozy mountain landscape at sunset',
+    description: 'Generate a wide mountain landscape at sunset, with warm orange and pink tones in the sky.',
+    acceptanceCriteria:
+      'The image depicts mountains under a sunset sky with warm colors (orange / pink / red). Any art style is acceptable. It must read clearly as an outdoor mountain scene.',
+    bountyUsd: 2,
+  },
+  {
+    title: 'A blue ceramic coffee mug',
+    description: 'Generate an image of a blue ceramic coffee mug sitting on a table, simple and well-lit.',
+    acceptanceCriteria:
+      'The image shows a blue mug or cup that is recognizable as a coffee mug. Any style and any background are fine. No text or watermark is required.',
+    bountyUsd: 2,
+  },
+  {
+    title: 'A cute cartoon cat',
+    description: 'Generate a friendly, cute cartoon cat character, front-facing, on a simple background.',
+    acceptanceCriteria:
+      'The image clearly shows a cat. Any breed, pose, or art style is acceptable (cartoon or realistic). It must be recognizable as a cat.',
+    bountyUsd: 2,
+  },
+]
+
+export interface ImagePostReport {
+  posted: number
+  jobs: { title: string; specHash: string; bountyUsd: number }[]
+  skipped?: string
+}
+
+/** Post `count` vision-graded image jobs from the house faucet wallet, on
+ *  demand. Mirrors tickJobFaucet's escrow path (mint-if-low → insert spec →
+ *  postJob) but for image deliverables, and ignores the open-count / daily
+ *  caps because a human explicitly asked for these. */
+export async function postHouseImageJobs(count = 3): Promise<ImagePostReport> {
+  const n = Math.max(1, Math.min(count, IMAGE_JOB_TEMPLATES.length * 3))
+
+  const { isLaborMarketConfigured, isAgentAccountConfigured } = await import('@/lib/onchain/config')
+  if (!isLaborMarketConfigured() || !isAgentAccountConfigured()) {
+    return { posted: 0, jobs: [], skipped: 'onchain not configured' }
+  }
+
+  const faucet = await ensureFaucetAgent()
+  if (!faucet?.smartAccountAddress) return { posted: 0, jobs: [], skipped: 'no faucet wallet' }
+
+  // Self-fund on testnet when low — same as the text faucet.
+  try {
+    const { usdcBalanceOf, mintTestUsdc } = await import('@/lib/onchain/treasury')
+    const balance = await usdcBalanceOf(faucet.smartAccountAddress as `0x${string}`)
+    if (balance < MIN_BALANCE_USD) {
+      await mintTestUsdc(faucet.id, REFUEL_USD, faucet.smartAccountAddress as `0x${string}`)
+    }
+  } catch (error) {
+    console.error('[faucet] image refuel failed (posting may still succeed):', error)
+  }
+
+  const { keccak256, toHex } = await import('viem')
+  const { postJob } = await import('@/lib/onchain/labor')
+  const report: ImagePostReport = { posted: 0, jobs: [] }
+  for (let i = 0; i < n; i++) {
+    const template = IMAGE_JOB_TEMPLATES[i % IMAGE_JOB_TEMPLATES.length]
+    try {
+      const specHash = keccak256(
+        toHex(JSON.stringify({ title: template.title, agent: faucet.id, nonce: nanoid() })),
+      )
+      await db.insert(jobSpec).values({
+        specHash,
+        title: template.title,
+        description: template.description,
+        acceptanceCriteria: template.acceptanceCriteria,
+        requesterAgentId: faucet.id,
+        autoApprove: true, // a passing vision review releases escrow with no manual step
+        deliverableKind: 'image',
+      })
+      if (report.posted > 0) await new Promise((r) => setTimeout(r, 2000)) // bundler rate limit
+      await postJob(faucet.id, template.bountyUsd, 0, specHash)
+      report.posted++
+      report.jobs.push({ title: template.title, specHash, bountyUsd: template.bountyUsd })
+      await logPlatformEvent('JOB_POSTED', `Job Faucet posted image job "${template.title}" — $${template.bountyUsd} bounty`)
+    } catch (error) {
+      console.error('[faucet] image post failed:', error)
+      report.skipped = error instanceof Error ? error.message : String(error)
+      break
+    }
+  }
+  return report
+}
+
 // In-memory throttle, per warm instance — same best-effort pattern as
 // tickCloudAutoMineAgents. Over-ticking across cold starts is harmless:
 // the open-count check makes the tick idempotent.
