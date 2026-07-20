@@ -227,12 +227,16 @@ const HATS = [
   { id: 'tophat', emoji: '🎩', cost: 300 },
   { id: 'crown', emoji: '👑', cost: 800 },
 ]
-// Auto-miner drones — the idle loop. Each produces DRONE.rate 💎/sec (× the
-// shard-magnet multiplier). Cost scales geometrically. Offline production is
-// capped so the game rewards checking in without ever printing free money.
-const DRONE = { rate: 0.12, baseCost: 50, growth: 1.28, max: 25, offlineCapHours: 8 }
-function droneCost(n) { return Math.floor(DRONE.baseCost * DRONE.growth ** n) }
-function droneRatePerSec() { return game.drones * DRONE.rate * shardMultiplier() }
+// Reflex training — the REAL idle lever. 💎 (earned only from real completed
+// jobs) trains the miner's poll cadence faster, so it genuinely grabs real
+// jobs sooner → measurably higher real $/day. No fake currency is minted;
+// the payoff is downstream USDC, shown live. `game.drones` = reflex tier.
+const REFLEX_SECS = [9, 7, 6, 5, 4, 3] // poll seconds by tier (index 0..5)
+const REFLEX_MAX = REFLEX_SECS.length - 1
+const REFLEX = { baseCost: 60, growth: 1.9 }
+function reflexTier() { return Math.min(REFLEX_MAX, game.drones || 0) }
+function pollSecsForTier(t) { return REFLEX_SECS[Math.min(REFLEX_MAX, Math.max(0, t))] }
+function reflexCost(tier) { return Math.floor(REFLEX.baseCost * REFLEX.growth ** tier) }
 const QUESTS = [
   { id: 'q_tasks', goal: 3, reward: 40, en: 'Complete 3 tasks today', ko: '오늘 작업 3개 완료', progress: (s) => s.tasksToday },
   { id: 'q_streak', goal: 4, reward: 30, en: 'Reach a 4-task streak', ko: '연속 4개 성공', progress: (s) => s.streak },
@@ -253,8 +257,10 @@ function loadGame() {
       hats: [], hat: null,
       day: '', tasksToday: 0, clicksToday: 0, questsClaimed: [],
       lastSeen: null,
-      // Idle economy: auto-miner drones produce 💎 passively (game currency,
-      // never USDC). idleAcc holds fractional production between whole shards.
+      // Idle throughput: `drones` is the trained REFLEX TIER — it retunes the
+      // real miner's poll cadence (faster = grabs real jobs sooner). No fake
+      // currency: 💎 come only from real completed jobs. (idleAcc/lastTick
+      // kept for save-compat.)
       drones: 0, idleAcc: 0, lastTick: null,
     },
     raw || {},
@@ -468,13 +474,15 @@ function buy(kind, id) {
       game.hats.push(id)
       game.hat = id
     }
-  } else if (kind === 'drone') {
-    if (game.drones >= DRONE.max) return
-    const cost = droneCost(game.drones)
+  } else if (kind === 'reflex') {
+    const tier = reflexTier()
+    if (tier >= REFLEX_MAX) return
+    const cost = reflexCost(tier)
     if (game.shards < cost) return
     game.shards -= cost
-    game.drones += 1
-    spawnDrone() // pop a new drone into the canvas scene
+    game.drones = tier + 1
+    applyReflex() // actually retune the Rust miner's poll cadence — REAL
+    spawnDrone() // one more drone orbits, visualizing the faster reflex
   }
   saveGame()
   renderGame()
@@ -551,15 +559,18 @@ function renderShop() {
   shop.innerHTML = ''
   const ko = lang === 'ko'
 
-  // Auto-miner drone — the idle producer, top of the shop.
+  // Reflex training — the REAL throughput upgrade. Retunes the miner's poll
+  // cadence, so it grabs real jobs faster (more real USDC/day).
   {
-    const maxed = game.drones >= DRONE.max
-    const rate = droneRatePerSec()
+    const tier = reflexTier()
+    const maxed = tier >= REFLEX_MAX
+    const cur = pollSecsForTier(tier)
+    const next = pollSecsForTier(tier + 1)
     shop.appendChild(shopRow(
-      `🛸 ${ko ? '자동 채굴 드론' : 'Auto-miner drone'} ×${game.drones} (${rate.toFixed(2)}💎/s)`,
-      maxed ? (ko ? '최대' : 'MAX') : `${droneCost(game.drones)}💎`,
-      !maxed && game.shards >= droneCost(game.drones),
-      () => buy('drone'),
+      `⚡ ${ko ? '반사신경 훈련' : 'Reflex training'} T${tier}/${REFLEX_MAX} (${ko ? `폴 ${cur}초` : `poll ${cur}s`}${maxed ? '' : ` → ${next}초`})`,
+      maxed ? (ko ? '최대' : 'MAX') : `${reflexCost(tier)}💎`,
+      !maxed && game.shards >= reflexCost(tier),
+      () => buy('reflex'),
     ))
   }
 
@@ -638,6 +649,7 @@ function gameOnWallet(usdc) {
   if (usdc >= 1) unlock('dollar1')
   if (usdc >= 10) unlock('dollar10')
   checkAwayEarnings(usdc)
+  noteEarnings(usdc) // feed the REAL $/day readout
   game.lastSeen = { usdc, at: Date.now() }
   saveGame()
 }
@@ -676,50 +688,53 @@ function spawnCoinBurst(n = 8) {
   }
 }
 
-/** Award drone production accrued while the app/panel was closed (capped). */
-function applyOfflineAccrual() {
-  const now = Date.now()
-  if (game.lastTick && game.drones > 0) {
-    const elapsed = Math.min((now - game.lastTick) / 1000, DRONE.offlineCapHours * 3600)
-    const produced = elapsed * droneRatePerSec()
-    if (produced >= 1) {
-      const whole = Math.floor(produced)
-      game.shards += whole
-      showToast(lang === 'ko'
-        ? `🛸 드론이 자리 비운 동안 ${whole}💎 캤어요`
-        : `🛸 Drones mined ${whole}💎 while you were away`)
-    }
-    game.idleAcc = (game.idleAcc || 0) + (produced % 1)
-  }
-  game.lastTick = now
+/** Push the current reflex tier's poll cadence into the Rust miner — this is
+ *  the REAL effect. Also migrates veterans (lots of real jobs, no reflex yet)
+ *  up a few tiers so the upgrade never nerfs an existing miner. */
+function applyReflex() {
+  // one-time migration: reward past real work with starter reflexes
+  const earned = Math.min(REFLEX_MAX, Math.floor((game.total || 0) / 4))
+  if ((game.drones || 0) < earned) game.drones = earned
+  const secs = pollSecsForTier(reflexTier())
+  invoke('set_poll_interval', { secs }).catch(() => {})
   saveGame()
+  updateRateHud()
+}
+
+// Real earnings rate: sampled from actual wallet balance over the session.
+const earnStat = { startUsd: null, startAt: 0, lastUsd: null }
+function noteEarnings(usdc) {
+  if (earnStat.startUsd === null) { earnStat.startUsd = usdc; earnStat.startAt = Date.now() }
+  earnStat.lastUsd = usdc
+  updateRateHud()
+}
+function projectedPerDay() {
+  if (earnStat.startUsd === null) return null
+  const days = (Date.now() - earnStat.startAt) / 86_400_000
+  if (days < 0.0007) return null // < ~1 min of data → not enough to project
+  const delta = (earnStat.lastUsd ?? earnStat.startUsd) - earnStat.startUsd
+  return delta / days
 }
 
 let idleSaveCtr = 0
 function idleTick() {
-  if (game.drones > 0) {
-    game.idleAcc = (game.idleAcc || 0) + droneRatePerSec()
-    if (game.idleAcc >= 1) {
-      const whole = Math.floor(game.idleAcc)
-      game.idleAcc -= whole
-      game.shards += whole
-      const sc = document.getElementById('shard-count')
-      if (sc) sc.textContent = String(game.shards)
-      // keep the shop's affordability states fresh as 💎 tick up
-      const shop = document.getElementById('shop')
-      if (shop && !shop.hidden) renderShop()
-    }
-  }
+  // No fake currency is produced here — 💎 only come from real completed
+  // jobs. This tick just keeps the live rate readout honest.
   game.lastTick = Date.now()
-  if (++idleSaveCtr % 10 === 0) saveGame() // persist ~every 10s
+  if (++idleSaveCtr % 15 === 0) saveGame()
   updateRateHud()
 }
 
 function updateRateHud() {
   const el = document.getElementById('idle-rate')
-  if (el) el.textContent = game.drones > 0
-    ? `🛸 ${droneRatePerSec().toFixed(2)} 💎/s · ×${game.drones}`
-    : (lang === 'ko' ? '🛸 드론 없음 — 상점에서 구입' : '🛸 no drones — buy in Shop')
+  if (!el) return
+  const secs = pollSecsForTier(reflexTier())
+  const perDay = projectedPerDay()
+  const ko = lang === 'ko'
+  const rate = perDay === null
+    ? (ko ? '측정 중…' : 'measuring…')
+    : `~$${perDay.toFixed(2)}/${ko ? '일' : 'day'}`
+  el.textContent = `⚡ ${ko ? '폴' : 'poll'} ${secs}s · ${rate}`
 }
 
 function renderWorld(ts) {
@@ -803,10 +818,10 @@ function renderWorld(ts) {
 }
 
 function startIdleWorld() {
-  // seed drone sprites to match saved count
+  applyReflex() // migrate veterans + push the saved reflex cadence to Rust
+  // seed drone sprites to match the reflex tier (visual of trained reflexes)
   drones.length = 0
-  for (let i = 0; i < game.drones; i++) spawnDrone()
-  applyOfflineAccrual()
+  for (let i = 0; i < reflexTier(); i++) spawnDrone()
   updateRateHud()
   if (!startIdleWorld._tick) startIdleWorld._tick = setInterval(idleTick, 1000)
   if (!worldRAF) { worldLast = performance.now(); worldRAF = requestAnimationFrame(renderWorld) }

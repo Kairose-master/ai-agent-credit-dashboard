@@ -6,7 +6,7 @@ mod protocol;
 use protocol::{ModelBackend, RegisterRequest, RegisterResponse};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
@@ -68,11 +68,19 @@ fn save_stored_config(app: &tauri::AppHandle, cfg: &StoredConfig) -> Result<(), 
 struct AppState {
     mining_flag: Arc<AtomicBool>,
     is_mining: Mutex<bool>,
+    // Poll cadence in seconds — the miner's "reflex speed". The game trains
+    // it faster (down to a floor) as 💎 accrue from real completed jobs, so
+    // buying reflexes genuinely makes the worker grab real jobs sooner.
+    poll_interval: Arc<AtomicU64>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        Self { mining_flag: Arc::new(AtomicBool::new(false)), is_mining: Mutex::new(false) }
+        Self {
+            mining_flag: Arc::new(AtomicBool::new(false)),
+            is_mining: Mutex::new(false),
+            poll_interval: Arc::new(AtomicU64::new(POLL_INTERVAL_SECS)),
+        }
     }
 }
 
@@ -238,6 +246,15 @@ async fn stop_mining(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Set the miner's poll cadence (the game's "reflex speed"). Clamped to a
+/// sane range so a maxed reflex tree still can't hammer the platform.
+#[tauri::command]
+fn set_poll_interval(secs: u64, state: State<'_, AppState>) -> u64 {
+    let clamped = secs.clamp(3, 30);
+    state.poll_interval.store(clamped, Ordering::Relaxed);
+    clamped
+}
+
 async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: ModelBackend, flag: Arc<AtomicBool>) {
     emit_event(&app, MiningEvent::Log { line: format!("Warming up {}…", backend.label()) });
     emit_event(&app, MiningEvent::Status { state: "warming".into(), tasks_completed: 0, tasks_failed: 0 });
@@ -336,7 +353,8 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
             }
         }
 
-        for _ in 0..POLL_INTERVAL_SECS {
+        let wait = app.state::<AppState>().poll_interval.load(Ordering::Relaxed).max(1);
+        for _ in 0..wait {
             if !flag.load(Ordering::SeqCst) {
                 break;
             }
@@ -428,6 +446,7 @@ fn main() {
             save_backend,
             start_mining,
             stop_mining,
+            set_poll_interval,
             get_wallet,
             withdraw_earnings,
             get_agent_card,
