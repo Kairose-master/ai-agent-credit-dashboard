@@ -1,0 +1,79 @@
+import { getSession } from '@/lib/get-session'
+import { isSuperAdminEmail } from '@/lib/admin'
+import { db } from '@/lib/db'
+import { agentTask, delegation } from '@/lib/db/schema'
+import { and, eq, inArray, lt } from 'drizzle-orm'
+
+export const maxDuration = 30
+
+/**
+ * GET /api/admin/health — one-glance operational status for the operator.
+ * Superadmin-only. Reads are best-effort: any sub-check that throws
+ * reports its error inline rather than failing the whole page, so this
+ * stays useful exactly when something is broken.
+ */
+export async function GET() {
+  const session = await getSession()
+  if (!isSuperAdminEmail(session?.user?.email)) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const health: Record<string, unknown> = { at: new Date().toISOString() }
+
+  // On-chain job market: open count, submitted-awaiting-settlement count,
+  // and the faucet wallet balance (the demand bootstrap's fuel gauge).
+  try {
+    const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
+    if (!isLaborMarketConfigured()) {
+      health.market = 'labor market not configured'
+    } else {
+      const { readJobs } = await import('@/lib/onchain/labor')
+      const jobs = await readJobs()
+      const open = jobs.filter((j) => j.status === 'Open').length
+      const submitted = jobs.filter((j) => j.status === 'Submitted').length
+      const disputed = jobs.filter((j) => j.status === 'Disputed').length
+
+      let faucet: unknown = 'not bootstrapped'
+      const { faucetAgentId } = await import('@/lib/job-faucet')
+      const fid = await faucetAgentId()
+      if (fid) {
+        const { agent } = await import('@/lib/db/schema')
+        const [fa] = await db.select().from(agent).where(eq(agent.id, fid))
+        const faucetOpen = fa?.smartAccountAddress
+          ? jobs.filter((j) => j.status === 'Open' && j.requester.toLowerCase() === fa.smartAccountAddress!.toLowerCase()).length
+          : 0
+        let balance: number | null = null
+        if (fa?.smartAccountAddress) {
+          const { usdcBalanceOf } = await import('@/lib/onchain/treasury')
+          balance = await usdcBalanceOf(fa.smartAccountAddress as `0x${string}`).catch(() => null)
+        }
+        faucet = { openJobs: faucetOpen, walletUsd: balance }
+      }
+      health.market = { open, submitted, disputed, faucet }
+    }
+  } catch (e) {
+    health.market = { error: e instanceof Error ? e.message : String(e) }
+  }
+
+  // Stuck agent tasks (running/processing past the reap window) + active
+  // delegations still being driven.
+  try {
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+    const stuck = (
+      await db
+        .select({ id: agentTask.id })
+        .from(agentTask)
+        .where(and(inArray(agentTask.status, ['running', 'processing']), lt(agentTask.updatedAt, cutoff)))
+    ).length
+    const activeDelegations = (await db.select({ id: delegation.id }).from(delegation).where(eq(delegation.status, 'posted'))).length
+    health.tasks = { stuckOver30min: stuck, activeDelegations }
+  } catch (e) {
+    health.tasks = { error: e instanceof Error ? e.message : String(e) }
+  }
+
+  // Settlement heartbeat wiring.
+  health.cronSecretConfigured = Boolean(process.env.CRON_SECRET)
+  health.faucetEnabled = process.env.FAUCET_DISABLED !== 'true'
+
+  return Response.json(health)
+}

@@ -446,6 +446,14 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS artifacts_task_idx ON artifacts (task_id);
 
+CREATE TABLE IF NOT EXISTS auth_attempts (
+  id     text PRIMARY KEY,
+  scope  text NOT NULL,
+  ip     text NOT NULL,
+  at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS auth_attempts_scope_ip_at_idx ON auth_attempts (scope, ip, at);
+
 CREATE TABLE IF NOT EXISTS oauth_clients (
   id              text PRIMARY KEY,
   name            text NOT NULL,

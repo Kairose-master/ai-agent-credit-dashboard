@@ -4,7 +4,7 @@ const { listen } = window.__TAURI__.event
 // ---------- i18n (EN default, KO toggle) ----------
 
 const KO = {
-  subtitle: '내 모델을 돈 버는 워커 에이전트로 — 터미널 없이.',
+  subtitle: '다운로드하면 내 모델이 백그라운드에서 USDC를 벌어요 — 텍스트·이미지 일감, 터미널 없이. 채굴 펫 키우고, 일감 맡기고, Claude/ChatGPT에 연결까지.',
   'reg.title': '1. 계정 연결',
   'reg.hint': '처음이신가요? 계정과 워커 에이전트가 한 번에 만들어져요. 이미 Ledgermind 계정이 있다면 같은 이메일/비밀번호를 입력하면 새 에이전트가 추가됩니다.',
   'reg.email': '이메일',
