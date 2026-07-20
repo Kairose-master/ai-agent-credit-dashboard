@@ -49,6 +49,13 @@ export interface DelegationSubtask {
   /** Terminal failure marker (refunded lineage, verification rejection…). */
   failed?: boolean
   failReason?: string
+  /** Integration-verification subtask: NOT posted as a paid job. Once every
+   *  work subtask is terminal, the platform assembles their outputs and
+   *  runs this subtask's testCode against the combined result — the
+   *  delegation only completes cleanly if it passes. This is how
+   *  interdependent work (a library split across workers, say) is proven
+   *  to actually fit together, not just individually graded. */
+  isIntegration?: boolean
 }
 
 /** Live view derived at read time — never persisted. */
@@ -126,7 +133,9 @@ Rules:
 - If (and only if) a subtask is "write a single Python function" shaped, include testCode: plain Python asserts calling that function. Otherwise omit testCode.
 - If one subtask's deliverable must EMBED another subtask's output (e.g. a guide that includes a code example a different worker writes), mark the exact spot with {{PART: exact title of that other subtask}} in the description's required output — the assembler substitutes the real output there after completion. Never invent other placeholder syntaxes.
 - Each subtask has deliverableKind: "text" (writing, code, analysis — the default), "image" (the worker must PRODUCE an image, e.g. a logo or illustration), or "audio" (the worker must produce an audio file, e.g. narration). Use non-text kinds only when the client's goal genuinely requires that output — such workers are scarcer, so never mark a describable-in-text deliverable as image/audio.
-- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "testCode"?}] — no commentary, no code fences.`
+- SHARED INTERFACES: when subtasks must fit together (they call each other's functions, share a type, or agree on a data shape), define the interface ONCE — exact function signatures, types, field names — and repeat that identical interface block VERBATIM in every subtask description that depends on it. Independent workers have no shared context, so a drifted signature means the pieces won't integrate.
+- INTEGRATION CHECK: if and only if the subtasks are code that must work together as one whole, add ONE FINAL subtask with "integration": true, "bountyUsd": 0, and "testCode": Python that imports/exercises the COMBINED pieces (assume every prior subtask's code is concatenated above your tests). This subtask is NOT sent to a worker — the platform auto-runs its tests against the assembled result, and the delegation only completes cleanly if they pass. Omit it entirely for non-code or independent work.
+- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "testCode"?, "integration"?}] — no commentary, no code fences.`
 
 /** Parse + validate raw planner output into subtasks. Pure — separated
  *  from the LLM call so the guardrails (count bounds, bounty bounds,
@@ -146,10 +155,20 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
   }
 
   const subtasks: DelegationSubtask[] = parsed.map((raw: any, i: number) => {
+    const isIntegration = raw?.integration === true
     const title = String(raw?.title ?? '').trim()
     const description = String(raw?.description ?? '').trim()
     const acceptanceCriteria = String(raw?.acceptanceCriteria ?? '').trim()
-    const bountyUsd = Number(raw?.bountyUsd)
+    const bountyUsd = isIntegration ? 0 : Number(raw?.bountyUsd)
+    const testCode = typeof raw?.testCode === 'string' && raw.testCode.trim() ? raw.testCode.trim() : null
+
+    if (isIntegration) {
+      // Integration subtask: platform-verified, not a paid job. Must carry
+      // the tests it will be checked against.
+      if (!title || !testCode) throw new Error(`Integration subtask ${i + 1} needs a title and testCode`)
+      return { title, description, acceptanceCriteria: acceptanceCriteria || 'Integration tests pass against the assembled result.', bountyUsd: 0, deliverableKind: 'text' as const, testCode, isIntegration: true }
+    }
+
     if (!title || !description || acceptanceCriteria.length < 10) {
       throw new Error(`Planner subtask ${i + 1} is missing title/description/criteria`)
     }
@@ -163,9 +182,20 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
       bountyUsd: Math.round(bountyUsd * 100) / 100,
       deliverableKind:
         raw?.deliverableKind === 'image' ? ('image' as const) : raw?.deliverableKind === 'audio' ? ('audio' as const) : ('text' as const),
-      testCode: typeof raw?.testCode === 'string' && raw.testCode.trim() ? raw.testCode.trim() : null,
+      testCode,
     }
   })
+
+  // At most one integration subtask, and it must be the last entry (it runs
+  // after every work subtask completes).
+  const integrationCount = subtasks.filter((s) => s.isIntegration).length
+  if (integrationCount > 1) throw new Error('Planner produced more than one integration subtask')
+  if (integrationCount === 1 && !subtasks[subtasks.length - 1].isIntegration) {
+    throw new Error('The integration subtask must be last')
+  }
+  if (subtasks.filter((s) => !s.isIntegration).length < 1) {
+    throw new Error('Planner must produce at least one work subtask')
+  }
 
   const total = subtasks.reduce((s, x) => s + x.bountyUsd, 0)
   if (total > budgetUsd + 0.01) {
@@ -204,7 +234,8 @@ export async function postDelegationJobs(
 
   // Check the escrow is actually affordable BEFORE the first on-chain call —
   // a raw "USDC: balance" revert mid-posting is undiagnosable for users.
-  const remaining = subtasks.filter((st) => st.onchainJobId === undefined)
+  // Integration subtasks are platform-verified (bounty 0) — never escrowed.
+  const remaining = subtasks.filter((st) => st.onchainJobId === undefined && !st.isIntegration)
   const needed = remaining.reduce((s, x) => s + x.bountyUsd, 0)
   try {
     const { usdcBalanceOf } = await import('@/lib/onchain/treasury')
@@ -223,6 +254,7 @@ export async function postDelegationJobs(
 
   for (let i = 0; i < subtasks.length; i++) {
     const st = subtasks[i]
+    if (st.isIntegration) continue // platform-verified after work completes — never posted/escrowed
     if (st.onchainJobId !== undefined) continue // already posted (confirm retried)
 
     const specHash = keccak256(
@@ -380,9 +412,21 @@ export function assembleFinalOutput(task: string, subtasks: DelegationSubtask[])
 
   const substituted = originals.map((out, i) => (out === null ? null : substituteInto(out, i)))
 
+  // The integration subtask is a verification result, not content — it
+  // renders as a footer, never a section.
+  const integration = subtasks.find((s) => s.isIntegration)
+  const integrationNote = integration
+    ? integration.failed
+      ? `\n\n---\n\n### ⚠️ Integration check: FAILED\n${integration.failReason ?? 'the pieces did not integrate'}`
+      : integration.output
+        ? `\n\n---\n\n### ✅ Integration check: passed\n${integration.output}`
+        : ''
+    : ''
+
   const sections: string[] = []
   const failures: string[] = []
   subtasks.forEach((st, i) => {
+    if (st.isIntegration) return // rendered as the footer note
     if (st.failed) {
       failures.push(`- ${st.title}: did not complete (${st.failReason ?? 'failed'})`)
       return
@@ -394,14 +438,13 @@ export function assembleFinalOutput(task: string, subtasks: DelegationSubtask[])
   // Everything merged into one host document, nothing failed → deliver the
   // document itself, exactly as the planner designed it.
   if (sections.length === 1 && failures.length === 0) {
-    const body = sections[0].replace(/^## .*\n\n/, '')
-    return body
+    return sections[0].replace(/^## .*\n\n/, '') + integrationNote
   }
 
   const parts = [`# Delegated task\n\n${task}\n`]
   sections.forEach((s) => parts.push(`\n---\n\n${s}\n`))
   if (failures.length > 0) parts.push(`\n---\n\n_Incomplete parts:_\n${failures.join('\n')}\n`)
-  return parts.join('')
+  return parts.join('') + integrationNote
 }
 
 /**
@@ -502,6 +545,44 @@ export async function tickDelegation(
     }
   }
 
+  // Integration gate: once every WORK subtask is terminal, run the
+  // integration subtask (if the planner added one) against the assembled
+  // result. The delegation only finalizes after this resolves, so
+  // interdependent pieces are proven to fit together — not just graded in
+  // isolation.
+  const workSubtasks = subtasks.filter((s) => !s.isIntegration)
+  const integration = subtasks.find((s) => s.isIntegration)
+  const workTerminal = workSubtasks.every((st) => st.failed || st.output != null)
+
+  if (integration && !integration.failed && integration.output == null && workTerminal) {
+    if (workSubtasks.some((s) => s.failed)) {
+      integration.failed = true
+      integration.failReason = 'skipped — a work subtask did not complete, so the assembled result is incomplete'
+    } else {
+      try {
+        const { extractPythonCode, gradeSubmission } = await import('@/lib/code-grading')
+        const assembledCode = workSubtasks.map((s) => extractPythonCode(s.output ?? '') ?? '').filter(Boolean).join('\n\n')
+        const grade = await gradeSubmission(assembledCode, integration.testCode!)
+        if (grade.passed === true) {
+          integration.output = `Integration tests PASSED.\n${grade.output.slice(0, 500)}`
+        } else if (grade.passed === false) {
+          integration.failed = true
+          integration.failReason = `integration tests FAILED — the pieces don't work together:\n${grade.output.slice(0, 500)}`
+        } else {
+          // Grader unavailable — don't block completion forever; record and pass through.
+          integration.output = `Integration check could not run (grader unavailable): ${grade.output.slice(0, 200)}`
+        }
+        changed = true
+        await logPlatformEvent(
+          integration.failed ? 'JOB_TESTS_FAILED' : 'JOB_TESTS_PASSED',
+          `Delegation integration check ${integration.failed ? 'FAILED' : 'passed'} — "${row.task.slice(0, 60)}"`,
+        )
+      } catch (error) {
+        console.error('[delegation] integration check failed to run:', error)
+      }
+    }
+  }
+
   const allTerminal = subtasks.every((st) => st.failed || st.output != null)
   if (allTerminal) {
     await db
@@ -513,7 +594,8 @@ export async function tickDelegation(
         updatedAt: new Date(),
       })
       .where(eq(delegation.id, row.id))
-    await logPlatformEvent('DELEGATION_COMPLETED', `Delegated task finished — ${subtasks.filter((s) => !s.failed).length}/${subtasks.length} parts delivered`)
+    const integFailed = integration?.failed ? ' (integration check FAILED)' : ''
+    await logPlatformEvent('DELEGATION_COMPLETED', `Delegated task finished — ${workSubtasks.filter((s) => !s.failed).length}/${workSubtasks.length} parts delivered${integFailed}`)
   } else if (changed) {
     await db.update(delegation).set({ subtasks, updatedAt: new Date() }).where(eq(delegation.id, row.id))
   }
