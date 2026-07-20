@@ -402,6 +402,19 @@ async fn delegation_status(app: tauri::AppHandle) -> Result<serde_json::Value, S
     protocol::delegation_status(&agent.platform_url, &agent.agent_id, &agent.secret).await
 }
 
+/// $LEDGER governance from the Miner: view/lock/vote/review/set_auto_vote.
+/// Worker-secret auth — earned-token governance, no money movement.
+#[tauri::command]
+async fn governance(
+    app: tauri::AppHandle,
+    action: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let cfg = load_stored_config(&app);
+    let agent = cfg.agent.ok_or_else(|| "No agent registered yet.".to_string())?;
+    protocol::governance(&agent.platform_url, &agent.agent_id, &agent.secret, &action, args).await
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -422,6 +435,7 @@ fn main() {
             confirm_delegation,
             discard_delegation,
             delegation_status,
+            governance,
             set_image_mining,
             open_url,
         ])

@@ -139,6 +139,38 @@
           <div id="delegate-list"></div>
         </details>
 
+        <details id="governance-section">
+          <summary data-i18n="gov.title">🗳️ Governance ($LEDGER)</summary>
+          <p class="hint" data-i18n="gov.hint">$LEDGER is earned from completed work — never bought. Lock it for voting power and steer the
+            platform. Your trusted agent can even vote for you; anything it's unsure about waits here for your call.</p>
+          <div class="stats gov-stats">
+            <div><span class="stat-value" id="gov-power">—</span><span class="stat-label" data-i18n="gov.power">voting power</span></div>
+            <div><span class="stat-value" id="gov-balance">—</span><span class="stat-label" data-i18n="gov.balance">$LEDGER free</span></div>
+            <div><span class="stat-value" id="gov-locked">—</span><span class="stat-label" data-i18n="gov.locked">locked</span></div>
+            <div><span class="stat-value" id="gov-earned">—</span><span class="stat-label" data-i18n="gov.earned">total earned</span></div>
+          </div>
+
+          <form id="gov-lock-form" class="gov-lock">
+            <label><span data-i18n="gov.lockAmount">Lock amount</span> <input type="number" id="gov-lock-amount" min="1" step="1" placeholder="0" /></label>
+            <label><span data-i18n="gov.lockWeeks">Weeks (1–52)</span> <input type="number" id="gov-lock-weeks" min="1" max="52" step="1" value="26" /></label>
+            <button type="submit" id="gov-lock-btn" data-i18n="gov.lock">Lock</button>
+          </form>
+
+          <div id="gov-delegate" class="gov-delegate" hidden>
+            <label class="toggle-row">
+              <input type="checkbox" id="gov-autovote-toggle" />
+              <span data-i18n="gov.autoVote">🤖 Let this agent auto-vote for me (needs rating A / score ≥ 760)</span>
+            </label>
+            <textarea id="gov-policy" rows="2" placeholder="Voting policy, e.g. favor lower fees and higher miner rewards"></textarea>
+            <button id="gov-policy-save" type="button" data-i18n="gov.savePolicy">Save policy</button>
+          </div>
+
+          <div id="gov-reviews" class="gov-reviews"></div>
+          <div id="gov-proposals" class="gov-proposals"></div>
+          <p class="error" id="gov-error" hidden></p>
+          <p class="success" id="gov-ok" hidden></p>
+        </details>
+
         <details id="withdraw-section">
           <summary data-i18n="withdraw.title">Withdraw earnings</summary>
           <p class="hint" data-i18n="withdraw.hint">Sends this worker's USDC balance to any wallet address you control (e.g. copy your

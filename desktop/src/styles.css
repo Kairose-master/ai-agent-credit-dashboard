@@ -322,3 +322,22 @@ details summary { cursor: pointer; }
   word-break: break-word;
   margin: 0;
 }
+
+/* ---------- Governance ($LEDGER) panel ---------- */
+.gov-stats { margin: 0.5rem 0 0.75rem; }
+.gov-lock { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.gov-lock label { flex: 1 1 6rem; }
+.gov-lock button { flex: 0 0 auto; }
+.gov-delegate { border-top: 1px solid var(--border, #2a2a2a); padding-top: 0.75rem; margin-bottom: 0.75rem; }
+.gov-delegate textarea { width: 100%; margin: 0.4rem 0; }
+.gov-reviews:not(:empty) { margin-bottom: 0.75rem; }
+.gov-review-card { border: 1px solid #b4881f; background: rgba(180, 136, 31, 0.08); border-radius: 8px; padding: 0.6rem 0.75rem; margin-bottom: 0.5rem; }
+.gov-review-head { display: flex; align-items: center; gap: 0.5rem; justify-content: space-between; }
+.gov-rec { font-size: 0.85em; opacity: 0.85; white-space: nowrap; }
+.gov-reason { color: #d8a533; font-size: 0.85em; margin: 0.3rem 0 0; }
+.gov-rationale { font-size: 0.85em; opacity: 0.8; margin: 0.2rem 0 0; font-style: italic; }
+.gov-review-actions, .gov-vote-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.gov-prop-card { border: 1px solid var(--border, #2a2a2a); border-radius: 8px; padding: 0.6rem 0.75rem; margin-bottom: 0.5rem; }
+.gov-tally { font-size: 0.85em; opacity: 0.85; margin: 0.3rem 0; }
+.gov-yourvote { font-size: 0.85em; opacity: 0.7; margin: 0.3rem 0 0; }
+.gov-vote-actions button { text-transform: capitalize; }
