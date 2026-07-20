@@ -50,6 +50,7 @@ const en: Dict = {
   'nav.riskAnalytics': 'Risk Analytics',
   'nav.insurance': 'Insurance',
   'nav.governance': 'Governance',
+  'nav.world': 'World',
   'nav.settings': 'Settings',
 
   'guide.title': 'Getting started',
@@ -659,6 +660,7 @@ const ko: Dict = {
   'nav.riskAnalytics': '리스크 분석',
   'nav.insurance': '보험',
   'nav.governance': '거버넌스',
+  'nav.world': '게임 월드',
   'nav.settings': '설정',
 
   'guide.title': '시작하기',
