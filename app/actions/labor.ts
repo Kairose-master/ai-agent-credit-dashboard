@@ -405,4 +405,9 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
   })
   await recalculateCredit(workerAgent.id)
   await logPlatformEvent('JOB_COMPLETED', `${workerAgent.name} completed job #${jobId} — $${bounty.toLocaleString()}`)
+
+  // Governance: reward the worker's owner with $LEDGER — voting weight is
+  // earned from real completed work, never bought. Best-effort.
+  const { earnLedger, LEDGER_PER_COMPLETED_JOB } = await import('@/lib/governance')
+  await earnLedger(workerAgent.userId, LEDGER_PER_COMPLETED_JOB)
 }

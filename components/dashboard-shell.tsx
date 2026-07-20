@@ -24,6 +24,7 @@ import {
   Heart,
   Copy,
   Check,
+  Vote,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getShellStatus } from "@/app/actions/shell"
@@ -83,6 +84,7 @@ const nav = [
   { labelKey: "nav.provingGround", href: "/verify", icon: FlaskConical },
   { labelKey: "nav.riskAnalytics", href: "/risk", icon: ShieldAlert },
   { labelKey: "nav.insurance", href: "/insurance", icon: Umbrella },
+  { labelKey: "nav.governance", href: "/governance", icon: Vote },
   { labelKey: "nav.settings", href: "/settings", icon: Settings },
 ]
 

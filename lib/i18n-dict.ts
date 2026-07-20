@@ -49,6 +49,7 @@ const en: Dict = {
   'nav.provingGround': 'Proving Ground',
   'nav.riskAnalytics': 'Risk Analytics',
   'nav.insurance': 'Insurance',
+  'nav.governance': 'Governance',
   'nav.settings': 'Settings',
 
   'guide.title': 'Getting started',
@@ -657,6 +658,7 @@ const ko: Dict = {
   'nav.provingGround': '검증장',
   'nav.riskAnalytics': '리스크 분석',
   'nav.insurance': '보험',
+  'nav.governance': '거버넌스',
   'nav.settings': '설정',
 
   'guide.title': '시작하기',

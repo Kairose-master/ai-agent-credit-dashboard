@@ -446,6 +446,39 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS artifacts_task_idx ON artifacts (task_id);
 
+CREATE TABLE IF NOT EXISTS gov_accounts (
+  user_id       text PRIMARY KEY,
+  balance       numeric(24,6) NOT NULL DEFAULT 0,
+  total_earned  numeric(24,6) NOT NULL DEFAULT 0,
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS gov_locks (
+  id         text PRIMARY KEY,
+  user_id    text NOT NULL,
+  amount     numeric(24,6) NOT NULL,
+  locked_at  timestamptz NOT NULL DEFAULT now(),
+  unlock_at  timestamptz NOT NULL,
+  withdrawn  boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS gov_locks_user_idx ON gov_locks (user_id);
+CREATE TABLE IF NOT EXISTS gov_proposals (
+  id               text PRIMARY KEY,
+  creator_user_id  text NOT NULL,
+  title            text NOT NULL,
+  body             text NOT NULL DEFAULT '',
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  closes_at        timestamptz NOT NULL,
+  status           text NOT NULL DEFAULT 'open'
+);
+CREATE TABLE IF NOT EXISTS gov_votes (
+  proposal_id  text NOT NULL,
+  user_id      text NOT NULL,
+  choice       text NOT NULL,
+  power        numeric(24,6) NOT NULL,
+  at           timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (proposal_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS auth_attempts (
   id     text PRIMARY KEY,
   scope  text NOT NULL,
