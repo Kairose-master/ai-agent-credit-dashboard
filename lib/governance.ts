@@ -16,7 +16,7 @@
  * tested — it's what makes votes fair.
  */
 import { db } from '@/lib/db'
-import { agent, govAccount, govLock, govProposal, govVote } from '@/lib/db/schema'
+import { agent, govAccount, govLock, govProposal, govVote, govDelegateReview } from '@/lib/db/schema'
 import { and, eq, desc, sql } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 
@@ -32,8 +32,39 @@ export const QUORUM_POWER = 50 // min total power cast for a result to count
 // behalf. High trust is the whole point — a flaky agent shouldn't move a
 // vote. Owner-configurable ceiling, platform-fixed floor.
 export const AUTO_VOTE_MIN_SCORE = 760
+// A delegate must be at least this confident to auto-cast. Below it — or if
+// the proposal could harm the least-advantaged — the recommendation is
+// escalated to the owner instead of cast. Borrowed from the algorithmica
+// auto-voter's human-in-the-loop guardrail. (0–1 scale.)
+export const CONFIDENCE_THRESHOLD = 0.7
 
 export type VoteChoice = 'for' | 'against' | 'abstain'
+
+/** A delegate's structured recommendation for one proposal. */
+export interface DelegateDecision {
+  choice: VoteChoice
+  confidence: number // 0–1
+  rationale: string
+  /** The delegate's own call that a human should decide this one. */
+  escalate: boolean
+  /** High minority-impact — harms the least-advantaged / small participants. */
+  minorityImpactHigh: boolean
+}
+
+/** The escalation gate, kept pure so it's unit-tested: a decision goes to
+ *  human review if the delegate asked to escalate, OR it's high-minority-
+ *  impact, OR it's below the confidence floor. Server-enforced — the model
+ *  can never suppress it by omitting a flag. */
+export function mustEscalate(d: DelegateDecision, threshold = CONFIDENCE_THRESHOLD): boolean {
+  return d.escalate || d.minorityImpactHigh || d.confidence < threshold
+}
+
+/** Human-readable reason for an escalation (drives the review card). */
+export function escalationReason(d: DelegateDecision, threshold = CONFIDENCE_THRESHOLD): string {
+  if (d.minorityImpactHigh) return 'Could significantly harm the least-advantaged — a human should decide.'
+  if (d.confidence < threshold) return `Low confidence (${(d.confidence * 100).toFixed(0)}%) — below the ${(threshold * 100).toFixed(0)}% auto-vote floor.`
+  return 'The delegate flagged this for your judgment.'
+}
 
 // ---------- pure math (unit-tested) ----------
 
@@ -237,7 +268,7 @@ export async function castVote(
   userId: string,
   proposalId: string,
   choice: VoteChoice,
-  opts: { viaAgentId?: string | null; rationale?: string | null } = {},
+  opts: { viaAgentId?: string | null; rationale?: string | null; confidence?: number | null } = {},
 ) {
   const [prop] = await db.select().from(govProposal).where(eq(govProposal.id, proposalId))
   if (!prop) throw new Error('Proposal not found')
@@ -258,6 +289,7 @@ export async function castVote(
     power: power.toFixed(6),
     viaAgentId: opts.viaAgentId ?? null,
     rationale: opts.rationale ? opts.rationale.slice(0, 300) : null,
+    confidence: opts.confidence != null ? Math.max(0, Math.min(1, opts.confidence)).toFixed(3) : null,
   })
   return { power }
 }
@@ -312,13 +344,16 @@ export async function setAutoVote(agentId: string, ownerUserId: string, enabled:
 }
 
 /** Ask an owner's LLM (BYOK, else platform key) how their delegate should
- *  vote on one proposal, given the standing policy. Returns null on any
+ *  vote. Two-hat single call (analyst then delegate), modeled on the
+ *  algorithmica auto-voter: neutrally assess who's affected — especially the
+ *  least-advantaged — THEN recommend per the owner's policy, with a
+ *  self-reported confidence and an escalate flag. Returns null on any
  *  failure — auto-voting is strictly best-effort. */
 async function decideDelegateVote(
   userId: string,
   policy: string,
   prop: { title: string; body: string },
-): Promise<{ choice: VoteChoice; rationale: string } | null> {
+): Promise<DelegateDecision | null> {
   let complete: (system: string, userMsg: string, maxTokens: number) => Promise<string>
   try {
     const { resolveLlm } = await import('@/lib/delegation')
@@ -327,14 +362,18 @@ async function decideDelegateVote(
     return null // no LLM key for this owner — skip, don't guess
   }
   const system =
-    'You are an AI governance delegate casting a vote on behalf of your owner in an AI-agent labor marketplace. ' +
-    "Your owner's standing voting policy below is your ONLY mandate — vote the way it directs, not your own preferences. " +
-    'Output ONLY strict JSON: {"choice":"for"|"against"|"abstain","rationale":"<=160 chars, grounded in the policy"}. ' +
+    'You are an AI governance delegate voting on behalf of your owner in an AI-agent labor marketplace. ' +
+    'First act as a neutral ANALYST: who is affected by this proposal, and could it harm the least-advantaged participants ' +
+    '(new/small miners, low-credit agents, minority stakeholders)? Then act as the DELEGATE: recommend a vote that follows ' +
+    "the owner's standing policy below — the policy is your mandate, not your own preferences. Be honest about uncertainty. " +
+    'Output ONLY strict JSON: {"choice":"for"|"against"|"abstain","confidence":0.0-1.0,"rationale":"<=160 chars grounded in the policy",' +
+    '"escalate":true|false,"minorityImpactHigh":true|false}. ' +
+    'Set minorityImpactHigh=true if the proposal could significantly harm the least-advantaged. Set escalate=true whenever a human should decide. ' +
     'Use "abstain" when the policy does not clearly favor either side. No commentary, no code fences.'
   const userMsg = `OWNER VOTING POLICY:\n${policy}\n\nPROPOSAL TITLE: ${prop.title}\n\nPROPOSAL BODY:\n${prop.body || '(no description provided)'}`
   let raw: string
   try {
-    raw = await complete(system, userMsg, 400)
+    raw = await complete(system, userMsg, 600)
   } catch {
     return null
   }
@@ -342,21 +381,53 @@ async function decideDelegateVote(
     const j = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '').trim())
     const choice = j?.choice
     if (choice !== 'for' && choice !== 'against' && choice !== 'abstain') return null
-    return { choice, rationale: String(j?.rationale ?? '').slice(0, 200) }
+    const confidence = Number(j?.confidence)
+    return {
+      choice,
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0, // unparseable confidence → 0 → escalates
+      rationale: String(j?.rationale ?? '').slice(0, 200),
+      escalate: j?.escalate === true,
+      minorityImpactHigh: j?.minorityImpactHigh === true,
+    }
   } catch {
     return null // unparseable — retry next tick rather than cast garbage
   }
 }
 
+/** Park an escalated recommendation for the owner to confirm/dismiss.
+ *  Upsert so re-ticks refresh (never duplicate) a still-pending review. */
+async function upsertReview(proposalId: string, userId: string, viaAgentId: string, d: DelegateDecision) {
+  await db
+    .insert(govDelegateReview)
+    .values({
+      proposalId,
+      userId,
+      viaAgentId,
+      choice: d.choice,
+      confidence: d.confidence.toFixed(3),
+      rationale: d.rationale,
+      reason: escalationReason(d),
+      status: 'pending',
+    })
+    .onConflictDoUpdate({
+      target: [govDelegateReview.proposalId, govDelegateReview.userId],
+      set: { choice: d.choice, confidence: d.confidence.toFixed(3), rationale: d.rationale, reason: escalationReason(d) },
+    })
+    .catch(() => undefined)
+}
+
 /** Cast delegate votes for every eligible agent on every open proposal it
- *  hasn't voted on yet. Idempotent: the immutable one-vote-per-owner rule
- *  means each (proposal, owner) triggers at most one LLM decision ever, so
- *  this is cheap to run on the heartbeat. Best-effort throughout. */
-export async function runAutoVotes(now = new Date()): Promise<{ openProposals: number; delegates: number; cast: number }> {
+ *  hasn't handled yet. Confidence-gated: a low-confidence or minority-
+ *  harming recommendation is parked for owner review (gov_delegate_reviews)
+ *  rather than cast. Idempotent — a proposal already voted OR already under
+ *  review triggers no new LLM call, so this is cheap on the heartbeat. */
+export async function runAutoVotes(
+  now = new Date(),
+): Promise<{ openProposals: number; delegates: number; cast: number; escalated: number }> {
   const openProps = (await db.select().from(govProposal).where(eq(govProposal.status, 'open'))).filter(
     (p) => p.closesAt > now,
   )
-  if (openProps.length === 0) return { openProposals: 0, delegates: 0, cast: 0 }
+  if (openProps.length === 0) return { openProposals: 0, delegates: 0, cast: 0, escalated: 0 }
 
   const rows = await db.select().from(agent).where(eq(agent.autoVote, true))
   const delegates = pickDelegateByUser(
@@ -368,31 +439,121 @@ export async function runAutoVotes(now = new Date()): Promise<{ openProposals: n
       autoVote: a.autoVote,
     })),
   )
-  if (delegates.size === 0) return { openProposals: openProps.length, delegates: 0, cast: 0 }
+  if (delegates.size === 0) return { openProposals: openProps.length, delegates: 0, cast: 0, escalated: 0 }
 
   let cast = 0
+  let escalated = 0
   for (const prop of openProps) {
     for (const [userId, del] of delegates) {
-      const [existing] = await db
+      const [voted] = await db
         .select({ userId: govVote.userId })
         .from(govVote)
         .where(and(eq(govVote.proposalId, prop.id), eq(govVote.userId, userId)))
-      if (existing) continue // already voted (manually or by a prior tick)
+      if (voted) continue // already voted (manually or by a prior tick)
+      const [reviewed] = await db
+        .select({ userId: govDelegateReview.userId })
+        .from(govDelegateReview)
+        .where(
+          and(
+            eq(govDelegateReview.proposalId, prop.id),
+            eq(govDelegateReview.userId, userId),
+            eq(govDelegateReview.status, 'pending'),
+          ),
+        )
+      if (reviewed) continue // already awaiting the owner — don't re-ask the LLM
       const power = await currentVotingPower(userId)
       if (power <= 0) continue // nothing locked → no weight to cast
-      const decision = await decideDelegateVote(userId, del.votePolicy ?? '', { title: prop.title, body: prop.body }).catch(
-        () => null,
-      )
+      const decision = await decideDelegateVote(userId, del.votePolicy ?? '', {
+        title: prop.title,
+        body: prop.body,
+      }).catch(() => null)
       if (!decision) continue
+
+      if (mustEscalate(decision)) {
+        await upsertReview(prop.id, userId, del.id, decision)
+        escalated++
+        continue // human-in-the-loop — never silently cast an uncertain/harmful vote
+      }
       try {
-        await castVote(userId, prop.id, decision.choice, { viaAgentId: del.id, rationale: decision.rationale })
+        await castVote(userId, prop.id, decision.choice, {
+          viaAgentId: del.id,
+          rationale: decision.rationale,
+          confidence: decision.confidence,
+        })
         cast++
       } catch {
         // raced with a manual vote or the window just closed — fine, skip.
       }
     }
   }
-  return { openProposals: openProps.length, delegates: delegates.size, cast }
+  return { openProposals: openProps.length, delegates: delegates.size, cast, escalated }
+}
+
+export interface DelegateReviewView {
+  proposalId: string
+  proposalTitle: string
+  choice: VoteChoice
+  confidence: number | null
+  rationale: string | null
+  reason: string | null
+  closesAt: string
+}
+
+/** Pending delegate recommendations the owner still needs to decide on
+ *  (open proposals only). */
+export async function listPendingReviews(userId: string): Promise<DelegateReviewView[]> {
+  const reviews = await db
+    .select()
+    .from(govDelegateReview)
+    .where(and(eq(govDelegateReview.userId, userId), eq(govDelegateReview.status, 'pending')))
+  if (reviews.length === 0) return []
+  const now = new Date()
+  const out: DelegateReviewView[] = []
+  for (const r of reviews) {
+    const [prop] = await db.select().from(govProposal).where(eq(govProposal.id, r.proposalId))
+    if (!prop || prop.closesAt <= now) continue // closed → not actionable
+    out.push({
+      proposalId: r.proposalId,
+      proposalTitle: prop.title,
+      choice: r.choice as VoteChoice,
+      confidence: r.confidence != null ? Number(r.confidence) : null,
+      rationale: r.rationale,
+      reason: r.reason,
+      closesAt: prop.closesAt.toISOString(),
+    })
+  }
+  return out
+}
+
+/** The owner resolves an escalated recommendation: 'accept' casts the
+ *  delegate's recommended choice (attributed to the delegate, marked as
+ *  owner-confirmed), 'dismiss' just clears it. Owner-scoped by userId. */
+export async function resolveDelegateReview(userId: string, proposalId: string, action: 'accept' | 'dismiss') {
+  const [review] = await db
+    .select()
+    .from(govDelegateReview)
+    .where(and(eq(govDelegateReview.proposalId, proposalId), eq(govDelegateReview.userId, userId)))
+  if (!review || review.status !== 'pending') throw new Error('No pending review for this proposal')
+
+  if (action === 'dismiss') {
+    await db
+      .update(govDelegateReview)
+      .set({ status: 'dismissed' })
+      .where(and(eq(govDelegateReview.proposalId, proposalId), eq(govDelegateReview.userId, userId)))
+    return { ok: true as const, cast: false }
+  }
+
+  // accept → cast the recommended choice, then mark the review resolved.
+  const r = await castVote(userId, proposalId, review.choice as VoteChoice, {
+    viaAgentId: review.viaAgentId,
+    rationale: review.rationale ? `(owner-confirmed) ${review.rationale}` : '(owner-confirmed)',
+    confidence: review.confidence != null ? Number(review.confidence) : null,
+  })
+  await db
+    .update(govDelegateReview)
+    .set({ status: 'voted' })
+    .where(and(eq(govDelegateReview.proposalId, proposalId), eq(govDelegateReview.userId, userId)))
+  return { ok: true as const, cast: true, power: r.power }
 }
 
 export interface ProposalView {

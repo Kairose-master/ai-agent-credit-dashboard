@@ -615,9 +615,37 @@ export const govVote = pgTable(
     power: decimal('power', { precision: 24, scale: 6 }).notNull(),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
     // Set when an AI delegate cast this vote on the owner's behalf: which
-    // agent decided, and its one-line rationale (for transparency in the UI).
+    // agent decided, its one-line rationale, and how confident it was
+    // (0–1) — for transparency in the UI.
     viaAgentId: text('via_agent_id'),
     rationale: text('rationale'),
+    confidence: decimal('confidence', { precision: 4, scale: 3 }),
+  },
+  (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
+)
+
+/**
+ * Escalated delegate recommendations awaiting the owner's decision.
+ *
+ * Modeled on the algorithmica-agent-dashboard auto-voter: a delegate NEVER
+ * silently casts a vote it isn't sure about, or one that could harm the
+ * least-advantaged. When confidence < threshold, or the proposal carries
+ * high minority-impact, the recommendation lands here (status 'pending')
+ * instead of in gov_votes — a human must confirm or dismiss it. This is the
+ * human-in-the-loop guardrail that makes trusting a delegate safe.
+ */
+export const govDelegateReview = pgTable(
+  'gov_delegate_reviews',
+  {
+    proposalId: text('proposal_id').notNull(),
+    userId: text('user_id').notNull(),
+    viaAgentId: text('via_agent_id').notNull(),
+    choice: text('choice').notNull(), // recommended: 'for' | 'against' | 'abstain'
+    confidence: decimal('confidence', { precision: 4, scale: 3 }),
+    rationale: text('rationale'),
+    reason: text('reason'), // why it was escalated (low confidence / minority impact)
+    status: text('status').notNull().default('pending'), // 'pending' | 'voted' | 'dismissed'
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
 )

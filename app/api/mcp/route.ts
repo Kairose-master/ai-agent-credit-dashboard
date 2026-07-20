@@ -576,14 +576,21 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
     }
 
     case 'governance': {
-      const { govSummary, listProposals } = await import('@/lib/governance')
-      const [summary, proposals] = await Promise.all([govSummary(auth.userId), listProposals(auth.userId, 10)])
+      const { govSummary, listProposals, listPendingReviews } = await import('@/lib/governance')
+      const [summary, proposals, reviews] = await Promise.all([
+        govSummary(auth.userId),
+        listProposals(auth.userId, 10),
+        listPendingReviews(auth.userId),
+      ])
       const head = `$LEDGER — balance ${summary.balance.toFixed(1)}, locked ${summary.locked.toFixed(1)}, voting power ${summary.votingPower.toFixed(1)} (earned ${summary.totalEarned.toFixed(1)} total).`
       const open = proposals.filter((p) => p.open)
       const propLines = open.length
         ? open.map((p) => `- ${p.id} "${p.title}" — For ${p.tally.for.toFixed(1)} / Against ${p.tally.against.toFixed(1)} / Abstain ${p.tally.abstain.toFixed(1)} · closes ${new Date(p.closesAt).toISOString().slice(0, 10)}${p.yourVote ? ` · you voted ${p.yourVote}` : ''}`).join('\n')
         : '(no open proposals)'
-      return toolText(id, `${head}\n\nOpen proposals:\n${propLines}\n\nVote with the vote tool. Earn $LEDGER by completing jobs; lock it on the /governance page for power.`)
+      const reviewLine = reviews.length
+        ? `\n\n⚠ ${reviews.length} delegate recommendation(s) need your review (low confidence or minority-impact) — resolve them on /governance.`
+        : ''
+      return toolText(id, `${head}\n\nOpen proposals:\n${propLines}${reviewLine}\n\nVote with the vote tool. Earn $LEDGER by completing jobs; lock it on the /governance page for power.`)
     }
 
     case 'vote': {
