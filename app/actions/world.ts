@@ -15,6 +15,7 @@ import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent, artifact, delegation, jobSpec } from '@/lib/db/schema'
 import { desc, eq, inArray } from 'drizzle-orm'
+import { faucetAgentId } from '@/lib/job-faucet'
 
 export interface WorldAgent {
   id: string
@@ -170,40 +171,42 @@ export async function getWorldState(): Promise<WorldState> {
       mine: myAddresses.has(j.requester?.toLowerCase?.() ?? ''),
     }))
 
-  // ---- loot vault: real image/audio deliverables the viewer's agents made -
-  // Scoped to the viewer's own agents (privacy) — the multimodal output of
-  // the economy, rendered as thumbnails and players instead of a status row.
-  const myAgentIds = myAgents.map((a) => a.id)
-  if (myAgentIds.length) {
-    const nameById = new Map(myAgents.map((a) => [a.id, a.name]))
-    const arts = await db
-      .select({ id: artifact.id, mime: artifact.mime, name: artifact.name, taskId: artifact.taskId, agentId: artifact.agentId })
-      .from(artifact)
-      .where(inArray(artifact.agentId, myAgentIds))
-      .orderBy(desc(artifact.createdAt))
-      .limit(24)
-      .catch(() => [] as { id: string; mime: string; name: string; taskId: string; agentId: string }[])
+  // ---- loot vault: real image/audio deliverables --------------------------
+  // Shows the viewer's OWN agents' output AND anything produced for a house
+  // (faucet) job — those are public sample bounties, so their results are
+  // safe to display to everyone. Private delegated work stays visible only to
+  // its requester (their own agent produced it → the "mine" branch).
+  const myAgentIds = new Set(myAgents.map((a) => a.id))
+  const faucetId = await faucetAgentId().catch(() => null)
+  const rows = await db
+    .select({
+      id: artifact.id,
+      mime: artifact.mime,
+      name: artifact.name,
+      agentId: artifact.agentId,
+      title: jobSpec.title,
+      requesterAgentId: jobSpec.requesterAgentId,
+      producer: agent.name,
+    })
+    .from(artifact)
+    .leftJoin(jobSpec, eq(jobSpec.agentTaskId, artifact.taskId))
+    .leftJoin(agent, eq(agent.id, artifact.agentId))
+    .orderBy(desc(artifact.createdAt))
+    .limit(60)
+    .catch(() => [] as { id: string; mime: string; name: string; agentId: string; title: string | null; requesterAgentId: string | null; producer: string | null }[])
 
-    const media = arts.filter((a) => a.mime.startsWith('image/') || a.mime.startsWith('audio/'))
-    const titleByTask = new Map<string, string>()
-    if (media.length) {
-      const taskIds = [...new Set(media.map((a) => a.taskId))]
-      const titleRows = await db
-        .select({ agentTaskId: jobSpec.agentTaskId, title: jobSpec.title })
-        .from(jobSpec)
-        .where(inArray(jobSpec.agentTaskId, taskIds))
-        .catch(() => [] as { agentTaskId: string | null; title: string }[])
-      for (const r of titleRows) if (r.agentTaskId) titleByTask.set(r.agentTaskId, r.title)
-    }
-    state.gallery = media.slice(0, 8).map((a) => ({
-      id: a.id,
-      kind: a.mime.startsWith('image/') ? ('image' as const) : ('audio' as const),
-      mime: a.mime,
-      name: a.name,
-      title: titleByTask.get(a.taskId) ?? a.name,
-      agentName: nameById.get(a.agentId) ?? 'agent',
+  state.gallery = rows
+    .filter((r) => r.mime.startsWith('image/') || r.mime.startsWith('audio/'))
+    .filter((r) => myAgentIds.has(r.agentId) || (faucetId !== null && r.requesterAgentId === faucetId))
+    .slice(0, 8)
+    .map((r) => ({
+      id: r.id,
+      kind: r.mime.startsWith('image/') ? ('image' as const) : ('audio' as const),
+      mime: r.mime,
+      name: r.name,
+      title: r.title ?? r.name,
+      agentName: r.producer ?? 'agent',
     }))
-  }
 
   // ---- delegations as quest trees --------------------------------------
   try {
