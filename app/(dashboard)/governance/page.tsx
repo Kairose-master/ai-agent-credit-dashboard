@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getGovernance, lockLedger, openProposal, voteOnProposal, setAgentAutoVote } from '@/app/actions/governance'
+import { getGovernance, lockLedger, openProposal, voteOnProposal, setAgentAutoVote, resolveReview } from '@/app/actions/governance'
 
 type Gov = Awaited<ReturnType<typeof getGovernance>>
 type VotingAgent = Gov['agents'][number]
@@ -189,7 +189,9 @@ export default function GovernancePage() {
           Let a <strong>trusted agent</strong> (credit score ≥ 760, rating A) cast <strong>your</strong> $LEDGER vote on
           open proposals automatically, following a stance you set — so you don&apos;t have to be online. The platform
           heartbeat asks the agent how your policy applies to each proposal and votes with your locked voting power. One
-          delegate per account (your highest-trust enabled agent).
+          delegate per account (your highest-trust enabled agent). It only auto-casts when it&apos;s{' '}
+          <strong>≥ 70% confident</strong>; anything uncertain, or that could hurt the least-advantaged, is parked above
+          for you to decide — never cast silently.
         </p>
         <div className="mt-3 space-y-2">
           {gov?.agents.length === 0 ? (
@@ -206,6 +208,54 @@ export default function GovernancePage() {
           )}
         </div>
       </div>
+
+      {gov && gov.reviews.length > 0 && (
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-5">
+          <h2 className="font-semibold">🔍 Needs your review</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Your delegate wasn&apos;t confident enough to auto-vote these — either it&apos;s a close call, or the proposal
+            could hurt the least-advantaged. It never casts those silently. Confirm its recommendation or dismiss it.
+          </p>
+          <div className="mt-3 space-y-3">
+            {gov.reviews.map((r) => (
+              <div key={r.proposalId} className="rounded-md border border-border bg-background p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{r.proposalTitle}</span>
+                  <span className="rounded bg-secondary px-2 py-0.5 text-xs">
+                    recommends <strong>{r.choice}</strong>
+                  </span>
+                  {r.confidence != null && (
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {(r.confidence * 100).toFixed(0)}% confident
+                    </span>
+                  )}
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    closes {new Date(r.closesAt).toLocaleDateString()}
+                  </span>
+                </div>
+                {r.reason && <p className="mt-1 text-xs text-warning">⚠ {r.reason}</p>}
+                {r.rationale && <p className="mt-1 text-sm text-muted-foreground italic">🤖 “{r.rationale}”</p>}
+                <div className="mt-2 flex gap-2">
+                  <button
+                    disabled={busy}
+                    onClick={() => run(() => resolveReview(r.proposalId, 'accept'))}
+                    className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+                  >
+                    Vote {r.choice}
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => run(() => resolveReview(r.proposalId, 'dismiss'))}
+                    className="h-8 rounded-md border border-border px-3 text-xs hover:bg-secondary/50 disabled:opacity-50"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <h2 className="mb-3 font-semibold">Proposals</h2>

@@ -10,6 +10,8 @@ import {
   listProposals,
   listVotingAgents,
   setAutoVote,
+  listPendingReviews,
+  resolveDelegateReview,
   type VoteChoice,
 } from '@/lib/governance'
 
@@ -21,12 +23,24 @@ async function requireUser() {
 
 export async function getGovernance() {
   const userId = await requireUser()
-  const [summary, proposals, agents] = await Promise.all([
+  const [summary, proposals, agents, reviews] = await Promise.all([
     govSummary(userId),
     listProposals(userId),
     listVotingAgents(userId),
+    listPendingReviews(userId),
   ])
-  return { summary, proposals, agents }
+  return { summary, proposals, agents, reviews }
+}
+
+export async function resolveReview(proposalId: string, action: 'accept' | 'dismiss') {
+  const userId = await requireUser()
+  try {
+    const r = await resolveDelegateReview(userId, proposalId, action)
+    revalidatePath('/governance')
+    return r
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export async function setAgentAutoVote(agentId: string, enabled: boolean, policy: string) {

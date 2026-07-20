@@ -484,6 +484,20 @@ CREATE TABLE IF NOT EXISTS gov_votes (
 );
 ALTER TABLE gov_votes ADD COLUMN IF NOT EXISTS via_agent_id text;
 ALTER TABLE gov_votes ADD COLUMN IF NOT EXISTS rationale text;
+ALTER TABLE gov_votes ADD COLUMN IF NOT EXISTS confidence numeric(4,3);
+
+CREATE TABLE IF NOT EXISTS gov_delegate_reviews (
+  proposal_id  text NOT NULL,
+  user_id      text NOT NULL,
+  via_agent_id text NOT NULL,
+  choice       text NOT NULL,
+  confidence   numeric(4,3),
+  rationale    text,
+  reason       text,
+  status       text NOT NULL DEFAULT 'pending',
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (proposal_id, user_id)
+);
 
 CREATE TABLE IF NOT EXISTS auth_attempts (
   id     text PRIMARY KEY,

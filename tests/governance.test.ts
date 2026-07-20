@@ -5,12 +5,24 @@ import {
   tallyVotes,
   isAutoVoteEligible,
   pickDelegateByUser,
+  mustEscalate,
   AUTO_VOTE_MIN_SCORE,
+  CONFIDENCE_THRESHOLD,
   MAX_LOCK_WEEKS,
   WEEK_MS,
   QUORUM_POWER,
   type AutoVoteAgent,
+  type DelegateDecision,
 } from '@/lib/governance'
+
+const mkDecision = (o: Partial<DelegateDecision> = {}): DelegateDecision => ({
+  choice: 'for',
+  confidence: 0.9,
+  rationale: 'aligns with policy',
+  escalate: false,
+  minorityImpactHigh: false,
+  ...o,
+})
 
 const mkAgent = (o: Partial<AutoVoteAgent> & { id: string; userId: string }): AutoVoteAgent => ({
   creditScore: AUTO_VOTE_MIN_SCORE,
@@ -122,5 +134,23 @@ describe('pickDelegateByUser (one delegate per owner)', () => {
 
   it('returns an empty map when nobody is eligible', () => {
     expect(pickDelegateByUser([mkAgent({ id: 'a', userId: 'u', creditScore: 100 })]).size).toBe(0)
+  })
+})
+
+describe('mustEscalate (human-in-the-loop guardrail)', () => {
+  it('auto-casts a confident, low-impact recommendation', () => {
+    expect(mustEscalate(mkDecision({ confidence: 0.9 }))).toBe(false)
+  })
+
+  it('escalates below the confidence floor', () => {
+    expect(mustEscalate(mkDecision({ confidence: CONFIDENCE_THRESHOLD - 0.01 }))).toBe(true)
+  })
+
+  it('always escalates high minority-impact, even at full confidence', () => {
+    expect(mustEscalate(mkDecision({ confidence: 1, minorityImpactHigh: true }))).toBe(true)
+  })
+
+  it('honors the delegate\'s own escalate flag', () => {
+    expect(mustEscalate(mkDecision({ confidence: 1, escalate: true }))).toBe(true)
   })
 })
