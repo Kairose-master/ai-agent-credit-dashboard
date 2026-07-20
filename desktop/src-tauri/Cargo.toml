@@ -1,6 +1,6 @@
 [package]
 name = "ledgermind-miner"
-version = "0.8.1"
+version = "0.8.2"
 description = "Ledgermind Miner — run a local model as a paid worker agent, no terminal required."
 edition = "2021"
 
