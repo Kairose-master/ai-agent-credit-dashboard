@@ -273,11 +273,15 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
     console.error('[runtime/callback] labor market auto-submit failed:', error)
   }
 
-  // Two independent grading paths produce the same verdict shape:
-  // Python asserts for code jobs, a vision LLM for image deliverables.
-  // Jobs with neither stay ungraded (manual requester review).
+  // Three independent grading paths produce the same verdict shape:
+  // Python asserts for code jobs, a vision LLM for image deliverables,
+  // and an LLM reviewer for text jobs with acceptance criteria. Only
+  // audio/video/file (binary the graders can't inspect) and text jobs
+  // without criteria stay ungraded for manual requester review.
   const isImageJob = spec.deliverableKind === 'image'
-  if (!spec.testCode && !isImageJob) return
+  const isLlmGradableText =
+    !spec.testCode && !isImageJob && (spec.deliverableKind ?? 'text') === 'text' && Boolean(spec.acceptanceCriteria?.trim())
+  if (!spec.testCode && !isImageJob && !isLlmGradableText) return
   try {
     let grade: { passed: boolean | null; output: string; gradedAt: string }
     if (isImageJob) {
@@ -288,6 +292,13 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         : []
       const { gradeImageSubmission } = await import('@/lib/vision-grading')
       grade = await gradeImageSubmission(spec, arts, requesterAgent?.userId ?? null)
+    } else if (isLlmGradableText) {
+      const { agent } = await import('@/lib/db/schema')
+      const [requesterAgent] = spec.requesterAgentId
+        ? await db.select().from(agent).where(eq(agent.id, spec.requesterAgentId))
+        : []
+      const { gradeTextSubmission } = await import('@/lib/text-grading')
+      grade = await gradeTextSubmission(spec, output, requesterAgent?.userId ?? null)
     } else {
       const { extractPythonCode, gradeSubmission } = await import('@/lib/code-grading')
       const solutionCode = extractPythonCode(output)
@@ -318,7 +329,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
       })
       await logPlatformEvent(
         grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
-        `"${spec.title}" — ${isImageJob ? 'vision review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
+        `"${spec.title}" — ${isImageJob ? 'vision review' : isLlmGradableText ? 'LLM review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
       )
 
       // Mirror the graded fact into the ERC-8004 Validation Registry — but
@@ -335,7 +346,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         await publishValidation(
           spec.workerAgentId,
           grade.passed ? 100 : 0,
-          isImageJob ? 'vision-review' : 'acceptance-tests',
+          isImageJob ? 'vision-review' : isLlmGradableText ? 'llm-review' : 'acceptance-tests',
           `job-${spec.onchainJobId}`,
         )
       }

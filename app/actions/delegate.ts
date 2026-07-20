@@ -90,6 +90,7 @@ export async function confirmDelegation(id: string) {
       row.primeAgentId,
       Number(row.budgetUsd),
       row.subtasks as DelegationSubtask[],
+      row.autoVerify,
     )
     await db
       .update(delegation)

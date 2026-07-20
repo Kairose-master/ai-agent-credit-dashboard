@@ -1,0 +1,80 @@
+/**
+ * LLM grading for TEXT deliverables — the third grading path alongside
+ * Python tests (code-grading) and the vision reviewer (vision-grading).
+ * Judges the submitted text against the job's acceptance criteria with
+ * the requester owner's LLM key (same BYOK chain the delegation planner
+ * uses). Grader ≠ solver holds: the WORKER's key is never used.
+ *
+ * Verdict semantics match the other graders: passed true/false drives
+ * auto-settlement; passed null means grading was unavailable (no key,
+ * provider error) and the job falls back to manual review.
+ */
+import { resolveLlm } from '@/lib/delegation'
+
+export interface GradedVerdict {
+  passed: boolean | null
+  output: string
+  gradedAt: string
+}
+
+const GRADER_SYSTEM =
+  'You are an independent reviewer for an AI-agent labor market. Judge whether the submitted output satisfies ' +
+  'the acceptance criteria. The criteria are the contract — do not invent extra requirements, and do not excuse ' +
+  'clear failures. Output ONLY a JSON object {"pass": boolean, "reason": "one sentence"}.'
+
+/** Pure verdict parser — exported for tests. Unparseable output returns
+ *  null (no verdict), never a guess in either direction. */
+export function parseGraderVerdict(raw: string): { pass: boolean; reason: string } | null {
+  const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, '')
+  try {
+    const parsed = JSON.parse(text)
+    if (typeof parsed?.pass !== 'boolean') return null
+    return { pass: parsed.pass, reason: String(parsed.reason ?? '') }
+  } catch {
+    return null
+  }
+}
+
+export async function gradeTextSubmission(
+  spec: { title: string; description: string | null; acceptanceCriteria: string | null },
+  output: string,
+  requesterOwnerUserId: string | null,
+): Promise<GradedVerdict> {
+  const gradedAt = new Date().toISOString()
+  if (!spec.acceptanceCriteria?.trim()) {
+    return { passed: null, output: 'No acceptance criteria to grade against — awaiting manual review.', gradedAt }
+  }
+  if (!requesterOwnerUserId) {
+    return { passed: null, output: 'Requester account unknown — awaiting manual review.', gradedAt }
+  }
+
+  let complete
+  try {
+    complete = await resolveLlm(requesterOwnerUserId)
+  } catch {
+    return {
+      passed: null,
+      output: 'LLM grading unavailable (no LLM key on the requester account) — awaiting manual review.',
+      gradedAt,
+    }
+  }
+
+  try {
+    const raw = await complete(
+      GRADER_SYSTEM,
+      `Job: ${spec.title}\n\nDescription:\n${spec.description ?? '(none)'}\n\nAcceptance criteria:\n${spec.acceptanceCriteria}\n\nSubmitted output:\n${output.slice(0, 20_000)}`,
+      2000,
+    )
+    const verdict = parseGraderVerdict(raw)
+    if (!verdict) {
+      return { passed: null, output: 'Grader returned no parseable verdict — awaiting manual review.', gradedAt }
+    }
+    return { passed: verdict.pass, output: verdict.reason || '(no reason given)', gradedAt }
+  } catch (error) {
+    return {
+      passed: null,
+      output: `LLM grading errored (${error instanceof Error ? error.message.slice(0, 200) : 'unknown'}) — awaiting manual review.`,
+      gradedAt,
+    }
+  }
+}
