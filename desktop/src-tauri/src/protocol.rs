@@ -713,11 +713,18 @@ const TTS_API: &str = "https://translate.google.com/translate_tts";
 /// the task text, chunks it to the TTS endpoint's ~200-char limit, and
 /// concatenates the MP3 frames — the audio lane's genuine deliverable.
 pub async fn generate_audio(task: &str) -> Result<(String, String), String> {
-    // Strip the acceptance-criteria boilerplate; keep the human-readable ask.
-    let script: String = task
-        .split("Acceptance criteria")
-        .next()
-        .unwrap_or(task)
+    // Prefer an explicit script marker: audio jobs put the exact line to
+    // speak after `Script to read:` (often quoted). Reading only that keeps
+    // the deliverable clean and matches what the grader transcribes against.
+    // Fall back to the pre-criteria task text for free-form narration asks.
+    let raw = task.split("Acceptance criteria").next().unwrap_or(task);
+    let after_marker = raw
+        .split_once("Script to read:")
+        .map(|(_, rest)| rest)
+        .unwrap_or(raw)
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\u{201C}' || c == '\u{201D}' || c == '\'');
+    let script: String = after_marker
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

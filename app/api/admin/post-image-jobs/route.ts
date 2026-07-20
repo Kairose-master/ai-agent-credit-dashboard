@@ -1,4 +1,4 @@
-import { postHouseImageJobs } from '@/lib/job-faucet'
+import { postHouseImageJobs, postHouseAudioJobs } from '@/lib/job-faucet'
 
 /**
  * Post a handful of vision-graded image jobs from the house faucet wallet,
@@ -28,9 +28,10 @@ async function handle(request: Request): Promise<Response> {
   }
 
   const count = Math.max(1, Math.min(Number(url.searchParams.get('count') ?? 3) || 3, 12))
+  const kind = (url.searchParams.get('kind') ?? 'image').toLowerCase()
   try {
-    const report = await postHouseImageJobs(count)
-    return Response.json({ status: 'ok', ...report })
+    const report = kind === 'audio' ? await postHouseAudioJobs(count) : await postHouseImageJobs(count)
+    return Response.json({ status: 'ok', kind, ...report })
   } catch (error) {
     console.error('[admin/post-image-jobs] failed:', error)
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })

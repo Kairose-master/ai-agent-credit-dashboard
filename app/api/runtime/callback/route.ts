@@ -285,9 +285,10 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
   // audio/video/file (binary the graders can't inspect) and text jobs
   // without criteria stay ungraded for manual requester review.
   const isImageJob = spec.deliverableKind === 'image'
+  const isAudioJob = spec.deliverableKind === 'audio' && Boolean(spec.acceptanceCriteria?.trim())
   const isLlmGradableText =
     !spec.testCode && !isImageJob && (spec.deliverableKind ?? 'text') === 'text' && Boolean(spec.acceptanceCriteria?.trim())
-  if (!spec.testCode && !isImageJob && !isLlmGradableText) return null
+  if (!spec.testCode && !isImageJob && !isAudioJob && !isLlmGradableText) return null
   try {
     let grade: { passed: boolean | null; output: string; gradedAt: string }
     if (isImageJob) {
@@ -298,6 +299,14 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         : []
       const { gradeImageSubmission } = await import('@/lib/vision-grading')
       grade = await gradeImageSubmission(spec, arts, requesterAgent?.userId ?? null)
+    } else if (isAudioJob) {
+      const { artifact, agent } = await import('@/lib/db/schema')
+      const arts = await db.select().from(artifact).where(eq(artifact.taskId, agentTaskId))
+      const [requesterAgent] = spec.requesterAgentId
+        ? await db.select().from(agent).where(eq(agent.id, spec.requesterAgentId))
+        : []
+      const { gradeAudioSubmission } = await import('@/lib/audio-grading')
+      grade = await gradeAudioSubmission(spec, arts, requesterAgent?.userId ?? null)
     } else if (isLlmGradableText) {
       const { agent } = await import('@/lib/db/schema')
       const [requesterAgent] = spec.requesterAgentId
@@ -335,7 +344,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
       })
       await logPlatformEvent(
         grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
-        `"${spec.title}" — ${isImageJob ? 'vision review' : isLlmGradableText ? 'LLM review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
+        `"${spec.title}" — ${isImageJob ? 'vision review' : isAudioJob ? 'audio transcription review' : isLlmGradableText ? 'LLM review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
       )
 
       // Mirror the graded fact into the ERC-8004 Validation Registry — but
@@ -352,7 +361,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         await publishValidation(
           spec.workerAgentId,
           grade.passed ? 100 : 0,
-          isImageJob ? 'vision-review' : isLlmGradableText ? 'llm-review' : 'acceptance-tests',
+          isImageJob ? 'vision-review' : isAudioJob ? 'audio-review' : isLlmGradableText ? 'llm-review' : 'acceptance-tests',
           `job-${spec.onchainJobId}`,
         )
       }
