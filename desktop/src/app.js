@@ -227,6 +227,12 @@ const HATS = [
   { id: 'tophat', emoji: '🎩', cost: 300 },
   { id: 'crown', emoji: '👑', cost: 800 },
 ]
+// Auto-miner drones — the idle loop. Each produces DRONE.rate 💎/sec (× the
+// shard-magnet multiplier). Cost scales geometrically. Offline production is
+// capped so the game rewards checking in without ever printing free money.
+const DRONE = { rate: 0.12, baseCost: 50, growth: 1.28, max: 25, offlineCapHours: 8 }
+function droneCost(n) { return Math.floor(DRONE.baseCost * DRONE.growth ** n) }
+function droneRatePerSec() { return game.drones * DRONE.rate * shardMultiplier() }
 const QUESTS = [
   { id: 'q_tasks', goal: 3, reward: 40, en: 'Complete 3 tasks today', ko: '오늘 작업 3개 완료', progress: (s) => s.tasksToday },
   { id: 'q_streak', goal: 4, reward: 30, en: 'Reach a 4-task streak', ko: '연속 4개 성공', progress: (s) => s.streak },
@@ -247,6 +253,9 @@ function loadGame() {
       hats: [], hat: null,
       day: '', tasksToday: 0, clicksToday: 0, questsClaimed: [],
       lastSeen: null,
+      // Idle economy: auto-miner drones produce 💎 passively (game currency,
+      // never USDC). idleAcc holds fractional production between whole shards.
+      drones: 0, idleAcc: 0, lastTick: null,
     },
     raw || {},
   )
@@ -376,6 +385,7 @@ function onTaskDone() {
   saveGame()
   renderGame()
   bouncePet()
+  spawnCoinBurst(10) // a real on-chain job settled — coins burst in the scene
 }
 
 function onTaskFail() {
@@ -458,6 +468,13 @@ function buy(kind, id) {
       game.hats.push(id)
       game.hat = id
     }
+  } else if (kind === 'drone') {
+    if (game.drones >= DRONE.max) return
+    const cost = droneCost(game.drones)
+    if (game.shards < cost) return
+    game.shards -= cost
+    game.drones += 1
+    spawnDrone() // pop a new drone into the canvas scene
   }
   saveGame()
   renderGame()
@@ -533,6 +550,18 @@ function renderShop() {
   if (shop.hidden) return
   shop.innerHTML = ''
   const ko = lang === 'ko'
+
+  // Auto-miner drone — the idle producer, top of the shop.
+  {
+    const maxed = game.drones >= DRONE.max
+    const rate = droneRatePerSec()
+    shop.appendChild(shopRow(
+      `🛸 ${ko ? '자동 채굴 드론' : 'Auto-miner drone'} ×${game.drones} (${rate.toFixed(2)}💎/s)`,
+      maxed ? (ko ? '최대' : 'MAX') : `${droneCost(game.drones)}💎`,
+      !maxed && game.shards >= droneCost(game.drones),
+      () => buy('drone'),
+    ))
+  }
 
   for (const u of UPGRADES) {
     const tier = game.upgrades[u.id] ?? 0
@@ -617,6 +646,172 @@ function gameOnCredit(rating) {
   if (typeof rating === 'string' && rating.startsWith('A')) unlock('credit_a')
 }
 
+// ---------- Idle economy + canvas Mining World ----------
+//
+// The scene is a real idle game: drones you buy produce 💎 over time, the
+// buddy swings harder while a real job is running, and completed on-chain
+// jobs burst coins. Everything visual is game-layer (💎 shards, never USDC);
+// the honest numbers (USDC, credit) stay in the dashboard tiles.
+
+let worldRAF = null
+let worldLast = 0
+let miningActive = false
+const coins = []   // {x,y,vx,vy,life}
+const motes = []   // ambient rising 💎 {x,y,vy,life,size}
+const drones = []  // {a, r, bob, phase}  orbiting auto-miners
+let swing = 0      // pickaxe swing phase
+
+function spawnDrone() {
+  drones.push({ a: Math.random() * Math.PI * 2, r: 0, bob: Math.random() * Math.PI * 2, phase: Math.random() })
+}
+
+function spawnCoinBurst(n = 8) {
+  const c = document.getElementById('mine-canvas')
+  if (!c) return
+  const cx = c.clientWidth / 2, cy = c.clientHeight * 0.62
+  for (let i = 0; i < n; i++) {
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.6
+    const sp = 1.6 + Math.random() * 2.2
+    coins.push({ x: cx, y: cy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 1.5, life: 1 })
+  }
+}
+
+/** Award drone production accrued while the app/panel was closed (capped). */
+function applyOfflineAccrual() {
+  const now = Date.now()
+  if (game.lastTick && game.drones > 0) {
+    const elapsed = Math.min((now - game.lastTick) / 1000, DRONE.offlineCapHours * 3600)
+    const produced = elapsed * droneRatePerSec()
+    if (produced >= 1) {
+      const whole = Math.floor(produced)
+      game.shards += whole
+      showToast(lang === 'ko'
+        ? `🛸 드론이 자리 비운 동안 ${whole}💎 캤어요`
+        : `🛸 Drones mined ${whole}💎 while you were away`)
+    }
+    game.idleAcc = (game.idleAcc || 0) + (produced % 1)
+  }
+  game.lastTick = now
+  saveGame()
+}
+
+let idleSaveCtr = 0
+function idleTick() {
+  if (game.drones > 0) {
+    game.idleAcc = (game.idleAcc || 0) + droneRatePerSec()
+    if (game.idleAcc >= 1) {
+      const whole = Math.floor(game.idleAcc)
+      game.idleAcc -= whole
+      game.shards += whole
+      const sc = document.getElementById('shard-count')
+      if (sc) sc.textContent = String(game.shards)
+      // keep the shop's affordability states fresh as 💎 tick up
+      const shop = document.getElementById('shop')
+      if (shop && !shop.hidden) renderShop()
+    }
+  }
+  game.lastTick = Date.now()
+  if (++idleSaveCtr % 10 === 0) saveGame() // persist ~every 10s
+  updateRateHud()
+}
+
+function updateRateHud() {
+  const el = document.getElementById('idle-rate')
+  if (el) el.textContent = game.drones > 0
+    ? `🛸 ${droneRatePerSec().toFixed(2)} 💎/s · ×${game.drones}`
+    : (lang === 'ko' ? '🛸 드론 없음 — 상점에서 구입' : '🛸 no drones — buy in Shop')
+}
+
+function renderWorld(ts) {
+  const c = document.getElementById('mine-canvas')
+  if (!c) { worldRAF = null; return }
+  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  const w = c.clientWidth, h = c.clientHeight
+  if (c.width !== w * dpr || c.height !== h * dpr) { c.width = w * dpr; c.height = h * dpr }
+  const ctx = c.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const dt = Math.min((ts - worldLast) || 16, 50) / 16
+  worldLast = ts
+
+  // cavern backdrop
+  const g = ctx.createLinearGradient(0, 0, 0, h)
+  g.addColorStop(0, '#0e1526'); g.addColorStop(1, '#070b14')
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h)
+  ctx.globalAlpha = 0.5
+  for (let i = 0; i < 22; i++) {
+    const x = (i * 53.3 % w), y = (i * 71.7 % (h * 0.9)) + 6
+    ctx.fillStyle = i % 3 ? '#1b2740' : '#242f4d'
+    ctx.beginPath(); ctx.arc(x, y, 1.5 + (i % 3), 0, 7); ctx.fill()
+  }
+  ctx.globalAlpha = 1
+
+  const cx = w / 2, groundY = h * 0.78
+  // ground line
+  ctx.strokeStyle = '#243154'; ctx.lineWidth = 2
+  ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(w, groundY); ctx.stroke()
+
+  // ore vein (pulses) — the thing being mined
+  const pulse = 0.6 + 0.4 * Math.sin(ts / 380)
+  ctx.font = '26px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  ctx.globalAlpha = pulse; ctx.fillText('💎', cx + 54, groundY - 12); ctx.globalAlpha = 1
+  ctx.fillText('🪨', cx + 40, groundY + 4)
+
+  // ambient motes
+  if (Math.random() < 0.06 + game.drones * 0.02) motes.push({ x: cx + (Math.random() - 0.5) * 90, y: groundY, vy: 0.3 + Math.random() * 0.5, life: 1, size: 10 + Math.random() * 8 })
+  for (let i = motes.length - 1; i >= 0; i--) {
+    const m = motes[i]; m.y -= m.vy * dt; m.life -= 0.012 * dt
+    if (m.life <= 0) { motes.splice(i, 1); continue }
+    ctx.globalAlpha = Math.max(0, m.life) * 0.8; ctx.font = `${m.size}px serif`; ctx.fillText('💎', m.x, m.y)
+  }
+  ctx.globalAlpha = 1
+
+  // the buddy — bobbing, with pickaxe. swing speed rises while mining.
+  const bob = Math.sin(ts / 500) * 4
+  const petY = groundY - 26 + bob
+  swing += dt * (miningActive ? 0.34 : 0.14)
+  ctx.font = '42px serif'
+  ctx.fillText(petForLevel(game.level), cx, petY)
+  const hat = HATS.find((x) => x.id === game.hat)
+  if (hat) { ctx.font = '22px serif'; ctx.fillText(hat.emoji, cx, petY - 26) }
+  // pickaxe swinging next to the buddy
+  ctx.save(); ctx.translate(cx + 26, petY + 6); ctx.rotate(Math.sin(swing) * 0.7 - 0.3)
+  ctx.font = '26px serif'; ctx.fillText('⛏️', 0, 0); ctx.restore()
+  // spark when the pickaxe hits (bottom of swing) while actively mining
+  if (miningActive && Math.sin(swing) > 0.96 && Math.random() < 0.5) {
+    coins.push({ x: cx + 40, y: petY, vx: (Math.random() - 0.5) * 1.5, vy: -1 - Math.random(), life: 0.6, spark: true })
+  }
+
+  // orbiting drones
+  for (const d of drones) {
+    d.a += 0.008 * dt; d.r += (74 - d.r) * 0.04
+    d.bob += 0.05 * dt
+    const dx = cx + Math.cos(d.a) * d.r, dy = petY - 6 + Math.sin(d.a) * d.r * 0.5 + Math.sin(d.bob) * 3
+    ctx.font = '20px serif'; ctx.fillText('🛸', dx, dy)
+    if (Math.random() < 0.02) motes.push({ x: dx, y: dy, vy: 0.4, life: 1, size: 9 })
+  }
+
+  // coins / sparks
+  for (let i = coins.length - 1; i >= 0; i--) {
+    const p = coins[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 0.14 * dt; p.life -= 0.02 * dt
+    if (p.life <= 0) { coins.splice(i, 1); continue }
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 1.5))
+    ctx.font = `${p.spark ? 14 : 20}px serif`; ctx.fillText(p.spark ? '✨' : '🪙', p.x, p.y)
+  }
+  ctx.globalAlpha = 1
+
+  worldRAF = requestAnimationFrame(renderWorld)
+}
+
+function startIdleWorld() {
+  // seed drone sprites to match saved count
+  drones.length = 0
+  for (let i = 0; i < game.drones; i++) spawnDrone()
+  applyOfflineAccrual()
+  updateRateHud()
+  if (!startIdleWorld._tick) startIdleWorld._tick = setInterval(idleTick, 1000)
+  if (!worldRAF) { worldLast = performance.now(); worldRAF = requestAnimationFrame(renderWorld) }
+}
+
 // ---------- Step 3: mining dashboard ----------
 
 function backendLabel(backend) {
@@ -645,6 +840,8 @@ function onMiningEvent(payload) {
     const running = payload.state === 'polling' || payload.state === 'running' || payload.state === 'warming'
     document.getElementById('start-btn').hidden = running
     document.getElementById('stop-btn').hidden = !running
+    // buddy swings hard while a real job is executing
+    miningActive = payload.state === 'running' || payload.state === 'warming'
   }
 }
 
@@ -1166,6 +1363,7 @@ async function enterMiningView() {
   document.getElementById('image-mining-toggle').checked = Boolean(cfg.image_mining)
 
   renderGame()
+  startIdleWorld() // canvas scene + passive drone production + offline catch-up
   refreshWallet()
   if (!walletTimer) walletTimer = setInterval(refreshWallet, 60_000)
 }
