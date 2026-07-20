@@ -24,6 +24,39 @@ import { logPlatformEvent } from '@/lib/platform-feed'
 export const FAUCET_EMAIL = 'faucet@ledgermind.internal'
 export const FAUCET_AGENT_NAME = 'Job Faucet'
 
+/** New-miner grace window: for this long after a faucet job is posted,
+ *  auto-mine holds it back from agents above NEW_MINER_MAX_SCORE so a
+ *  fresh miner gets first pick. After it elapses anyone may claim, so a
+ *  faucet job never sits forever when no newbie is around. */
+export const FAUCET_GRACE_MS = 3 * 60 * 1000
+export const NEW_MINER_MAX_SCORE = 350
+
+let cachedFaucetAgentIdForReserve: string | null = null
+
+/** The faucet agent's id, cached — lets auto-mine recognize faucet jobs
+ *  without a per-tick lookup. Null until the faucet has been bootstrapped
+ *  (no faucet jobs exist before then, so nothing to reserve). */
+export async function faucetAgentId(): Promise<string | null> {
+  if (cachedFaucetAgentIdForReserve) return cachedFaucetAgentIdForReserve
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, FAUCET_EMAIL))
+  if (!owner) return null
+  const [a] = await db
+    .select({ id: agent.id })
+    .from(agent)
+    .where(and(eq(agent.userId, owner.id), eq(agent.name, FAUCET_AGENT_NAME)))
+  cachedFaucetAgentIdForReserve = a?.id ?? null
+  return cachedFaucetAgentIdForReserve
+}
+
+/** Should `agentScore` be held back from this faucet job right now?
+ *  Pure — reserved iff the job is still inside its grace window AND the
+ *  agent is above the new-miner score band. */
+export function faucetReservedFor(agentScore: number, postedAt: Date | null, now: number): boolean {
+  if (!postedAt) return false
+  const withinGrace = now - postedAt.getTime() < FAUCET_GRACE_MS
+  return withinGrace && agentScore > NEW_MINER_MAX_SCORE
+}
+
 const TARGET_OPEN = () => Math.max(1, Number(process.env.FAUCET_TARGET_OPEN ?? 3) || 3)
 const MAX_PER_DAY = () => Math.max(0, Number(process.env.FAUCET_MAX_PER_DAY ?? 15) || 15)
 const MAX_PER_TICK = 2

@@ -53,6 +53,9 @@ export async function autoMineTick(agent: AgentRow, callbackUrl: string): Promis
   }
 
   const score = Math.round(parseFloat(agent.creditScore))
+  const { faucetAgentId, faucetReservedFor } = await import('@/lib/job-faucet')
+  const faucetId = await faucetAgentId().catch(() => null)
+  const now = Date.now()
   for (const j of jobs) {
     if (j.status !== 'Open') continue
     if (j.minScore > score) continue
@@ -60,6 +63,11 @@ export async function autoMineTick(agent: AgentRow, callbackUrl: string): Promis
 
     const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, j.specHash))
     if (!spec) continue // no off-chain spec = nothing to actually do
+    // New-miner priority: leave freshly-posted faucet jobs for low-credit
+    // agents during the grace window. High-credit rigs skip and take a
+    // non-faucet (or post-grace) job instead, so the starter supply
+    // actually reaches newcomers instead of being vacuumed instantly.
+    if (faucetId && spec.requesterAgentId === faucetId && faucetReservedFor(score, spec.createdAt, now)) continue
     if (spec.failedWorkerIds?.includes(agent.id)) continue
     if (isClaimedByOther(spec, agent.id)) continue // another rig has this work unit
     // Capability match: an image job must never be claimed by a text-only
