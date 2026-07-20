@@ -252,32 +252,64 @@ fn finish_output(content: &str, thinking: &str) -> String {
 
 async fn ask_ollama(base_url: &str, model: &str, task: &str) -> Result<String, String> {
     let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
-    let res = client()
-        .post(&url)
-        .json(&json!({
+
+    // Thinking models (deepseek-r1, qwen3, glm-*) can 500 with a
+    // "peg-native format" / parse error: the model generates fine on the GPU,
+    // but Ollama's reasoning/tool parser rejects the raw output on some
+    // versions. It's intermittent, so retry — and once we've seen a parse
+    // crash, disable thinking (`think: false`) to bypass that parser path
+    // entirely (we only need the answer text, never the <think> trace).
+    let mut disable_think = false;
+    let mut last_err = String::new();
+    for attempt in 0..3u32 {
+        let mut payload = json!({
             "model": model,
             "stream": false,
             "messages": [
                 { "role": "system", "content": SYSTEM_PROMPT },
                 { "role": "user", "content": task },
             ],
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("could not reach Ollama at {base_url}: {e}"))?;
+        });
+        if disable_think {
+            payload["think"] = json!(false);
+        }
 
-    if !res.status().is_success() {
+        let res = client()
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("could not reach Ollama at {base_url}: {e}"))?;
+
+        if res.status().is_success() {
+            let parsed: OllamaChatResponse =
+                res.json().await.map_err(|e| format!("unexpected Ollama response: {e}"))?;
+            let msg = parsed.message.unwrap_or(OllamaMessage { content: None, thinking: None });
+            return Ok(finish_output(
+                &msg.content.unwrap_or_default(),
+                &msg.thinking.unwrap_or_default(),
+            ));
+        }
+
         let status = res.status();
         let body = res.text().await.unwrap_or_default();
-        return Err(format!(
+        let body_low = body.to_lowercase();
+        last_err = format!(
             "Ollama responded {status}: {} — is `ollama serve` running, and is `{model}` pulled?",
             body.chars().take(300).collect::<String>()
-        ));
-    }
+        );
 
-    let parsed: OllamaChatResponse = res.json().await.map_err(|e| format!("unexpected Ollama response: {e}"))?;
-    let msg = parsed.message.unwrap_or(OllamaMessage { content: None, thinking: None });
-    Ok(finish_output(&msg.content.unwrap_or_default(), &msg.thinking.unwrap_or_default()))
+        // Only retry on the known-intermittent server-side parse crash;
+        // a 404 (model not pulled) or 400 (bad request) won't fix itself.
+        let is_parse_crash = status.is_server_error()
+            && (body_low.contains("peg") || body_low.contains("format") || body_low.contains("parse"));
+        if !is_parse_crash || attempt == 2 {
+            break;
+        }
+        // Next attempt bypasses the crashing reasoning parser.
+        disable_think = true;
+    }
+    Err(last_err)
 }
 
 async fn ask_openai_compatible(base_url: &str, api_key: &str, model: &str, task: &str) -> Result<String, String> {
