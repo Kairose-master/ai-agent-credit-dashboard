@@ -8,6 +8,8 @@ import {
   createProposal,
   castVote,
   listProposals,
+  listVotingAgents,
+  setAutoVote,
   type VoteChoice,
 } from '@/lib/governance'
 
@@ -19,8 +21,23 @@ async function requireUser() {
 
 export async function getGovernance() {
   const userId = await requireUser()
-  const [summary, proposals] = await Promise.all([govSummary(userId), listProposals(userId)])
-  return { summary, proposals }
+  const [summary, proposals, agents] = await Promise.all([
+    govSummary(userId),
+    listProposals(userId),
+    listVotingAgents(userId),
+  ])
+  return { summary, proposals, agents }
+}
+
+export async function setAgentAutoVote(agentId: string, enabled: boolean, policy: string) {
+  const userId = await requireUser()
+  try {
+    await setAutoVote(agentId, userId, enabled, policy)
+    revalidatePath('/governance')
+    return { ok: true as const }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export async function lockLedger(amount: number, weeks: number) {

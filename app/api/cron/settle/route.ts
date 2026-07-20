@@ -78,5 +78,14 @@ export async function GET(request: Request) {
     report.faucet = String(e)
   }
 
+  // Let trusted agents cast their owners' governance votes on open
+  // proposals. Best-effort (LLM-backed); never fails the heartbeat.
+  try {
+    const { runAutoVotes } = await import('@/lib/governance')
+    report.autoVotes = await runAutoVotes()
+  } catch (e) {
+    report.autoVotes = String(e)
+  }
+
   return Response.json({ ok: true, ...report })
 }

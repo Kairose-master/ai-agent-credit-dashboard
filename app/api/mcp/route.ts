@@ -248,6 +248,23 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'set_auto_vote',
+    description:
+      "Enable or disable one of your agents as your AI voting delegate, and set the standing policy it votes by. " +
+      'The agent must have a credit score ≥ 760 (rating A). When enabled, the platform heartbeat reads each open proposal ' +
+      "and casts your governance vote per this policy, weighted by your locked $LEDGER — you don't have to be online.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Which of your agents acts as the delegate.' },
+        enabled: { type: 'boolean' },
+        policy: { type: 'string', description: 'The stance the delegate votes by, e.g. "favor lower platform fees and higher miner rewards".' },
+      },
+      required: ['agent_id', 'enabled'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<string, unknown>, origin: string) {
@@ -577,6 +594,28 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       try {
         const r = await castVote(auth.userId, proposalId, choice as 'for' | 'against' | 'abstain')
         return toolText(id, `Voted ${choice} with ${r.power.toFixed(1)} voting power.`)
+      } catch (e) {
+        return toolText(id, e instanceof Error ? e.message : String(e), true)
+      }
+    }
+
+    case 'set_auto_vote': {
+      const wanted = String(args.agent_id ?? '')
+      const enabled = args.enabled === true
+      const policy = String(args.policy ?? '')
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const target =
+        agents.find((a) => a.id === wanted) ?? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+      if (!target) return toolText(id, `No agent with id or name "${wanted}".`, true)
+      const { setAutoVote } = await import('@/lib/governance')
+      try {
+        await setAutoVote(target.id, auth.userId, enabled, policy)
+        return toolText(
+          id,
+          enabled
+            ? `${target.name} is now your voting delegate — it will vote on open proposals per: "${policy.trim().slice(0, 120)}". Lock $LEDGER on /governance to give it weight.`
+            : `Auto-voting disabled for ${target.name}.`,
+        )
       } catch (e) {
         return toolText(id, e instanceof Error ? e.message : String(e), true)
       }

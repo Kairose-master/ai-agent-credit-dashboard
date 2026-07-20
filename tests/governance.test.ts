@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { lockVotingPower, totalVotingPower, tallyVotes, MAX_LOCK_WEEKS, WEEK_MS, QUORUM_POWER } from '@/lib/governance'
+import {
+  lockVotingPower,
+  totalVotingPower,
+  tallyVotes,
+  isAutoVoteEligible,
+  pickDelegateByUser,
+  AUTO_VOTE_MIN_SCORE,
+  MAX_LOCK_WEEKS,
+  WEEK_MS,
+  QUORUM_POWER,
+  type AutoVoteAgent,
+} from '@/lib/governance'
+
+const mkAgent = (o: Partial<AutoVoteAgent> & { id: string; userId: string }): AutoVoteAgent => ({
+  creditScore: AUTO_VOTE_MIN_SCORE,
+  votePolicy: 'favor lower fees',
+  autoVote: true,
+  ...o,
+})
 
 const now = 1_000_000_000
 
@@ -75,5 +93,34 @@ describe('tallyVotes', () => {
     expect(r.total).toBe(55)
     expect(r.quorumMet).toBe(true)
     expect(r.passed).toBe(true) // 20 > 10
+  })
+})
+
+describe('isAutoVoteEligible (delegate trust gate)', () => {
+  it('requires opt-in, trust ≥ floor, and a non-empty policy', () => {
+    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u' }))).toBe(true)
+    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', autoVote: false }))).toBe(false)
+    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', creditScore: AUTO_VOTE_MIN_SCORE - 1 }))).toBe(false)
+    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', votePolicy: '   ' }))).toBe(false)
+    expect(isAutoVoteEligible(mkAgent({ id: 'a', userId: 'u', votePolicy: null }))).toBe(false)
+  })
+})
+
+describe('pickDelegateByUser (one delegate per owner)', () => {
+  it('picks the highest-trust eligible agent per owner and skips ineligible ones', () => {
+    const agents = [
+      mkAgent({ id: 'a1', userId: 'alice', creditScore: 800 }),
+      mkAgent({ id: 'a2', userId: 'alice', creditScore: 950 }), // higher → wins for alice
+      mkAgent({ id: 'a3', userId: 'alice', creditScore: 999, autoVote: false }), // opted out → ignored
+      mkAgent({ id: 'b1', userId: 'bob', creditScore: 700 }), // below floor → bob has no delegate
+    ]
+    const picked = pickDelegateByUser(agents)
+    expect(picked.get('alice')?.id).toBe('a2')
+    expect(picked.has('bob')).toBe(false)
+    expect(picked.size).toBe(1)
+  })
+
+  it('returns an empty map when nobody is eligible', () => {
+    expect(pickDelegateByUser([mkAgent({ id: 'a', userId: 'u', creditScore: 100 })]).size).toBe(0)
   })
 })
