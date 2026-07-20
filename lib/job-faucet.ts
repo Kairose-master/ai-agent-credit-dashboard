@@ -284,6 +284,31 @@ async function ensureFaucetAgent(): Promise<typeof agent.$inferSelect | null> {
   return faucet
 }
 
+/** Store an Anthropic key on the faucet's owner account so house-posted
+ *  image/text jobs can be vision/LLM graded (the requester-key path in
+ *  resolveUserAnthropicKey). The key is encrypted at rest via encryptSecret;
+ *  the plaintext never leaves this call. Returns the masked tail only. */
+export async function setFaucetOwnerAnthropicKey(plaintext: string): Promise<{ ok: true; keyTail: string }> {
+  const key = plaintext.trim()
+  if (!key.startsWith('sk-')) throw new Error('that does not look like an Anthropic key (expected sk-...)')
+
+  // ensureFaucetAgent also creates the faucet owner user row if missing.
+  const faucet = await ensureFaucetAgent()
+  if (!faucet) throw new Error('faucet account unavailable')
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, FAUCET_EMAIL))
+  if (!owner) throw new Error('faucet owner missing')
+
+  const { encryptSecret } = await import('@/lib/crypto')
+  const { userApiKey } = await import('@/lib/db/schema')
+  const enc = encryptSecret(key)
+  await db
+    .insert(userApiKey)
+    .values({ userId: owner.id, anthropicKeyEnc: enc })
+    .onConflictDoUpdate({ target: userApiKey.userId, set: { anthropicKeyEnc: enc, updatedAt: new Date() } })
+
+  return { ok: true, keyTail: key.slice(-4) }
+}
+
 /** Image starter jobs — posted on demand (not on the heartbeat) via the
  *  admin endpoint. Unlike the Python-graded faucet templates these are
  *  vision-graded, so the acceptance criteria are written to be FAIR: one
