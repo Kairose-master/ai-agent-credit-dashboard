@@ -346,11 +346,42 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                 let elapsed = started.elapsed().as_secs();
 
                 match protocol::submit_result(&agent.platform_url, &agent.agent_id, &agent.secret, &task.task_id, success, &output, elapsed, &artifacts).await {
-                    Ok(()) => {
+                    Ok(resp) => {
                         if success {
                             completed += 1;
                             emit_event(&app, MiningEvent::Log { line: format!("Done in {elapsed}s — result submitted.") });
-                            notify(&app, "Ledgermind Miner", &format!("Task completed and submitted ({completed} this session) — independent grading decides the payout."));
+                            // The callback grades synchronously and returns the verdict, so the
+                            // log can show what actually happened to the money instead of stopping
+                            // at "submitted". grading is null for jobs that need manual requester
+                            // review (no automatic grader) or non-labor-market tasks.
+                            let grading = resp.get("grading");
+                            match grading.and_then(|g| g.get("settled")).and_then(|s| s.as_str()) {
+                                Some("paid") => {
+                                    emit_event(&app, MiningEvent::Log { line: "✅ 채점 통과 — 정산 완료(지급됨).".into() });
+                                    notify(&app, "Ledgermind Miner", "채점 통과 — 대금이 지급됐어요.");
+                                }
+                                Some("refunded") => {
+                                    let reason = grading
+                                        .and_then(|g| g.get("reason"))
+                                        .and_then(|r| r.as_str())
+                                        .map(|r| r.chars().take(200).collect::<String>())
+                                        .unwrap_or_default();
+                                    let line = if reason.is_empty() {
+                                        "❌ 채점 실패 — 요청자에게 환불(지급 없음).".to_string()
+                                    } else {
+                                        format!("❌ 채점 실패 — 요청자에게 환불(지급 없음). 사유: {reason}")
+                                    };
+                                    emit_event(&app, MiningEvent::Log { line });
+                                    notify(&app, "Ledgermind Miner", "채점 실패로 환불됐어요 — 지급 없음. 로그에서 사유를 확인하세요.");
+                                }
+                                Some("manual") => {
+                                    emit_event(&app, MiningEvent::Log { line: "⏳ 자동 채점 없음 — 요청자 수동 검토 대기 중.".into() });
+                                }
+                                _ => {
+                                    // No grading verdict (non-labor-market task, or grader unavailable).
+                                    notify(&app, "Ledgermind Miner", &format!("Task completed and submitted ({completed} this session) — independent grading decides the payout."));
+                                }
+                            }
                         } else {
                             failed += 1;
                             emit_event(&app, MiningEvent::Log { line: format!("FAILED: {output}") });

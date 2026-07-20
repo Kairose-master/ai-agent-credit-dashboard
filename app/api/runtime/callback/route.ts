@@ -102,8 +102,9 @@ export async function POST(request: Request) {
     }
 
     // Labor Market job? Submit the REAL output on-chain — no more manual
-    // "Submit work" click, no more placeholder text.
-    await settleLaborMarketJob(taskId, String(body?.output ?? ''))
+    // "Submit work" click, no more placeholder text. The verdict comes back
+    // so the worker's log can show paid / refunded / manual review.
+    const grading = await settleLaborMarketJob(taskId, String(body?.output ?? ''))
 
     const credit = await recalculateCredit(agentId)
 
@@ -133,7 +134,7 @@ export async function POST(request: Request) {
       })
       .where(eq(agentTask.id, taskId))
 
-    return Response.json({ status: 'ok' })
+    return Response.json({ status: 'ok', grading })
   } catch (error) {
     await db
       .update(agentTask)
@@ -257,9 +258,14 @@ async function settleVerifiedTask(
  * (JOB_TESTS_PASSED/FAILED — same trust class as VERIFIED_TASK_*, because a
  * test run is a fact, not an LLM's opinion of itself).
  */
-async function settleLaborMarketJob(agentTaskId: string, output: string): Promise<void> {
+/** What happened to the worker's submission — returned to the worker so its
+ *  log can show the real outcome (paid / refunded / awaiting manual review)
+ *  instead of stopping at "submitted". */
+type GradeReport = { passed: boolean | null; settled: 'paid' | 'refunded' | 'manual'; reason: string }
+
+async function settleLaborMarketJob(agentTaskId: string, output: string): Promise<GradeReport | null> {
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, agentTaskId))
-  if (!spec || !spec.workerAgentId || spec.onchainJobId === null) return
+  if (!spec || !spec.workerAgentId || spec.onchainJobId === null) return null
 
   let submitted = false
   try {
@@ -281,7 +287,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
   const isImageJob = spec.deliverableKind === 'image'
   const isLlmGradableText =
     !spec.testCode && !isImageJob && (spec.deliverableKind ?? 'text') === 'text' && Boolean(spec.acceptanceCriteria?.trim())
-  if (!spec.testCode && !isImageJob && !isLlmGradableText) return
+  if (!spec.testCode && !isImageJob && !isLlmGradableText) return null
   try {
     let grade: { passed: boolean | null; output: string; gradedAt: string }
     if (isImageJob) {
@@ -354,10 +360,15 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
 
     if (grade.passed === false) {
       await returnFailedJobToMarket(spec)
+      return { passed: false, settled: 'refunded', reason: grade.output }
     } else if (grade.passed === true) {
       await autoApprovePassedJob(spec)
+      return { passed: true, settled: 'paid', reason: grade.output }
     }
+    // passed:null — grading unavailable; job waits for manual requester review.
+    return { passed: null, settled: 'manual', reason: grade.output }
   } catch (error) {
     console.error('[runtime/callback] acceptance-test grading failed:', error)
+    return null
   }
 }
