@@ -65,6 +65,24 @@ users override per-account in Worker Console), `WALLET_CAP_HARD_MAX_USD`,
 default, empty once meant "$0, block everything" before the parser was
 hardened.
 
+## Settlement heartbeat (CRON_SECRET)
+
+Settlement is three-layered: grading + payout at submission time (the
+callback), opportunistic sweeps on page reads, and the background
+heartbeat — `GET /api/cron/settle`, called by
+`.github/workflows/settle-heartbeat.yml` on a schedule. The heartbeat is
+what re-drives payouts that failed transiently (RPC 429) while nobody has
+a tab open.
+
+`CRON_SECRET` must hold the SAME value in two places: a Vercel Production
+env var (remember: env changes only apply on the NEXT deployment) and a
+GitHub Actions repository secret. With it missing, the workflow skips
+silently (by design — no red X spam) and the endpoint answers 503; set
+it before onboarding real users. Verify with:
+`curl -H "Authorization: Bearer $CRON_SECRET" .../api/cron/settle` →
+`{"ok":true,...}`. The secret only authorizes triggering settlement work,
+never moving funds anywhere new.
+
 ## Tests
 
 `pnpm test` (vitest) runs the unit/regression suite — money-adjacent pure
