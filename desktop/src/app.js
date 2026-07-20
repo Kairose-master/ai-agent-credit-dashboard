@@ -1004,12 +1004,63 @@ const JOB_STATUS_ICON = {
   Open: '🕐', Claimed: '⚙️', Submitted: '📤', Completed: '✅', Refunded: '↩️', Disputed: '⚠️',
 }
 
+// Deliverable-kind glyph — shown per subtask so the requester sees at a glance
+// whether a node produces text, an image, or audio.
+const DELIVERABLE_ICON = { text: '📝', image: '🖼️', audio: '🎧', video: '🎬', file: '📎' }
+
+// Platform origin for artifact links (final outputs embed relative
+// /api/artifacts/<id> URLs; in the Tauri webview they need an absolute base).
+let platformBase = ''
+
+/** Render an assembled delegation output into `container`: markdown image
+ *  links (`![name](/api/artifacts/id)`) become <img>, audio artifact links
+ *  become <audio>, everything else stays as text. Keeps the requester's
+ *  result visual instead of a wall of markdown. */
+function renderDelegationOutput(container, text) {
+  container.innerHTML = ''
+  const abs = (u) => (u.startsWith('http') ? u : `${platformBase}${u}`)
+  // Split on any markdown link that points at an artifact (image or file form).
+  const re = /(!?)\[([^\]]*)\]\((\/api\/artifacts\/[^)\s]+|https?:\/\/[^)\s]+)\)/g
+  let last = 0, m
+  const pushText = (s) => { if (s) container.appendChild(document.createTextNode(s)) }
+  while ((m = re.exec(text)) !== null) {
+    pushText(text.slice(last, m.index))
+    last = re.lastIndex
+    const [, bang, name, url] = m
+    const isImage = bang === '!' || /\.(png|jpe?g|webp|gif)$/i.test(name) || /\.(png|jpe?g|webp|gif)$/i.test(url)
+    const isAudio = /\.(mp3|wav|ogg|webm|m4a)$/i.test(name) || /\.(mp3|wav|ogg|webm|m4a)$/i.test(url)
+    if (isImage) {
+      const img = document.createElement('img')
+      img.className = 'dlg-media'
+      img.loading = 'lazy'
+      img.alt = name || 'image'
+      img.src = abs(url)
+      container.appendChild(img)
+    } else if (isAudio) {
+      const audio = document.createElement('audio')
+      audio.className = 'dlg-media'
+      audio.controls = true
+      audio.preload = 'none'
+      audio.src = abs(url)
+      container.appendChild(audio)
+    } else {
+      const a = document.createElement('a')
+      a.href = '#'
+      a.textContent = name || url
+      a.addEventListener('click', (e) => { e.preventDefault(); invoke('open_url', { url: abs(url) }).catch(() => {}) })
+      container.appendChild(a)
+    }
+  }
+  pushText(text.slice(last))
+}
+
 function renderPlanReview(subtasks) {
   const list = document.getElementById('delegate-plan-list')
   list.innerHTML = ''
   for (const st of subtasks) {
     const li = document.createElement('li')
-    li.textContent = `$${Number(st.bountyUsd).toFixed(2)} — ${st.title}`
+    const kind = DELIVERABLE_ICON[st.deliverableKind || 'text'] || '📝'
+    li.textContent = `${kind} $${Number(st.bountyUsd).toFixed(2)} — ${st.title}`
     li.title = st.description
     list.appendChild(li)
   }
@@ -1041,8 +1092,9 @@ function renderDelegations(delegations) {
         const line = document.createElement('div')
         line.className = 'dlg-subtask'
         const icon = st.failed ? '❌' : (JOB_STATUS_ICON[st.jobStatus] || '🕐')
+        const kind = DELIVERABLE_ICON[st.deliverableKind || 'text'] || '📝'
         const worker = st.workerLabel ? ` · ${st.workerLabel}` : ''
-        line.textContent = `${icon} ${st.title} — $${Number(st.bountyUsd).toFixed(2)}${worker}`
+        line.textContent = `${icon} ${kind} ${st.title} — $${Number(st.bountyUsd).toFixed(2)}${worker}`
         card.appendChild(line)
       }
     }
@@ -1053,7 +1105,8 @@ function renderDelegations(delegations) {
       sum.textContent = lang === 'ko' ? '최종 결과물 보기' : 'View final output'
       const pre = document.createElement('pre')
       pre.className = 'dlg-output'
-      pre.textContent = d.final_output
+      // Render embedded image/audio artifacts as media, not raw markdown.
+      renderDelegationOutput(pre, d.final_output)
       det.appendChild(sum)
       det.appendChild(pre)
       card.appendChild(det)
@@ -1502,6 +1555,7 @@ async function enterMiningView() {
   if (!cfg.backend) return enterBackendView()
 
   showView('mining')
+  platformBase = (cfg.agent.platform_url || '').replace(/\/$/, '')
   setText('agent-name-display', cfg.agent.name)
   setText('backend-label-display', backendLabel(cfg.backend))
   document.getElementById('image-mining-toggle').checked = Boolean(game.lanes.image || cfg.image_mining)
