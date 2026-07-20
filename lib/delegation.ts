@@ -124,6 +124,7 @@ Rules:
 - acceptanceCriteria must be concrete enough that an independent reviewer can judge pass/fail from the criteria and the output text alone.
 - Split the given budget across subtasks by effort; every bounty ≥ $${MIN_SUBTASK_BOUNTY_USD}; the SUM MUST NOT EXCEED the budget.
 - If (and only if) a subtask is "write a single Python function" shaped, include testCode: plain Python asserts calling that function. Otherwise omit testCode.
+- If one subtask's deliverable must EMBED another subtask's output (e.g. a guide that includes a code example a different worker writes), mark the exact spot with {{PART: exact title of that other subtask}} in the description's required output — the assembler substitutes the real output there after completion. Never invent other placeholder syntaxes.
 - Each subtask has deliverableKind: "text" (writing, code, analysis — the default), "image" (the worker must PRODUCE an image, e.g. a logo or illustration), or "audio" (the worker must produce an audio file, e.g. narration). Use non-text kinds only when the client's goal genuinely requires that output — such workers are scarcer, so never mark a describable-in-text deliverable as image/audio.
 - Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "testCode"?}] — no commentary, no code fences.`
 
@@ -303,18 +304,103 @@ async function snapshotOutput(agentTaskId: string | null, textOutput: string | n
   return text
 }
 
-/** Deterministic final assembly — never depends on an LLM being available,
- *  so a finished delegation can always deliver. */
-function assembleFinalOutput(task: string, subtasks: DelegationSubtask[]): string {
-  const parts = [`# Delegated task\n\n${task}\n`]
+/** Placeholder forms the assembler recognizes inside a part's output:
+ *  - explicit contract (the planner is instructed to emit this):
+ *      {{PART: exact title of another subtask}}
+ *  - heuristic for free-form planner output: an ALL-CAPS bracket token
+ *    containing a slot keyword, e.g. [CODE EXAMPLE GOES HERE] — resolved
+ *    to another part by title-word overlap. `arr[0]` / `[TODO]` never
+ *    match (no slot keyword + no overlap target). */
+const EXPLICIT_PLACEHOLDER_RE = /\{\{\s*PART\s*:\s*([^}]{1,80}?)\s*\}\}/g
+const BRACKET_PLACEHOLDER_RE = /\[([A-Z][A-Z0-9 ,'&/_\-]{5,79})\]/g
+const SLOT_KEYWORDS = /\b(HERE|INSERT|INSERTED|PLACEHOLDER|GOES|TBD|SNIPPET|OUTPUT OF|FROM PART)\b/
+const STOP_WORDS = new Set(['the', 'and', 'for', 'here', 'goes', 'insert', 'inserted', 'placeholder', 'from', 'part', 'with', 'this', 'that'])
+
+function titleWords(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3 && !STOP_WORDS.has(w)),
+  )
+}
+
+/** Best-matching OTHER part for a placeholder's text, by word overlap with
+ *  part titles. Null when nothing overlaps — the placeholder stays put. */
+function resolvePlaceholderTarget(text: string, selfIdx: number, subtasks: DelegationSubtask[]): number | null {
+  const words = titleWords(text)
+  let best: number | null = null
+  let bestScore = 0
   subtasks.forEach((st, i) => {
-    parts.push(`\n---\n\n## Part ${i + 1}: ${st.title}\n`)
-    if (st.failed) {
-      parts.push(`_This part did not complete (${st.failReason ?? 'failed'})._\n`)
-    } else {
-      parts.push(`${st.output ?? '(no output recorded)'}\n`)
+    if (i === selfIdx) return
+    let score = 0
+    for (const w of titleWords(st.title)) if (words.has(w)) score++
+    if (score > bestScore) {
+      bestScore = score
+      best = i
     }
   })
+  return bestScore >= 1 ? best : null
+}
+
+/**
+ * Deterministic final assembly — never depends on an LLM being available,
+ * so a finished delegation can always deliver.
+ *
+ * Substitution pass first: any part whose output marks a spot for another
+ * part's deliverable gets it spliced IN PLACE, and the consumed part stops
+ * appearing as a separate section — the planner's "document with an
+ * embedded example" design survives assembly. When everything folds into
+ * a single host document (and nothing failed), the result IS that
+ * document, no Part headers at all. Exported for unit tests.
+ */
+export function assembleFinalOutput(task: string, subtasks: DelegationSubtask[]): string {
+  const originals = subtasks.map((st) => (st.failed ? null : (st.output ?? null)))
+  const consumed = new Set<number>()
+
+  const substituteInto = (text: string, selfIdx: number): string => {
+    const fill = (match: string, targetIdx: number | null): string => {
+      if (targetIdx === null || targetIdx === selfIdx) return match
+      const replacement = originals[targetIdx]?.trim()
+      if (!replacement) return match // failed/empty target — leave the marker visible
+      consumed.add(targetIdx)
+      return replacement
+    }
+    return text
+      .replace(EXPLICIT_PLACEHOLDER_RE, (m, title: string) => {
+        const wanted = title.trim().toLowerCase()
+        const idx = subtasks.findIndex((st, i) => i !== selfIdx && st.title.trim().toLowerCase() === wanted)
+        return fill(m, idx >= 0 ? idx : resolvePlaceholderTarget(title, selfIdx, subtasks))
+      })
+      .replace(BRACKET_PLACEHOLDER_RE, (m, inner: string) => {
+        if (!SLOT_KEYWORDS.test(inner)) return m
+        return fill(m, resolvePlaceholderTarget(inner, selfIdx, subtasks))
+      })
+  }
+
+  const substituted = originals.map((out, i) => (out === null ? null : substituteInto(out, i)))
+
+  const sections: string[] = []
+  const failures: string[] = []
+  subtasks.forEach((st, i) => {
+    if (st.failed) {
+      failures.push(`- ${st.title}: did not complete (${st.failReason ?? 'failed'})`)
+      return
+    }
+    if (consumed.has(i)) return // lives inside its host document now
+    sections.push(`## ${st.title}\n\n${substituted[i] ?? '(no output recorded)'}`)
+  })
+
+  // Everything merged into one host document, nothing failed → deliver the
+  // document itself, exactly as the planner designed it.
+  if (sections.length === 1 && failures.length === 0) {
+    const body = sections[0].replace(/^## .*\n\n/, '')
+    return body
+  }
+
+  const parts = [`# Delegated task\n\n${task}\n`]
+  sections.forEach((s) => parts.push(`\n---\n\n${s}\n`))
+  if (failures.length > 0) parts.push(`\n---\n\n_Incomplete parts:_\n${failures.join('\n')}\n`)
   return parts.join('')
 }
 
