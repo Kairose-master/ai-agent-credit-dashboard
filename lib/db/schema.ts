@@ -602,7 +602,33 @@ export const govProposal = pgTable('gov_proposals', {
   closesAt: timestamp('closes_at', { withTimezone: true }).notNull(),
   /** 'open' | 'passed' | 'rejected' — finalized when closesAt passes. */
   status: text('status').notNull().default('open'),
+  /** On-chain commit-reveal poll id, when GOVERNANCE_POLL_ADDRESS is set. */
+  onchainPollId: integer('onchain_poll_id'),
 })
+
+/**
+ * On-chain commit-reveal vote tracking (only when governance is on-chain).
+ * A confident delegate vote is committed here from the agent's smart
+ * account, then revealed after the proposal closes; the salt is stored
+ * encrypted and discarded the moment the reveal lands. Separate from
+ * gov_votes, which stays the authoritative ve-weighted tally.
+ */
+export const govOnchainVote = pgTable(
+  'gov_onchain_votes',
+  {
+    proposalId: text('proposal_id').notNull(),
+    userId: text('user_id').notNull(),
+    agentId: text('agent_id').notNull(), // the smart account that voted
+    pollId: integer('poll_id').notNull(),
+    optionIndex: integer('option_index').notNull(),
+    encryptedSalt: text('encrypted_salt'), // AES-GCM; nulled after reveal
+    commitTxHash: text('commit_tx_hash'),
+    revealTxHash: text('reveal_tx_hash'),
+    status: text('status').notNull().default('committed'), // 'committed' | 'revealed' | 'failed'
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
+)
 
 /** One immutable vote per (proposal, account), weighted by the caster's
  *  ve voting power snapshotted at cast time. */

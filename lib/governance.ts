@@ -16,7 +16,7 @@
  * tested — it's what makes votes fair.
  */
 import { db } from '@/lib/db'
-import { agent, govAccount, govLock, govProposal, govVote, govDelegateReview } from '@/lib/db/schema'
+import { agent, govAccount, govLock, govProposal, govVote, govDelegateReview, govOnchainVote } from '@/lib/db/schema'
 import { and, eq, desc, sql } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 
@@ -258,7 +258,32 @@ export async function createProposal(userId: string, title: string, body: string
   const id = `prop-${nanoid(10)}`
   const closesAt = new Date(Date.now() + Math.max(1, Math.min(30, days)) * 24 * 60 * 60 * 1000)
   await db.insert(govProposal).values({ id, creatorUserId: userId, title: t, body: body.trim().slice(0, 5000), closesAt })
+
+  // Best-effort: mirror to an on-chain commit-reveal poll when configured.
+  // Commit window = until the proposal closes; reveal window = the days
+  // after. Never blocks proposal creation.
+  await mirrorProposalOnchain(id, userId, closesAt).catch(() => undefined)
   return { id }
+}
+
+/** Create the on-chain poll for a proposal (gated + best-effort). Uses one
+ *  of the creator's smart-account agents as the relayer. */
+async function mirrorProposalOnchain(proposalId: string, userId: string, closesAt: Date): Promise<void> {
+  const { isGovernanceOnchainConfigured, onchainEnv } = await import('@/lib/onchain/config')
+  if (!isGovernanceOnchainConfigured()) return
+  const [relayer] = await db
+    .select({ id: agent.id })
+    .from(agent)
+    .where(and(eq(agent.userId, userId), sql`${agent.smartAccountAddress} is not null`))
+    .limit(1)
+  if (!relayer) return
+  const commitEnd = Math.floor(closesAt.getTime() / 1000)
+  const revealEnd = commitEnd + Math.max(1, onchainEnv.governanceRevealDays) * 24 * 60 * 60
+  const { createOnchainPoll } = await import('@/lib/onchain/governance-poll')
+  const pollId = await createOnchainPoll(relayer.id, commitEnd, revealEnd)
+  if (pollId != null) {
+    await db.update(govProposal).set({ onchainPollId: pollId }).where(eq(govProposal.id, proposalId)).catch(() => undefined)
+  }
 }
 
 /** Cast (or refuse to overwrite) a weighted vote. Power is snapshotted at
@@ -481,12 +506,84 @@ export async function runAutoVotes(
           confidence: decision.confidence,
         })
         cast++
+        // Also commit on-chain (privacy-preserving) when configured — the
+        // off-chain vote above stays the authoritative ve-weighted tally.
+        if (prop.onchainPollId != null) {
+          await commitDelegateVoteOnchain(prop.id, userId, del.id, prop.onchainPollId, decision.choice).catch(
+            () => undefined,
+          )
+        }
       } catch {
         // raced with a manual vote or the window just closed — fine, skip.
       }
     }
   }
   return { openProposals: openProps.length, delegates: delegates.size, cast, escalated }
+}
+
+/** Commit a delegate's vote on-chain from its smart account (gated + best-
+ *  effort). Stores the salt encrypted for the later reveal. */
+async function commitDelegateVoteOnchain(
+  proposalId: string,
+  userId: string,
+  agentId: string,
+  pollId: number,
+  choice: VoteChoice,
+): Promise<void> {
+  const { isGovernanceOnchainConfigured } = await import('@/lib/onchain/config')
+  if (!isGovernanceOnchainConfigured()) return
+  const { commitOnchainVote, CHOICE_TO_OPTION } = await import('@/lib/onchain/governance-poll')
+  const option = CHOICE_TO_OPTION[choice]
+  const result = await commitOnchainVote(agentId, pollId, option)
+  if (!result) return
+  const { encryptSecret } = await import('@/lib/crypto')
+  await db
+    .insert(govOnchainVote)
+    .values({
+      proposalId,
+      userId,
+      agentId,
+      pollId,
+      optionIndex: option,
+      encryptedSalt: encryptSecret(result.salt),
+      commitTxHash: result.txHash,
+      status: 'committed',
+    })
+    .onConflictDoNothing()
+    .catch(() => undefined)
+}
+
+/** Reveal every committed on-chain vote whose poll has entered its reveal
+ *  window. Runs on the heartbeat; salts are discarded the moment a reveal
+ *  lands. Gated + best-effort. Returns how many were revealed. */
+export async function revealOnchainVotes(): Promise<{ pending: number; revealed: number }> {
+  const { isGovernanceOnchainConfigured } = await import('@/lib/onchain/config')
+  if (!isGovernanceOnchainConfigured()) return { pending: 0, revealed: 0 }
+  const committed = await db.select().from(govOnchainVote).where(eq(govOnchainVote.status, 'committed'))
+  if (committed.length === 0) return { pending: 0, revealed: 0 }
+  const { pollPhase, revealOnchainVote } = await import('@/lib/onchain/governance-poll')
+  const { decryptSecret } = await import('@/lib/crypto')
+  let revealed = 0
+  for (const v of committed) {
+    if (!v.encryptedSalt) continue
+    const phase = await pollPhase(v.pollId)
+    if (phase !== 1) continue // 0=still committing, 2=closed (missed), null=off
+    let salt: `0x${string}`
+    try {
+      salt = decryptSecret(v.encryptedSalt) as `0x${string}`
+    } catch {
+      continue
+    }
+    const txHash = await revealOnchainVote(v.agentId, v.pollId, v.optionIndex, salt)
+    if (!txHash) continue
+    await db
+      .update(govOnchainVote)
+      .set({ status: 'revealed', revealTxHash: txHash, encryptedSalt: null, updatedAt: new Date() })
+      .where(and(eq(govOnchainVote.proposalId, v.proposalId), eq(govOnchainVote.userId, v.userId)))
+      .catch(() => undefined)
+    revealed++
+  }
+  return { pending: committed.length, revealed }
 }
 
 export interface DelegateReviewView {
