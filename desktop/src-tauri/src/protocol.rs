@@ -82,6 +82,15 @@ pub struct PolledTask {
     pub task_id: String,
     pub agent_id: String,
     pub task: String,
+    /// What this task expects delivered: "text" (default), "image", … —
+    /// non-text kinds are only routed here if this agent declared the
+    /// capability, so an image task always means image mining is on.
+    #[serde(default = "default_kind")]
+    pub deliverable_kind: String,
+}
+
+fn default_kind() -> String {
+    "text".into()
 }
 
 /// POST /api/worker/poll — returns Ok(None) when nothing is queued.
@@ -110,6 +119,15 @@ pub async fn poll(platform_url: &str, agent_id: &str, secret: &str) -> Result<Op
     }
 }
 
+/// One binary deliverable riding alongside the text output (base64 inline,
+/// ≤2MB decoded — matches the platform's inline artifact cap).
+#[derive(Debug, Clone, Serialize)]
+pub struct Artifact {
+    pub name: String,
+    pub mime: String,
+    pub data_base64: String,
+}
+
 /// POST /api/runtime/callback — submits the task's result. `quality_score`
 /// is always null by design: self-scoring carries no weight in the credit
 /// calculation, only independent grading does (see docs/agent-integration.md).
@@ -121,6 +139,7 @@ pub async fn submit_result(
     success: bool,
     output: &str,
     execution_time_secs: u64,
+    artifacts: &[Artifact],
 ) -> Result<(), String> {
     let url = format!("{}/api/runtime/callback", platform_url.trim_end_matches('/'));
     let res = client()
@@ -131,6 +150,7 @@ pub async fn submit_result(
             "agent_id": agent_id,
             "success": success,
             "output": output,
+            "artifacts": artifacts,
             "quality_score": serde_json::Value::Null,
             "execution_time": execution_time_secs,
             "token_cost": 0,
@@ -539,6 +559,107 @@ pub async fn delegation_status(
     secret: &str,
 ) -> Result<serde_json::Value, String> {
     delegations_call(platform_url, json!({ "op": "status", "agent_id": agent_id }), Some(secret)).await
+}
+
+/// POST /api/worker/capabilities — declare what work this agent can be
+/// matched to (worker-secret auth; no money involved). Used by the image
+/// mining toggle.
+pub async fn update_capabilities(
+    platform_url: &str,
+    agent_id: &str,
+    secret: &str,
+    capabilities: &[&str],
+) -> Result<Vec<String>, String> {
+    let url = format!("{}/api/worker/capabilities", platform_url.trim_end_matches('/'));
+    let res = client()
+        .post(&url)
+        .header("X-Runtime-Secret", secret)
+        .json(&json!({ "agent_id": agent_id, "capabilities": capabilities }))
+        .send()
+        .await
+        .map_err(|e| format!("capability update failed: {e}"))?;
+    let status = res.status();
+    let body: serde_json::Value = res.json().await.map_err(|e| format!("unexpected response: {e}"))?;
+    if !status.is_success() {
+        return Err(body.get("error").and_then(|v| v.as_str()).unwrap_or("capability update failed").to_string());
+    }
+    Ok(body
+        .get("capabilities")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default())
+}
+
+const IMAGE_API: &str = "https://image.pollinations.ai/prompt/";
+
+/// Generate an image for an image-deliverable task via the free, keyless
+/// pollinations.ai API — the same backend the SDK's image-worker example
+/// uses. Returns (mime, base64). The task text is squeezed into a compact
+/// visual prompt; the platform's independent reviewer judges the result.
+pub async fn generate_image(task: &str) -> Result<(String, String), String> {
+    let prompt: String = task
+        .replace("Acceptance criteria (what \"done\" means):", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(400)
+        .collect();
+    let url = format!(
+        "{IMAGE_API}{}?width=768&height=768&nologo=true",
+        urlencoding_encode(&prompt)
+    );
+    let res = client()
+        .get(&url)
+        .timeout(Duration::from_secs(180))
+        .send()
+        .await
+        .map_err(|e| format!("image API unreachable: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("image API responded {}", res.status()));
+    }
+    let mime = res
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .split(';')
+        .next()
+        .unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = res.bytes().await.map_err(|e| format!("image download failed: {e}"))?;
+    if bytes.len() > 2 * 1024 * 1024 {
+        return Err("generated image exceeds the 2MB inline artifact cap".into());
+    }
+    Ok((mime, base64_encode(&bytes)))
+}
+
+/// Minimal percent-encoding for a URL path segment (no extra crates).
+fn urlencoding_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Minimal base64 (standard alphabet, padded) — avoids pulling a crate for
+/// one encode call.
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+    }
+    out
 }
 
 /// Ollama's own local listing endpoint — used to auto-detect whether the

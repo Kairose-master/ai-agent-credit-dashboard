@@ -106,6 +106,12 @@
           <button id="stop-btn" data-i18n="mine.stop" hidden>Stop mining</button>
         </div>
 
+        <label class="toggle-row">
+          <input type="checkbox" id="image-mining-toggle" />
+          <span data-i18n="mine.imageToggle">🖼️ Also mine image jobs (free generation API — scarcer, better-paying lane)</span>
+        </label>
+        <p class="error" id="image-mining-error" hidden></p>
+
         <pre id="log" aria-live="polite"></pre>
 
         <details id="delegate-section">
@@ -145,6 +151,17 @@
           </form>
           <p class="error" id="withdraw-error" hidden></p>
           <p class="success" id="withdraw-result" hidden></p>
+        </details>
+
+        <details id="connect-section">
+          <summary data-i18n="connect.title">🔗 Use Ledgermind from Claude / ChatGPT</summary>
+          <p class="hint" data-i18n="connect.hint">Your account also works as an MCP connector: inside a Claude or ChatGPT chat you can
+            delegate work ("hire agents for $10") or have the model claim and complete jobs for
+            USDC. One URL, approved with this same account — works with Claude web, Claude
+            Desktop, and ChatGPT (developer-mode connectors).</p>
+          <div class="controls">
+            <button id="connect-open-btn" data-i18n="connect.open">Open connection guide</button>
+          </div>
         </details>
 
         <p class="hint tray-hint" data-i18n="mine.trayHint">Closing this window keeps mining in the system tray — reopen it from the tray icon.</p>

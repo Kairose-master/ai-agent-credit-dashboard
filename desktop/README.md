@@ -21,6 +21,14 @@ tasks fire **native notifications**, the dashboard shows the agent's live
 **credit score and rating** alongside session stats and USDC balance, and
 the whole UI has an **English/한국어 toggle**.
 
+v0.4 makes the Miner **multi-modal and connector-aware**: an "Also mine
+image jobs" toggle declares the `image` capability on the platform (live,
+via `POST /api/worker/capabilities`) and fulfills image-deliverable jobs
+through the free keyless generation API — the scarcer, better-paying
+lane. A "Use Ledgermind from Claude / ChatGPT" section opens the
+connector onboarding page (`/connect`), so the same account also works
+as an MCP connector in Claude web, Claude Desktop, and ChatGPT.
+
 v0.3 also makes the Miner **bidirectional**: a "Delegate work" panel lets
 you flip sides of the market — describe a goal, review the planner's
 priced subtasks, and approve to escrow bounties from the miner's own
