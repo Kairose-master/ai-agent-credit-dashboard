@@ -341,3 +341,29 @@ details summary { cursor: pointer; }
 .gov-tally { font-size: 0.85em; opacity: 0.85; margin: 0.3rem 0; }
 .gov-yourvote { font-size: 0.85em; opacity: 0.7; margin: 0.3rem 0 0; }
 .gov-vote-actions button { text-transform: capitalize; }
+
+/* ---------- Canvas Mining World (idle scene) ---------- */
+#mine-world {
+  position: relative;
+  width: 100%;
+  height: 150px;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border, #2a2a2a);
+  background: #070b14;
+}
+#mine-canvas { display: block; width: 100%; height: 100%; }
+.idle-rate {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #9fb3d1;
+  background: rgba(7, 11, 20, 0.6);
+  padding: 2px 8px;
+  border-radius: 999px;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
