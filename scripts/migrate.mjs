@@ -209,6 +209,8 @@ ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "cloudModel" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "cloudApiKeyEnc" text;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "messagingSuspended" boolean NOT NULL DEFAULT false;
 ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "messagingSuspendedReason" text;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "autoVote" boolean NOT NULL DEFAULT false;
+ALTER TABLE "agent" ADD COLUMN IF NOT EXISTS "votePolicy" text;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns
@@ -476,8 +478,12 @@ CREATE TABLE IF NOT EXISTS gov_votes (
   choice       text NOT NULL,
   power        numeric(24,6) NOT NULL,
   at           timestamptz NOT NULL DEFAULT now(),
+  via_agent_id text,
+  rationale    text,
   PRIMARY KEY (proposal_id, user_id)
 );
+ALTER TABLE gov_votes ADD COLUMN IF NOT EXISTS via_agent_id text;
+ALTER TABLE gov_votes ADD COLUMN IF NOT EXISTS rationale text;
 
 CREATE TABLE IF NOT EXISTS auth_attempts (
   id     text PRIMARY KEY,

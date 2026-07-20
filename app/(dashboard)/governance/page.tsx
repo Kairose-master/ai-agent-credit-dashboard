@@ -1,9 +1,65 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getGovernance, lockLedger, openProposal, voteOnProposal } from '@/app/actions/governance'
+import { getGovernance, lockLedger, openProposal, voteOnProposal, setAgentAutoVote } from '@/app/actions/governance'
 
 type Gov = Awaited<ReturnType<typeof getGovernance>>
+type VotingAgent = Gov['agents'][number]
+
+function DelegateRow({
+  agent,
+  busy,
+  onSave,
+}: {
+  agent: VotingAgent
+  busy: boolean
+  onSave: (agentId: string, enabled: boolean, policy: string) => void
+}) {
+  const [policy, setPolicy] = useState(agent.votePolicy)
+  return (
+    <div className="rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{agent.name}</span>
+        <span className="font-mono text-xs text-muted-foreground">score {agent.creditScore.toFixed(0)}</span>
+        {agent.eligible ? (
+          <span className="rounded bg-success/15 px-2 py-0.5 text-xs text-success">eligible (A+)</span>
+        ) : (
+          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">needs score ≥ 760</span>
+        )}
+        {agent.autoVote && <span className="rounded bg-primary/15 px-2 py-0.5 text-xs text-primary">🤖 auto-voting on</span>}
+      </div>
+      {agent.eligible && (
+        <div className="mt-2">
+          <textarea
+            value={policy}
+            onChange={(e) => setPolicy(e.target.value)}
+            placeholder='Voting policy, e.g. "favor lower platform fees and higher miner rewards; oppose anything that raises risk for new miners"'
+            rows={2}
+            className="block w-full rounded-md border border-border bg-background p-2 text-sm"
+          />
+          <div className="mt-2 flex gap-2">
+            <button
+              disabled={busy || !policy.trim()}
+              onClick={() => onSave(agent.id, true, policy)}
+              className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {agent.autoVote ? 'Update policy' : 'Enable auto-vote'}
+            </button>
+            {agent.autoVote && (
+              <button
+                disabled={busy}
+                onClick={() => onSave(agent.id, false, policy)}
+                className="h-8 rounded-md border border-border px-3 text-xs hover:bg-secondary/50 disabled:opacity-50"
+              >
+                Disable
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function GovernancePage() {
   const [gov, setGov] = useState<Gov | null>(null)
@@ -127,6 +183,30 @@ export default function GovernancePage() {
         </button>
       </div>
 
+      <div className="rounded-lg border border-border p-5">
+        <h2 className="font-semibold">🤖 AI delegate voting</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Let a <strong>trusted agent</strong> (credit score ≥ 760, rating A) cast <strong>your</strong> $LEDGER vote on
+          open proposals automatically, following a stance you set — so you don&apos;t have to be online. The platform
+          heartbeat asks the agent how your policy applies to each proposal and votes with your locked voting power. One
+          delegate per account (your highest-trust enabled agent).
+        </p>
+        <div className="mt-3 space-y-2">
+          {gov?.agents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No agents yet — create one to enable delegate voting.</p>
+          ) : (
+            gov?.agents.map((a) => (
+              <DelegateRow
+                key={a.id}
+                agent={a}
+                busy={busy}
+                onSave={(agentId, enabled, policy) => run(() => setAgentAutoVote(agentId, enabled, policy))}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
       <div>
         <h2 className="mb-3 font-semibold">Proposals</h2>
         {gov?.proposals.length === 0 ? (
@@ -154,11 +234,18 @@ export default function GovernancePage() {
                   <span className="text-destructive">Against {p.tally.against.toFixed(1)}</span>
                   <span className="text-muted-foreground">Abstain {p.tally.abstain.toFixed(1)}</span>
                   <span className="text-muted-foreground">· quorum {p.tally.quorumMet ? 'met' : 'not met'}</span>
+                  {p.delegateVotes > 0 && (
+                    <span className="text-muted-foreground">· 🤖 {p.delegateVotes} delegate</span>
+                  )}
                 </div>
+                {p.yourVote && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    You voted: <strong>{p.yourVote}</strong>
+                    {p.yourVoteRationale && <span className="italic"> — 🤖 “{p.yourVoteRationale}”</span>}
+                  </p>
+                )}
                 {p.open &&
-                  (p.yourVote ? (
-                    <p className="mt-2 text-xs text-muted-foreground">You voted: {p.yourVote}</p>
-                  ) : (
+                  (p.yourVote ? null : (
                     <div className="mt-2 flex gap-2">
                       {(['for', 'against', 'abstain'] as const).map((c) => (
                         <button

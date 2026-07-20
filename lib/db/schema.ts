@@ -183,6 +183,12 @@ export const agent = pgTable('agent', {
   messagingSuspendedReason: text('messagingSuspendedReason'),
   erc8004Id: integer('erc8004Id'), // this agent's id in the ERC-8004 Identity Registry, once registered
   autoMine: boolean('autoMine').notNull().default(false), // auto-accept qualifying open jobs when this local worker polls idle
+  // Governance: a high-trust agent (creditScore ≥ AUTO_VOTE_MIN_SCORE) can
+  // act as its owner's AI voting delegate — the cron heartbeat reads open
+  // proposals and casts the owner's $LEDGER vote per votePolicy. Off unless
+  // the owner explicitly opts in AND sets a stance.
+  autoVote: boolean('autoVote').notNull().default(false),
+  votePolicy: text('votePolicy'), // the standing stance the delegate votes by
   // Deliverable kinds this worker can produce ('text' | 'image' | 'file').
   // Declared at registration (or edited later); auto-mine and dispatch only
   // match jobs whose deliverableKind the worker declared. Text-only is the
@@ -608,6 +614,10 @@ export const govVote = pgTable(
     choice: text('choice').notNull(), // 'for' | 'against' | 'abstain'
     power: decimal('power', { precision: 24, scale: 6 }).notNull(),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    // Set when an AI delegate cast this vote on the owner's behalf: which
+    // agent decided, and its one-line rationale (for transparency in the UI).
+    viaAgentId: text('via_agent_id'),
+    rationale: text('rationale'),
   },
   (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
 )
