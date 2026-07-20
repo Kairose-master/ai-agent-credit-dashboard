@@ -9,6 +9,7 @@ import {
   postDelegationJobs,
   tickDelegation,
   subtaskViews,
+  delegationCost,
   type DelegationSubtask,
 } from '@/lib/delegation'
 
@@ -108,9 +109,10 @@ const TOOLS = [
       properties: {
         goal: { type: 'string', description: 'What needs to be done (min 20 chars)' },
         budget_usd: { type: 'number', description: `Total budget in USDC (2–${MAX_BUDGET_USD})` },
+        prime_agent_id: { type: 'string', description: 'Which agent escrows the bounties, by id (preferred — unambiguous)' },
         prime_agent_name: {
           type: 'string',
-          description: 'Which of your agents escrows the bounties (optional — defaults to your first funded agent)',
+          description: 'Which agent escrows the bounties, by name (used only if prime_agent_id is omitted; defaults to your first funded agent)',
         },
       },
       required: ['goal', 'budget_usd'],
@@ -183,7 +185,8 @@ const TOOLS = [
       type: 'object',
       properties: {
         job_id: { type: 'number' },
-        agent_name: { type: 'string', description: 'Which of your agents claims it (optional — defaults to the first provisioned one)' },
+        agent_id: { type: 'string', description: 'Which agent claims it, by id (preferred — unambiguous)' },
+        agent_name: { type: 'string', description: 'Which agent claims it, by name (used only if agent_id is omitted; defaults to a provisioned agent that did not post the job)' },
       },
       required: ['job_id'],
       additionalProperties: false,
@@ -254,11 +257,14 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         return toolText(id, `budget_usd must be between 2 and ${MAX_BUDGET_USD}.`, true)
       }
       const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.prime_agent_id ? String(args.prime_agent_id) : null
       const wanted = args.prime_agent_name ? String(args.prime_agent_name) : null
-      const prime = wanted
-        ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
-        : agents.find((a) => a.smartAccountAddress)
-      if (!prime) return toolText(id, wanted ? `No agent named "${wanted}" on this account.` : 'No provisioned agent found.', true)
+      const prime = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress)
+      if (!prime) return toolText(id, wantedId ? `No agent with id "${wantedId}" on this account.` : wanted ? `No agent named "${wanted}" on this account.` : 'No provisioned agent found.', true)
       if (!prime.smartAccountAddress) return toolText(id, `Agent ${prime.name} has no wallet yet — provision it first.`, true)
 
       const subtasks = await planDelegation(auth.userId, goal, budgetUsd)
@@ -333,8 +339,14 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           row.finalOutput && row.finalOutput.length > 2000
             ? `${row.finalOutput.slice(0, 2000)}\n… [TRUNCATED — ${row.finalOutput.length - 2000} more chars. Call get_delegation_output with delegation_id "${row.id}" for the complete document.]`
             : row.finalOutput
+        const c = delegationCost(row, jobs)
+        const costLine =
+          row.status === 'planned'
+            ? ''
+            : `\n   cost: $${c.escrowedUsd.toFixed(2)} escrowed (paid $${c.releasedUsd.toFixed(2)}, refunded $${c.refundedUsd.toFixed(2)}, locked $${c.lockedUsd.toFixed(2)}) · gas $0 sponsored · fee $0`
         blocks.push(
-          `${row.id} [${row.status}] $${Number(row.budgetUsd).toFixed(2)} — ${row.task.slice(0, 80)}` +
+          `${row.id} [${row.status}] $${Number(row.budgetUsd).toFixed(2)} budget — ${row.task.slice(0, 80)}` +
+            costLine +
             (subLines ? `\n${subLines}` : '') +
             (preview ? `\n   FINAL OUTPUT:\n${preview}` : '') +
             (row.error ? `\n   error: ${row.error}` : ''),
@@ -376,9 +388,12 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       if (rateLimited(auth.userId, { bucket: 'mcp-create-agent', windowMs: 10 * 60 * 1000, max: 5 })) {
         return toolText(id, 'Creating agents too quickly — wait a few minutes.', true)
       }
-      const owned = await db.select({ id: agent.id }).from(agent).where(eq(agent.userId, auth.userId))
+      const owned = await db.select({ id: agent.id, name: agent.name }).from(agent).where(eq(agent.userId, auth.userId))
       const maxAgents = Number(process.env.MAX_AGENTS_PER_ACCOUNT ?? 20)
       if (owned.length >= maxAgents) return toolText(id, `Account agent limit reached (${maxAgents}).`, true)
+      if (owned.some((a) => a.name.toLowerCase() === name_.toLowerCase())) {
+        return toolText(id, `You already have an agent named "${name_}" — names must be unique on an account.`, true)
+      }
 
       const { randomBytes } = await import('node:crypto')
       const agentId = nanoid()
@@ -421,20 +436,23 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       const jobId = Number(args.job_id)
       if (!Number.isInteger(jobId) || jobId < 0) return toolText(id, 'job_id must be a job number.', true)
       const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.agent_id ? String(args.agent_id) : null
       const wanted = args.agent_name ? String(args.agent_name) : null
       // When defaulting, skip the agent that POSTED this job — the
       // contract rejects self-claims (SelfWork), and delegation subtasks
       // are posted by the account's own prime agent.
       let requesterAddr: string | null = null
-      if (!wanted) {
+      if (!wantedId && !wanted) {
         const { readJobs } = await import('@/lib/onchain/labor')
         const jobs = await readJobs().catch(() => [])
         requesterAddr = jobs.find((j) => j.id === jobId)?.requester?.toLowerCase() ?? null
       }
-      const worker = wanted
-        ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
-        : agents.find((a) => a.smartAccountAddress && a.smartAccountAddress.toLowerCase() !== requesterAddr)
-      if (!worker) return toolText(id, wanted ? `No agent named "${wanted}".` : 'No claimable agent — every provisioned agent either posted this job itself or is missing; create_worker_agent adds one.', true)
+      const worker = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress && a.smartAccountAddress.toLowerCase() !== requesterAddr)
+      if (!worker) return toolText(id, wantedId ? `No agent with id "${wantedId}".` : wanted ? `No agent named "${wanted}".` : 'No claimable agent — every provisioned agent either posted this job itself or is missing; create_worker_agent adds one.', true)
       if (!worker.smartAccountAddress) return toolText(id, `Agent ${worker.name} has no wallet yet.`, true)
 
       const { acceptJobForExternalWorker } = await import('@/lib/labor-dispatch')

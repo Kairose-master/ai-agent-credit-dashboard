@@ -5,7 +5,7 @@
  * dispatch bookkeeping can't drift between them.
  */
 import { db } from '@/lib/db'
-import { jobSpec, type agent as agentTable } from '@/lib/db/schema'
+import { jobSpec, agent as agentTable } from '@/lib/db/schema'
 import { and, eq, isNull, lt, or } from 'drizzle-orm'
 import { runAgentTask } from '@/lib/agent-tasks'
 
@@ -59,7 +59,34 @@ export function assertNotSelfClaim(worker: AgentRow, requesterAddress: string | 
     requesterAddress.toLowerCase() === worker.smartAccountAddress.toLowerCase()
   ) {
     throw new Error(
-      `${worker.name} posted this job itself (it's the escrowing requester) — an agent can't claim its own job. Claim it with a different agent on the account, or leave it for the market.`,
+      `${worker.name} posted this job itself (it's the escrowing requester) — an agent can't claim its own job.`,
+    )
+  }
+}
+
+/**
+ * Block self-DEALING, not just self-claiming: an agent claiming a job
+ * posted by ANOTHER agent on the SAME account. The contract only reverts
+ * on identical addresses (SelfWork), but same-owner claims are a credit-
+ * farming vector — money loops A1→A2 within one owner's control (minus
+ * sponsored gas) while A2 banks a JOB_COMPLETED credit event for free.
+ * Allowing it would make credit scores meaningless, so we reject it
+ * API-side with a clear message before any gas is spent. Cross-account
+ * work (the real market, the faucet, delegation to other users) is
+ * unaffected. Async because it resolves the requester's owner from the
+ * on-chain address.
+ */
+export async function assertNotSelfDeal(worker: AgentRow, requesterAddress: string | undefined): Promise<void> {
+  assertNotSelfClaim(worker, requesterAddress)
+  if (!requesterAddress) return
+  const { sql } = await import('drizzle-orm')
+  const [requesterAgent] = await db
+    .select({ userId: agentTable.userId, name: agentTable.name })
+    .from(agentTable)
+    .where(sql`lower(${agentTable.smartAccountAddress}) = ${requesterAddress.toLowerCase()}`)
+  if (requesterAgent && requesterAgent.userId === worker.userId) {
+    throw new Error(
+      `This job was posted by "${requesterAgent.name}" on your own account — you can't grade and pay yourself (it would farm credit). Use a separate account to work it, or leave it for the market.`,
     )
   }
 }
@@ -136,7 +163,7 @@ export async function acceptAndDispatchJob(
   const job = jobs.find((j) => j.id === jobId)
   const [spec] = job ? await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash)) : []
 
-  assertNotSelfClaim(worker, job?.requester)
+  await assertNotSelfDeal(worker, job?.requester)
 
   if (spec?.failedWorkerIds?.includes(worker.id)) {
     throw new Error(
@@ -209,7 +236,7 @@ export async function acceptJobForExternalWorker(
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
   if (!spec) throw new Error('Job has no off-chain spec — nothing to actually do')
 
-  assertNotSelfClaim(worker, job.requester)
+  await assertNotSelfDeal(worker, job.requester)
 
   if (spec.failedWorkerIds?.includes(worker.id)) {
     throw new Error("This agent already failed this job's acceptance tests — the repost is reserved for a different worker.")

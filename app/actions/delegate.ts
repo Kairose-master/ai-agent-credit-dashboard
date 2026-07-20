@@ -18,6 +18,7 @@ import {
   postDelegationJobs,
   tickDelegation,
   subtaskViews,
+  delegationCost,
   MAX_SUBTASKS,
   type DelegationSubtask,
 } from '@/lib/delegation'
@@ -183,6 +184,9 @@ export async function getMyDelegations() {
       finalOutput: row.finalOutput,
       error: row.error,
       createdAt: row.createdAt.toISOString(),
+      // Transparent money breakdown — escrow/released/refunded/locked, plus
+      // gas (sponsored, $0) and fee ($0) stated so nothing is unexplained.
+      cost: delegationCost(row, jobs),
       subtasks:
         row.status === 'planned'
           ? (row.subtasks as DelegationSubtask[]).map((st) => ({ ...st, jobStatus: null, workerLabel: null }))
