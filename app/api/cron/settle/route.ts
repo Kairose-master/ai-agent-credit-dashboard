@@ -69,5 +69,14 @@ export async function GET(request: Request) {
     report.delegations = { active: 0 }
   }
 
+  // Keep the starter-job supply topped up — the heartbeat is exactly the
+  // "nobody is around" moment the faucet exists for.
+  try {
+    const { tickJobFaucet } = await import('@/lib/job-faucet')
+    report.faucet = await tickJobFaucet({ force: true })
+  } catch (e) {
+    report.faucet = String(e)
+  }
+
   return Response.json({ ok: true, ...report })
 }
