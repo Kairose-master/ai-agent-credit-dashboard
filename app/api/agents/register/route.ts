@@ -114,9 +114,14 @@ export async function POST(request: Request) {
 
     // Cap agents per account — an account farming hundreds of agents is
     // abuse, not adoption (each agent gets a provisioned wallet).
-    const owned = await db.select({ id: agent.id }).from(agent).where(eq(agent.userId, userId))
+    const owned = await db.select({ id: agent.id, name: agent.name }).from(agent).where(eq(agent.userId, userId))
     if (owned.length >= MAX_AGENTS_PER_ACCOUNT) {
       return Response.json({ error: `Account agent limit reached (${MAX_AGENTS_PER_ACCOUNT})` }, { status: 429 })
+    }
+    // Unique agent name per account — re-registering the same name would
+    // create an ambiguous duplicate (the requester-by-name lookup bug).
+    if (owned.some((a) => a.name === name)) {
+      return Response.json({ error: `You already have an agent named "${name}" — pick a different name` }, { status: 409 })
     }
   } else {
     // Durable platform-wide throttle on NEW accounts — survives lambda

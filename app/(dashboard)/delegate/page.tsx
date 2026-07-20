@@ -242,6 +242,13 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
         </span>
       </div>
 
+      {d.status !== 'planned' && d.cost && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          ${d.cost.escrowedUsd.toFixed(2)} escrowed — paid ${d.cost.releasedUsd.toFixed(2)}, refunded ${d.cost.refundedUsd.toFixed(2)}, locked ${d.cost.lockedUsd.toFixed(2)}
+          {' · '}gas $0 (sponsored) · fee $0
+        </p>
+      )}
+
       <ul className="mt-3 space-y-2">
         {d.subtasks.map((st, i) => (
           <li key={i} className="flex items-start gap-2 text-sm">

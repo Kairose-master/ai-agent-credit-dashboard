@@ -3,7 +3,7 @@
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent } from '@/lib/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { eq, and, desc } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { randomBytes } from 'node:crypto'
@@ -77,13 +77,23 @@ export async function bootstrapFirstAgent() {
  */
 export async function createAgent(data: { name: string; description?: string }) {
   const userId = await getUserId()
-  if (!data.name.trim()) throw new Error('Name required')
+  const name = data.name.trim()
+  if (!name) throw new Error('Name required')
+
+  // Unique per account — duplicate names made requester-by-name lookups
+  // sign with the wrong wallet (the NotRequester incident), so the name
+  // must resolve to exactly one agent within an account.
+  const [dupe] = await db
+    .select({ id: agent.id })
+    .from(agent)
+    .where(and(eq(agent.userId, userId), eq(agent.name, name)))
+  if (dupe) throw new Error(`You already have an agent named "${name}" — pick a different name`)
 
   const agentId = nanoid()
   await db.insert(agent).values({
     id: agentId,
     userId,
-    name: data.name.trim(),
+    name,
     walletAddress: `0x${randomBytes(20).toString('hex')}`,
     description: data.description?.trim() || null,
     modelVersion: 'claude-sonnet-5',

@@ -519,6 +519,57 @@ export async function tickDelegation(
   }
 }
 
+export interface DelegationCost {
+  budgetUsd: number
+  /** Sum of subtask bounties actually escrowed (posted jobs). */
+  escrowedUsd: number
+  /** Escrow paid out to workers (Completed subtasks). */
+  releasedUsd: number
+  /** Escrow returned to the prime (Refunded/failed subtasks). */
+  refundedUsd: number
+  /** Still locked in escrow (in-flight subtasks). */
+  lockedUsd: number
+  /** Gas is sponsored by the platform paymaster — never charged to you. */
+  gasUsd: 0
+  /** No platform fee (yet). */
+  feeUsd: 0
+}
+
+/** Deterministic money breakdown for a delegation — the trust layer.
+ *  Every figure comes from subtask bounties + live job states we already
+ *  read, so it reconciles exactly with the on-chain escrow. Gas is
+ *  sponsored and there's no fee, stated explicitly so "why was $X moved"
+ *  never has a hidden component. Pure. */
+export function delegationCost(
+  row: typeof delegation.$inferSelect,
+  jobs: Awaited<ReturnType<typeof import('@/lib/onchain/labor').readJobs>>,
+): DelegationCost {
+  const subtasks = row.subtasks as DelegationSubtask[]
+  let escrowed = 0
+  let released = 0
+  let refunded = 0
+  let locked = 0
+  for (const st of subtasks) {
+    if (st.onchainJobId === undefined) continue // never posted → nothing escrowed
+    const bounty = Number(st.bountyUsd) || 0
+    escrowed += bounty
+    const job = jobs.find((j) => j.id === st.onchainJobId)
+    const status = job?.status
+    if (status === 'Completed') released += bounty
+    else if (status === 'Refunded' || status === 'Cancelled' || st.failed) refunded += bounty
+    else locked += bounty
+  }
+  return {
+    budgetUsd: Number(row.budgetUsd) || 0,
+    escrowedUsd: Math.round(escrowed * 100) / 100,
+    releasedUsd: Math.round(released * 100) / 100,
+    refundedUsd: Math.round(refunded * 100) / 100,
+    lockedUsd: Math.round(locked * 100) / 100,
+    gasUsd: 0,
+    feeUsd: 0,
+  }
+}
+
 /** Live per-subtask view (job status + worker) for the UI. */
 export async function subtaskViews(
   row: typeof delegation.$inferSelect,
