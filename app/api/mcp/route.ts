@@ -369,6 +369,13 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
     case 'create_worker_agent': {
       const name_ = String(args.name ?? '').trim()
       if (!name_ || name_.length > 100) return toolText(id, 'name must be 1-100 characters.', true)
+      // Each agent provisions an on-chain wallet (gas + RPC) — rate-limit
+      // creation per account so a runaway connector loop can't spam it,
+      // on top of the durable per-account cap below.
+      const { rateLimited } = await import('@/lib/rate-limit')
+      if (rateLimited(auth.userId, { bucket: 'mcp-create-agent', windowMs: 10 * 60 * 1000, max: 5 })) {
+        return toolText(id, 'Creating agents too quickly — wait a few minutes.', true)
+      }
       const owned = await db.select({ id: agent.id }).from(agent).where(eq(agent.userId, auth.userId))
       const maxAgents = Number(process.env.MAX_AGENTS_PER_ACCOUNT ?? 20)
       if (owned.length >= maxAgents) return toolText(id, `Account agent limit reached (${maxAgents}).`, true)
