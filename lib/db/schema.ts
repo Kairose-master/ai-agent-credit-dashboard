@@ -602,8 +602,8 @@ export const govProposal = pgTable('gov_proposals', {
   closesAt: timestamp('closes_at', { withTimezone: true }).notNull(),
   /** 'open' | 'passed' | 'rejected' — finalized when closesAt passes. */
   status: text('status').notNull().default('open'),
-  /** On-chain commit-reveal poll id, when GOVERNANCE_POLL_ADDRESS is set. */
-  onchainPollId: integer('onchain_poll_id'),
+  /** On-chain VeilPoll contract address, when the factory is configured. */
+  onchainPollAddress: text('onchain_poll_address'),
 })
 
 /**
@@ -619,7 +619,7 @@ export const govOnchainVote = pgTable(
     proposalId: text('proposal_id').notNull(),
     userId: text('user_id').notNull(),
     agentId: text('agent_id').notNull(), // the smart account that voted
-    pollId: integer('poll_id').notNull(),
+    pollAddress: text('poll_address').notNull(), // the VeilPoll contract
     optionIndex: integer('option_index').notNull(),
     encryptedSalt: text('encrypted_salt'), // AES-GCM; nulled after reveal
     commitTxHash: text('commit_tx_hash'),

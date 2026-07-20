@@ -266,8 +266,10 @@ export async function createProposal(userId: string, title: string, body: string
   return { id }
 }
 
-/** Create the on-chain poll for a proposal (gated + best-effort). Uses one
- *  of the creator's smart-account agents as the relayer. */
+/** Deploy the on-chain VeilPoll for a proposal (gated + best-effort). Uses
+ *  one of the creator's smart-account agents as the relayer. Durations are
+ *  relative: commit window = time until the proposal closes, reveal window =
+ *  GOVERNANCE_REVEAL_DAYS after that. */
 async function mirrorProposalOnchain(proposalId: string, userId: string, closesAt: Date): Promise<void> {
   const { isGovernanceOnchainConfigured, onchainEnv } = await import('@/lib/onchain/config')
   if (!isGovernanceOnchainConfigured()) return
@@ -277,12 +279,16 @@ async function mirrorProposalOnchain(proposalId: string, userId: string, closesA
     .where(and(eq(agent.userId, userId), sql`${agent.smartAccountAddress} is not null`))
     .limit(1)
   if (!relayer) return
-  const commitEnd = Math.floor(closesAt.getTime() / 1000)
-  const revealEnd = commitEnd + Math.max(1, onchainEnv.governanceRevealDays) * 24 * 60 * 60
+  const commitDurationSec = Math.max(60, Math.floor((closesAt.getTime() - Date.now()) / 1000))
+  const revealDurationSec = Math.max(1, onchainEnv.governanceRevealDays) * 24 * 60 * 60
   const { createOnchainPoll } = await import('@/lib/onchain/governance-poll')
-  const pollId = await createOnchainPoll(relayer.id, commitEnd, revealEnd)
-  if (pollId != null) {
-    await db.update(govProposal).set({ onchainPollId: pollId }).where(eq(govProposal.id, proposalId)).catch(() => undefined)
+  const pollAddress = await createOnchainPoll(relayer.id, commitDurationSec, revealDurationSec)
+  if (pollAddress) {
+    await db
+      .update(govProposal)
+      .set({ onchainPollAddress: pollAddress })
+      .where(eq(govProposal.id, proposalId))
+      .catch(() => undefined)
   }
 }
 
@@ -508,8 +514,8 @@ export async function runAutoVotes(
         cast++
         // Also commit on-chain (privacy-preserving) when configured — the
         // off-chain vote above stays the authoritative ve-weighted tally.
-        if (prop.onchainPollId != null) {
-          await commitDelegateVoteOnchain(prop.id, userId, del.id, prop.onchainPollId, decision.choice).catch(
+        if (prop.onchainPollAddress) {
+          await commitDelegateVoteOnchain(prop.id, userId, del.id, prop.onchainPollAddress, decision.choice).catch(
             () => undefined,
           )
         }
@@ -527,14 +533,14 @@ async function commitDelegateVoteOnchain(
   proposalId: string,
   userId: string,
   agentId: string,
-  pollId: number,
+  pollAddress: string,
   choice: VoteChoice,
 ): Promise<void> {
   const { isGovernanceOnchainConfigured } = await import('@/lib/onchain/config')
   if (!isGovernanceOnchainConfigured()) return
   const { commitOnchainVote, CHOICE_TO_OPTION } = await import('@/lib/onchain/governance-poll')
   const option = CHOICE_TO_OPTION[choice]
-  const result = await commitOnchainVote(agentId, pollId, option)
+  const result = await commitOnchainVote(agentId, pollAddress as `0x${string}`, option)
   if (!result) return
   const { encryptSecret } = await import('@/lib/crypto')
   await db
@@ -543,7 +549,7 @@ async function commitDelegateVoteOnchain(
       proposalId,
       userId,
       agentId,
-      pollId,
+      pollAddress,
       optionIndex: option,
       encryptedSalt: encryptSecret(result.salt),
       commitTxHash: result.txHash,
@@ -566,15 +572,15 @@ export async function revealOnchainVotes(): Promise<{ pending: number; revealed:
   let revealed = 0
   for (const v of committed) {
     if (!v.encryptedSalt) continue
-    const phase = await pollPhase(v.pollId)
-    if (phase !== 1) continue // 0=still committing, 2=closed (missed), null=off
+    const phase = await pollPhase(v.pollAddress as `0x${string}`)
+    if (phase !== 1) continue // 0=still committing, 2=ended (missed), null=off
     let salt: `0x${string}`
     try {
       salt = decryptSecret(v.encryptedSalt) as `0x${string}`
     } catch {
       continue
     }
-    const txHash = await revealOnchainVote(v.agentId, v.pollId, v.optionIndex, salt)
+    const txHash = await revealOnchainVote(v.agentId, v.pollAddress as `0x${string}`, v.optionIndex, salt)
     if (!txHash) continue
     await db
       .update(govOnchainVote)

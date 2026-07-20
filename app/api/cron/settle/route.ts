@@ -88,7 +88,7 @@ export async function GET(request: Request) {
   }
 
   // Reveal any on-chain commit-reveal votes whose reveal window has opened
-  // (no-op unless GOVERNANCE_POLL_ADDRESS is configured).
+  // (no-op unless VEILPOLL_FACTORY_ADDRESS is configured).
   try {
     const { revealOnchainVotes } = await import('@/lib/governance')
     report.onchainReveals = await revealOnchainVotes()

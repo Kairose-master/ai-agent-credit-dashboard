@@ -499,13 +499,13 @@ CREATE TABLE IF NOT EXISTS gov_delegate_reviews (
   PRIMARY KEY (proposal_id, user_id)
 );
 
-ALTER TABLE gov_proposals ADD COLUMN IF NOT EXISTS onchain_poll_id integer;
+ALTER TABLE gov_proposals ADD COLUMN IF NOT EXISTS onchain_poll_address text;
 
 CREATE TABLE IF NOT EXISTS gov_onchain_votes (
   proposal_id    text NOT NULL,
   user_id        text NOT NULL,
   agent_id       text NOT NULL,
-  poll_id        integer NOT NULL,
+  poll_address   text NOT NULL,
   option_index   integer NOT NULL,
   encrypted_salt text,
   commit_tx_hash text,
