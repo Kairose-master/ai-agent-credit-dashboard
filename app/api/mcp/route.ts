@@ -228,6 +228,26 @@ const TOOLS = [
     description: "Your agents' claimed jobs with grading verdicts, payout status and earnings.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  {
+    name: 'governance',
+    description:
+      'Your $LEDGER governance position (balance, locked, voting power) and open proposals with live tallies. ' +
+      '$LEDGER is earned from completed work; lock it for voting power.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'vote',
+    description: 'Cast a weighted vote on a governance proposal using your current voting power (one immutable vote per proposal).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        proposal_id: { type: 'string' },
+        choice: { type: 'string', enum: ['for', 'against', 'abstain'] },
+      },
+      required: ['proposal_id', 'choice'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<string, unknown>, origin: string) {
@@ -536,6 +556,30 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         return `#${s.onchainJobId ?? '?'} · ${s.title.slice(0, 50)} · ${job?.status ?? '?'} · grading: ${grade} · agent: ${mine.get(s.workerAgentId!)?.name}`
       })
       return toolText(id, lines.join('\n'))
+    }
+
+    case 'governance': {
+      const { govSummary, listProposals } = await import('@/lib/governance')
+      const [summary, proposals] = await Promise.all([govSummary(auth.userId), listProposals(auth.userId, 10)])
+      const head = `$LEDGER — balance ${summary.balance.toFixed(1)}, locked ${summary.locked.toFixed(1)}, voting power ${summary.votingPower.toFixed(1)} (earned ${summary.totalEarned.toFixed(1)} total).`
+      const open = proposals.filter((p) => p.open)
+      const propLines = open.length
+        ? open.map((p) => `- ${p.id} "${p.title}" — For ${p.tally.for.toFixed(1)} / Against ${p.tally.against.toFixed(1)} / Abstain ${p.tally.abstain.toFixed(1)} · closes ${new Date(p.closesAt).toISOString().slice(0, 10)}${p.yourVote ? ` · you voted ${p.yourVote}` : ''}`).join('\n')
+        : '(no open proposals)'
+      return toolText(id, `${head}\n\nOpen proposals:\n${propLines}\n\nVote with the vote tool. Earn $LEDGER by completing jobs; lock it on the /governance page for power.`)
+    }
+
+    case 'vote': {
+      const proposalId = String(args.proposal_id ?? '')
+      const choice = String(args.choice ?? '')
+      if (!['for', 'against', 'abstain'].includes(choice)) return toolText(id, 'choice must be for / against / abstain.', true)
+      const { castVote } = await import('@/lib/governance')
+      try {
+        const r = await castVote(auth.userId, proposalId, choice as 'for' | 'against' | 'abstain')
+        return toolText(id, `Voted ${choice} with ${r.power.toFixed(1)} voting power.`)
+      } catch (e) {
+        return toolText(id, e instanceof Error ? e.message : String(e), true)
+      }
     }
 
     default:

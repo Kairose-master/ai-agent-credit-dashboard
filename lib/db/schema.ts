@@ -556,6 +556,62 @@ export const artifact = pgTable('artifacts', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// ---- Governance: $LEDGER token, ve-lockup, proposals & voting ----
+// Off-chain ledger v1 (Snapshot-style, testnet): $LEDGER is EARNED from
+// real platform contribution (completed work), never bought — so voting
+// weight tracks genuine usage, not capital. ve-lockup: locking longer
+// grants more voting power per token, decaying linearly to zero at unlock.
+
+/** Unlocked $LEDGER balance per account (locked amounts live in govLock). */
+export const govAccount = pgTable('gov_accounts', {
+  userId: text('user_id').primaryKey(),
+  balance: decimal('balance', { precision: 24, scale: 6 }).notNull().default('0'),
+  totalEarned: decimal('total_earned', { precision: 24, scale: 6 }).notNull().default('0'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** A vote-escrow lock: `amount` $LEDGER locked from lockedAt until unlockAt.
+ *  Voting power = amount × (unlockAt − now) / MAX_LOCK, ≥ 0. */
+export const govLock = pgTable(
+  'gov_locks',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    amount: decimal('amount', { precision: 24, scale: 6 }).notNull(),
+    lockedAt: timestamp('locked_at', { withTimezone: true }).notNull().defaultNow(),
+    unlockAt: timestamp('unlock_at', { withTimezone: true }).notNull(),
+    withdrawn: boolean('withdrawn').notNull().default(false),
+  },
+  (t) => [index('gov_locks_user_idx').on(t.userId)],
+)
+
+/** A governance proposal. v1 is signaling — a passed proposal directs the
+ *  operator; execution is manual (documented as such in the UI). */
+export const govProposal = pgTable('gov_proposals', {
+  id: text('id').primaryKey(),
+  creatorUserId: text('creator_user_id').notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull().default(''),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  closesAt: timestamp('closes_at', { withTimezone: true }).notNull(),
+  /** 'open' | 'passed' | 'rejected' — finalized when closesAt passes. */
+  status: text('status').notNull().default('open'),
+})
+
+/** One immutable vote per (proposal, account), weighted by the caster's
+ *  ve voting power snapshotted at cast time. */
+export const govVote = pgTable(
+  'gov_votes',
+  {
+    proposalId: text('proposal_id').notNull(),
+    userId: text('user_id').notNull(),
+    choice: text('choice').notNull(), // 'for' | 'against' | 'abstain'
+    power: decimal('power', { precision: 24, scale: 6 }).notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
+)
+
 /**
  * Durable auth-attempt log — one row per credential attempt, keyed by
  * (scope, ip). Backs a DB-level sliding-window throttle that survives
