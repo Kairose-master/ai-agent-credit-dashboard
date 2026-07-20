@@ -39,6 +39,17 @@ const KO = {
   'withdraw.to': '받는 주소',
   'withdraw.password': '계정 비밀번호',
   'withdraw.submit': '인출',
+  'gov.title': '🗳️ 거버넌스 ($LEDGER)',
+  'gov.hint': '$LEDGER는 완료한 작업으로 버는 토큰 — 사는 게 아니에요. 락하면 투표권이 생겨 플랫폼 방향을 정할 수 있어요. 신뢰받는 에이전트는 나 대신 투표도 하고, 확신 없는 건은 여기서 내 결정을 기다려요.',
+  'gov.power': '투표권',
+  'gov.balance': '$LEDGER 여유',
+  'gov.locked': '락된 양',
+  'gov.earned': '총 획득',
+  'gov.lockAmount': '락 수량',
+  'gov.lockWeeks': '주 (1–52)',
+  'gov.lock': '락하기',
+  'gov.autoVote': '🤖 이 에이전트가 나 대신 자동투표 (A등급 / 760점 이상 필요)',
+  'gov.savePolicy': '정책 저장',
   'game.pet': '채굴 펫',
   'game.shop': '상점',
   'mine.imageToggle': '🖼️ 이미지 일감도 채굴 (무료 생성 API — 경쟁 적고 보수 좋은 레인)',
@@ -196,6 +207,9 @@ const ACHIEVEMENTS = [
   { id: 'level5', emoji: '⭐', en: 'Reached level 5', ko: '레벨 5 달성' },
   { id: 'level10', emoji: '🌟', en: 'Reached level 10', ko: '레벨 10 달성' },
   { id: 'credit_a', emoji: '🏆', en: 'A-tier credit rating', ko: '신용 A등급' },
+  { id: 'first_vote', emoji: '🗳️', en: 'Cast your first vote', ko: '첫 투표 완료' },
+  { id: 'first_lock', emoji: '🔒', en: 'Locked $LEDGER for power', ko: '$LEDGER 첫 락' },
+  { id: 'delegate_on', emoji: '🤖', en: 'Delegate voting enabled', ko: '위임투표 활성화' },
 ]
 
 // Idle-game economy: 💎 shards are a pure GAME currency (never USDC, never
@@ -662,6 +676,8 @@ async function refreshWallet() {
 
 let currentPlanId = null
 let delegateTimer = null
+let govTimer = null
+let govPrevReviews = 0
 
 function delegateMsg(okText, errText) {
   const ok = document.getElementById('delegate-ok')
@@ -815,6 +831,246 @@ function initDelegateView() {
   })
 }
 
+// ---------- Governance ($LEDGER) ----------
+
+function govMsg(okText, errText) {
+  const okEl = document.getElementById('gov-ok')
+  const errEl = document.getElementById('gov-error')
+  okEl.hidden = !okText
+  okEl.textContent = okText || ''
+  errEl.hidden = !errText
+  errEl.textContent = errText || ''
+}
+
+async function gov(action, args = {}) {
+  return invoke('governance', { action, args })
+}
+
+function renderGovernance(data) {
+  const s = data.summary || {}
+  setText('gov-power', (s.votingPower ?? 0).toFixed(1))
+  setText('gov-balance', (s.balance ?? 0).toFixed(1))
+  setText('gov-locked', (s.locked ?? 0).toFixed(1))
+  setText('gov-earned', (s.totalEarned ?? 0).toFixed(1))
+
+  // This agent's delegate config (only if the platform sent it — i.e. this
+  // agent exists in the owner's roster).
+  const dWrap = document.getElementById('gov-delegate')
+  const me = data.me
+  if (me) {
+    dWrap.hidden = false
+    const toggle = document.getElementById('gov-autovote-toggle')
+    const policy = document.getElementById('gov-policy')
+    toggle.checked = Boolean(me.autoVote)
+    toggle.disabled = !me.eligible
+    policy.disabled = !me.eligible
+    document.getElementById('gov-policy-save').disabled = !me.eligible
+    if (document.activeElement !== policy) policy.value = me.votePolicy || ''
+  } else {
+    dWrap.hidden = true
+  }
+
+  // Pending delegate reviews — the human-in-the-loop queue.
+  const reviews = data.reviews || []
+  const rWrap = document.getElementById('gov-reviews')
+  rWrap.textContent = ''
+  if (reviews.length > govPrevReviews && govPrevReviews >= 0) {
+    const msg = lang === 'ko'
+      ? `🔍 대리인이 판단을 요청한 안건 ${reviews.length}건 — 확인해줘`
+      : `🔍 ${reviews.length} vote(s) need your review`
+    showToast(msg)
+    appendLog(msg)
+  }
+  govPrevReviews = reviews.length
+  for (const r of reviews) {
+    const card = document.createElement('div')
+    card.className = 'gov-review-card'
+    const head = document.createElement('div')
+    head.className = 'gov-review-head'
+    const title = document.createElement('strong')
+    title.textContent = r.proposalTitle
+    const rec = document.createElement('span')
+    rec.className = 'gov-rec'
+    rec.textContent = `→ ${r.choice}${r.confidence != null ? ` · ${Math.round(r.confidence * 100)}%` : ''}`
+    head.append(title, rec)
+    card.appendChild(head)
+    if (r.reason) {
+      const reason = document.createElement('p')
+      reason.className = 'gov-reason'
+      reason.textContent = `⚠ ${r.reason}`
+      card.appendChild(reason)
+    }
+    if (r.rationale) {
+      const rat = document.createElement('p')
+      rat.className = 'gov-rationale'
+      rat.textContent = `🤖 ${r.rationale}`
+      card.appendChild(rat)
+    }
+    const actions = document.createElement('div')
+    actions.className = 'gov-review-actions'
+    const accept = document.createElement('button')
+    accept.textContent = lang === 'ko' ? `${r.choice} 투표` : `Vote ${r.choice}`
+    accept.addEventListener('click', () => resolveGovReview(r.proposalId, 'accept'))
+    const dismiss = document.createElement('button')
+    dismiss.className = 'link-btn'
+    dismiss.textContent = lang === 'ko' ? '무시' : 'Dismiss'
+    dismiss.addEventListener('click', () => resolveGovReview(r.proposalId, 'dismiss'))
+    actions.append(accept, dismiss)
+    card.appendChild(actions)
+    rWrap.appendChild(card)
+  }
+
+  // Open proposals with vote buttons.
+  const props = data.proposals || []
+  const pWrap = document.getElementById('gov-proposals')
+  pWrap.textContent = ''
+  const open = props.filter((p) => p.open)
+  if (open.length === 0) {
+    const empty = document.createElement('p')
+    empty.className = 'hint'
+    empty.textContent = lang === 'ko' ? '열린 안건이 없어요.' : 'No open proposals.'
+    pWrap.appendChild(empty)
+  }
+  for (const p of open) {
+    const card = document.createElement('div')
+    card.className = 'gov-prop-card'
+    const title = document.createElement('strong')
+    title.textContent = p.title
+    card.appendChild(title)
+    const t = p.tally || {}
+    const tallyLine = document.createElement('p')
+    tallyLine.className = 'gov-tally'
+    tallyLine.textContent = `For ${(t.for ?? 0).toFixed(1)} · Against ${(t.against ?? 0).toFixed(1)} · Abstain ${(t.abstain ?? 0).toFixed(1)}`
+    card.appendChild(tallyLine)
+    if (p.yourVote) {
+      const yv = document.createElement('p')
+      yv.className = 'gov-yourvote'
+      yv.textContent = (lang === 'ko' ? '내 투표: ' : 'You voted: ') + p.yourVote
+      card.appendChild(yv)
+    } else {
+      const actions = document.createElement('div')
+      actions.className = 'gov-vote-actions'
+      for (const c of ['for', 'against', 'abstain']) {
+        const btn = document.createElement('button')
+        btn.textContent = c
+        btn.addEventListener('click', () => castGovVote(p.id, c))
+        actions.appendChild(btn)
+      }
+      card.appendChild(actions)
+    }
+    pWrap.appendChild(card)
+  }
+}
+
+async function refreshGovernance() {
+  try {
+    const data = await gov('view')
+    renderGovernance(data)
+  } catch {
+    /* offline or migration pending — keep last rendering */
+  }
+}
+
+async function castGovVote(proposalId, choice) {
+  govMsg('', '')
+  try {
+    await gov('vote', { proposal_id: proposalId, choice })
+    unlock('first_vote')
+    addXp(15)
+    const got = gainShards(8)
+    floatOverPet(`+${got} 💎`)
+    saveGame()
+    renderGame()
+    govMsg(lang === 'ko' ? `투표 완료: ${choice}` : `Voted ${choice}`, '')
+    refreshGovernance()
+  } catch (err) {
+    govMsg('', String(err))
+  }
+}
+
+async function resolveGovReview(proposalId, decision) {
+  govMsg('', '')
+  try {
+    const r = await gov('review', { proposal_id: proposalId, decision })
+    if (decision === 'accept' && r.cast) {
+      unlock('first_vote')
+      addXp(15)
+      saveGame()
+      renderGame()
+    }
+    refreshGovernance()
+  } catch (err) {
+    govMsg('', String(err))
+  }
+}
+
+function initGovernanceView() {
+  const section = document.getElementById('governance-section')
+  section.addEventListener('toggle', () => {
+    if (section.open) {
+      govPrevReviews = -1 // suppress the toast on the very first load
+      refreshGovernance()
+      if (!govTimer) govTimer = setInterval(refreshGovernance, 30_000)
+    } else if (govTimer) {
+      clearInterval(govTimer)
+      govTimer = null
+    }
+  })
+
+  document.getElementById('gov-lock-form').addEventListener('submit', async (e) => {
+    e.preventDefault()
+    govMsg('', '')
+    const amount = Number(document.getElementById('gov-lock-amount').value)
+    const weeks = Number(document.getElementById('gov-lock-weeks').value)
+    try {
+      await gov('lock', { amount, weeks })
+      unlock('first_lock')
+      addXp(20)
+      const got = gainShards(10)
+      floatOverPet(`+${got} 💎`)
+      saveGame()
+      renderGame()
+      document.getElementById('gov-lock-amount').value = ''
+      govMsg(lang === 'ko' ? `${amount} $LEDGER를 ${weeks}주 잠갔어요` : `Locked ${amount} $LEDGER for ${weeks}w`, '')
+      refreshGovernance()
+    } catch (err) {
+      govMsg('', String(err))
+    }
+  })
+
+  document.getElementById('gov-autovote-toggle').addEventListener('change', async (e) => {
+    const box = e.target
+    const policy = document.getElementById('gov-policy').value.trim()
+    box.disabled = true
+    try {
+      await gov('set_auto_vote', { enabled: box.checked, policy })
+      if (box.checked) {
+        unlock('delegate_on')
+        govMsg(lang === 'ko' ? '위임투표 켜짐 — 대리인이 대신 투표해요' : 'Delegate voting ON', '')
+      } else {
+        govMsg(lang === 'ko' ? '위임투표 꺼짐' : 'Delegate voting OFF', '')
+      }
+    } catch (err) {
+      box.checked = !box.checked
+      govMsg('', String(err))
+    } finally {
+      box.disabled = false
+    }
+  })
+
+  document.getElementById('gov-policy-save').addEventListener('click', async () => {
+    const enabled = document.getElementById('gov-autovote-toggle').checked
+    const policy = document.getElementById('gov-policy').value.trim()
+    govMsg('', '')
+    try {
+      await gov('set_auto_vote', { enabled, policy })
+      govMsg(lang === 'ko' ? '정책 저장됨' : 'Policy saved', '')
+    } catch (err) {
+      govMsg('', String(err))
+    }
+  })
+}
+
 // Buttons/listeners for the mining view are bound exactly once at boot —
 // enterMiningView() (called on every view transition into it) only
 // populates data, so re-entering never double-registers a handler.
@@ -932,6 +1188,7 @@ async function boot() {
   initBackendView()
   initMiningView()
   initDelegateView()
+  initGovernanceView()
 
   document.getElementById('pet-wrap').addEventListener('click', onPetClick)
   document.getElementById('shop-toggle').addEventListener('click', () => {

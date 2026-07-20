@@ -561,6 +561,42 @@ pub async fn delegation_status(
     delegations_call(platform_url, json!({ "op": "status", "agent_id": agent_id }), Some(secret)).await
 }
 
+/// POST /api/worker/governance — the Miner's $LEDGER governance panel.
+/// Worker-secret auth (safe: the worst it can do is vote/lock EARNED
+/// $LEDGER, which never leaves the platform — money still needs the
+/// password). Raw JSON in/out so new fields don't need a Rust release.
+pub async fn governance(
+    platform_url: &str,
+    agent_id: &str,
+    secret: &str,
+    action: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}/api/worker/governance", platform_url.trim_end_matches('/'));
+    let mut body = args;
+    if let Some(map) = body.as_object_mut() {
+        map.insert("agent_id".into(), json!(agent_id));
+        map.insert("action".into(), json!(action));
+    }
+    let res = client()
+        .post(&url)
+        .header("X-Runtime-Secret", secret)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("governance call failed: {e}"))?;
+    let status = res.status();
+    let parsed: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("unexpected governance response: {e}"))?;
+    if !status.is_success() {
+        let msg = parsed.get("error").and_then(|v| v.as_str()).unwrap_or("governance call failed");
+        return Err(msg.to_string());
+    }
+    Ok(parsed)
+}
+
 /// POST /api/worker/capabilities — declare what work this agent can be
 /// matched to (worker-secret auth; no money involved). Used by the image
 /// mining toggle.
