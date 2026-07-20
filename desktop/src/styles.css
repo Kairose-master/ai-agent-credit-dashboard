@@ -289,6 +289,23 @@ details summary { cursor: pointer; }
 
 .controls { display: flex; gap: 10px; margin-bottom: 14px; }
 
+.toggle-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.toggle-row input { margin-top: 2px; }
+
+#connect-section { margin-top: 14px; font-size: 0.85rem; color: var(--fg); }
+#connect-section summary { cursor: pointer; color: var(--muted); }
+#connect-section .hint { margin-top: 8px; }
+#connect-section .controls { margin-top: 10px; }
+
 #stop-btn { background: var(--danger); }
 
 #log {

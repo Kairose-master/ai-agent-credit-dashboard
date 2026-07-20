@@ -41,6 +41,10 @@ const KO = {
   'withdraw.submit': '인출',
   'game.pet': '채굴 펫',
   'game.shop': '상점',
+  'mine.imageToggle': '🖼️ 이미지 일감도 채굴 (무료 생성 API — 경쟁 적고 보수 좋은 레인)',
+  'connect.title': '🔗 Claude / ChatGPT에서 Ledgermind 쓰기',
+  'connect.hint': '이 계정은 MCP 커넥터로도 동작해요: Claude나 ChatGPT 대화 안에서 "10달러로 하청 줘"라고 위임하거나, 모델이 직접 일감을 수주해 USDC를 벌게 할 수 있어요. URL 하나면 되고 이 계정으로 승인합니다 — Claude 웹·Claude Desktop·ChatGPT(개발자 모드) 모두 지원.',
+  'connect.open': '연결 가이드 열기',
   'delegate.title': '일감 맡기기 (다른 에이전트 고용)',
   'delegate.hint': '이번엔 반대편에 서 보세요: 목표를 적으면 플랫폼 플래너가 보수가 책정된 하위 작업으로 쪼개주고, 정확한 계획을 승인한 뒤에야 채굴로 번 USDC가 에스크로됩니다. 다른 에이전트들이 작업을 수행하고, 검수를 통과한 제출물엔 자동으로 지급되며 조립된 결과물이 아래에 표시됩니다.',
   'delegate.goal': '무엇을 맡기시겠어요?',
@@ -866,6 +870,35 @@ function initMiningView() {
     location.reload()
   })
 
+  // Image-mining toggle: declares/undeclares the 'image' capability on
+  // the platform so the matcher (auto-mine) routes image jobs here.
+  document.getElementById('image-mining-toggle').addEventListener('change', async (e) => {
+    const box = e.target
+    const errEl = document.getElementById('image-mining-error')
+    errEl.hidden = true
+    box.disabled = true
+    try {
+      await invoke('set_image_mining', { enabled: box.checked })
+      appendLog(box.checked
+        ? 'Image mining ON — this agent now claims image jobs too (free generation API).'
+        : 'Image mining OFF — back to text-only.')
+    } catch (err) {
+      box.checked = !box.checked // revert — platform didn't accept it
+      errEl.textContent = String(err)
+      errEl.hidden = false
+    } finally {
+      box.disabled = false
+    }
+  })
+
+  document.getElementById('connect-open-btn').addEventListener('click', async () => {
+    try {
+      await invoke('open_url', { url: 'https://ai-agent-credit-dashboard.vercel.app/connect' })
+    } catch (err) {
+      appendLog(`Could not open browser: ${err}`)
+    }
+  })
+
   listen('mining-event', (event) => onMiningEvent(event.payload))
 }
 
@@ -877,6 +910,7 @@ async function enterMiningView() {
   showView('mining')
   setText('agent-name-display', cfg.agent.name)
   setText('backend-label-display', backendLabel(cfg.backend))
+  document.getElementById('image-mining-toggle').checked = Boolean(cfg.image_mining)
 
   renderGame()
   refreshWallet()

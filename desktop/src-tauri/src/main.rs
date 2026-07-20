@@ -34,6 +34,11 @@ struct AgentConfig {
 struct StoredConfig {
     agent: Option<AgentConfig>,
     backend: Option<ModelBackend>,
+    /// Image mining: when on, this agent declares the 'image' capability
+    /// and image-deliverable jobs are fulfilled via the free keyless
+    /// generation API instead of the chat model.
+    #[serde(default)]
+    image_mining: bool,
 }
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -173,6 +178,31 @@ async fn withdraw_earnings(app: tauri::AppHandle, to: String, password: String) 
     protocol::withdraw(&agent.platform_url, &agent.email, &password, &to, Some(&agent.agent_id)).await
 }
 
+/// Toggle image mining: declares/undeclares the 'image' capability on the
+/// platform (so the matcher routes/stops routing image jobs here) and
+/// persists the choice. Takes effect immediately — the mining loop reads
+/// each task's deliverable_kind per poll.
+#[tauri::command]
+async fn set_image_mining(app: tauri::AppHandle, enabled: bool) -> Result<Vec<String>, String> {
+    let mut cfg = load_stored_config(&app);
+    let agent = cfg.agent.clone().ok_or_else(|| "No agent registered yet.".to_string())?;
+    let caps: Vec<&str> = if enabled { vec!["text", "image"] } else { vec!["text"] };
+    let confirmed = protocol::update_capabilities(&agent.platform_url, &agent.agent_id, &agent.secret, &caps).await?;
+    cfg.image_mining = enabled;
+    save_stored_config(&app, &cfg)?;
+    Ok(confirmed)
+}
+
+/// Open a URL in the system browser — used by the "Connect Claude/ChatGPT"
+/// section (the connector onboarding lives on the web, where OAuth can run).
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("only https URLs can be opened".into());
+    }
+    open::that(&url).map_err(|e| format!("could not open browser: {e}"))
+}
+
 #[tauri::command]
 async fn start_mining(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let cfg = load_stored_config(&app);
@@ -248,14 +278,32 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                 emit_event(&app, MiningEvent::Status { state: "running".into(), tasks_completed: completed, tasks_failed: failed });
 
                 let started = std::time::Instant::now();
-                let (success, output) = match protocol::ask_model(&backend, &task.task).await {
-                    Ok(text) if !text.trim().is_empty() => (true, text),
-                    Ok(_) => (false, "Local model returned empty output".to_string()),
-                    Err(e) => (false, format!("Local worker error: {e}")),
+                // Image-deliverable tasks (only routed here when image
+                // mining declared the capability) go to the generation
+                // API; everything else goes to the chat model.
+                let (success, output, artifacts) = if task.deliverable_kind == "image" {
+                    match protocol::generate_image(&task.task).await {
+                        Ok((mime, data_base64)) => (
+                            true,
+                            "Generated image attached (desktop miner, prompt derived from the task spec).".to_string(),
+                            vec![protocol::Artifact {
+                                name: if mime.ends_with("png") { "deliverable.png".into() } else { "deliverable.jpg".into() },
+                                mime,
+                                data_base64,
+                            }],
+                        ),
+                        Err(e) => (false, format!("Image generation failed: {e}"), vec![]),
+                    }
+                } else {
+                    match protocol::ask_model(&backend, &task.task).await {
+                        Ok(text) if !text.trim().is_empty() => (true, text, vec![]),
+                        Ok(_) => (false, "Local model returned empty output".to_string(), vec![]),
+                        Err(e) => (false, format!("Local worker error: {e}"), vec![]),
+                    }
                 };
                 let elapsed = started.elapsed().as_secs();
 
-                match protocol::submit_result(&agent.platform_url, &agent.agent_id, &agent.secret, &task.task_id, success, &output, elapsed).await {
+                match protocol::submit_result(&agent.platform_url, &agent.agent_id, &agent.secret, &task.task_id, success, &output, elapsed, &artifacts).await {
                     Ok(()) => {
                         if success {
                             completed += 1;
@@ -374,6 +422,8 @@ fn main() {
             confirm_delegation,
             discard_delegation,
             delegation_status,
+            set_image_mining,
+            open_url,
         ])
         .setup(|app| {
             // System tray: the Miner's real home. Closing the window hides
