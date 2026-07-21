@@ -16,7 +16,12 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await params
-  const stored = await getWorkProof(id)
+  // `job-142` / `job:142` / `job142` resolves the latest proof for on-chain
+  // job #142 — the certificate for a real labor-market payout.
+  const jobMatch = id.match(/^job[-:]?(\d+)$/i)
+  const stored = jobMatch
+    ? await (await import('@/lib/work-proof-store')).getLatestProofForJob(`#${jobMatch[1]}`)
+    : await getWorkProof(id)
   if (!stored) return Response.json({ error: 'proof not found' }, { status: 404 })
 
   const verification = await verifyWorkProof(stored.proof, stored.signature as `0x${string}`, stored.attester as `0x${string}`)
