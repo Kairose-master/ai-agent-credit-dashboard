@@ -8,8 +8,10 @@
  * writes. The deployed address is stored in platform_secrets
  * ('minivault_address') so no env change or redeploy is needed to adopt it.
  */
-import { formatEther, parseEther, type Address, type Hex } from 'viem'
+import { createWalletClient, formatEther, http, parseEther, type Address, type Hex } from 'viem'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { MINIVAULT_ABI, MINIVAULT_BYTECODE } from './minivault-artifact'
+import { CHAIN, onchainEnv } from './config'
 import { oracleWallet, publicClient } from './clients'
 import { getPlatformSecret, setPlatformSecret } from '@/lib/platform-secret'
 
@@ -101,6 +103,114 @@ export async function readMiniVaultPosition(user: Address): Promise<MiniVaultPos
     maxDebtUsd: toNum(maxDebt as bigint),
     healthFactor: debt === 0n ? null : Number(hfWei) / Number(WAD),
     liquidatable: liq as boolean,
+  }
+}
+
+// ── two-party liquidation demo ──────────────────────────────────────────
+// A REAL liquidation needs a second party: someone who holds gUSD, burns it
+// against an unhealthy position, and walks away with bonus-priced ETH. We
+// keep a dedicated demo-liquidator key server-side (platform_secrets), fund
+// it from the oracle, and let it execute the actual liquidate() call.
+
+const LIQUIDATOR_KEY = 'minivault_liquidator_pk'
+
+async function liquidatorAccount() {
+  let pk = await getPlatformSecret(LIQUIDATOR_KEY)
+  if (!pk) {
+    pk = generatePrivateKey()
+    await setPlatformSecret(LIQUIDATOR_KEY, pk)
+  }
+  return privateKeyToAccount(pk as Hex)
+}
+
+function walletFor(account: ReturnType<typeof privateKeyToAccount>) {
+  return createWalletClient({ account, chain: CHAIN, transport: http(onchainEnv.rpcUrl) })
+}
+
+/** Step 1 — prep: ensure the demo liquidator has gas ETH and gUSD to burn.
+ *  Idempotent: skips whatever it already has. */
+export async function prepLiquidator(): Promise<{ liquidator: Address; ethBalance: number; gusdBalance: number; txs: Hex[] }> {
+  const address = await miniVaultAddress()
+  if (!address) throw new Error('MiniVault not deployed')
+  const liq = await liquidatorAccount()
+  const client = publicClient()
+  const oracle = oracleWallet()
+  const txs: Hex[] = []
+
+  const ethBal = await client.getBalance({ address: liq.address })
+  if (ethBal < parseEther('0.002')) {
+    const tx = await oracle.sendTransaction({ to: liq.address, value: parseEther('0.004') })
+    await client.waitForTransactionReceipt({ hash: tx })
+    txs.push(tx)
+  }
+
+  const gusd = (await client.readContract({ address, abi: MINIVAULT_ABI, functionName: 'balanceOf', args: [liq.address] })) as bigint
+  if (gusd < parseEther('1')) {
+    const tx = await oracle.writeContract({ address, abi: MINIVAULT_ABI, functionName: 'transfer', args: [liq.address, parseEther('1')] })
+    await client.waitForTransactionReceipt({ hash: tx })
+    txs.push(tx)
+  }
+
+  const [ethAfter, gusdAfter] = await Promise.all([
+    client.getBalance({ address: liq.address }),
+    client.readContract({ address, abi: MINIVAULT_ABI, functionName: 'balanceOf', args: [liq.address] }) as Promise<bigint>,
+  ])
+  return { liquidator: liq.address, ethBalance: toNum(ethAfter), gusdBalance: toNum(gusdAfter), txs }
+}
+
+/** Step 2 — run: crash the mock price until the oracle's position is under
+ *  water, let the SECOND account execute liquidate(), then restore the
+ *  price. Returns the full before/after story. */
+export async function runLiquidationDemo(crashPriceUsd: number, restorePriceUsd: number): Promise<{
+  liquidator: Address
+  target: Address
+  crashTx: Hex
+  liquidateTx: Hex
+  restoreTx: Hex
+  repaidGusd: number
+  seizedEth: number
+  seizedValueUsd: number
+  before: MiniVaultPosition | null
+  after: MiniVaultPosition | null
+}> {
+  const address = await miniVaultAddress()
+  if (!address) throw new Error('MiniVault not deployed')
+  const liq = await liquidatorAccount()
+  const client = publicClient()
+  const oracle = oracleWallet()
+  const target = oracle.account.address
+
+  const before = await readMiniVaultPosition(target)
+
+  const crashTx = await oracle.writeContract({ address, abi: MINIVAULT_ABI, functionName: 'setPrice', args: [parseEther(String(crashPriceUsd))] })
+  await client.waitForTransactionReceipt({ hash: crashTx })
+
+  const liquidatable = (await client.readContract({ address, abi: MINIVAULT_ABI, functionName: 'isLiquidatable', args: [target] })) as boolean
+  if (!liquidatable) throw new Error(`position still healthy at $${crashPriceUsd} — crash lower`)
+
+  const ethBefore = await client.getBalance({ address: liq.address })
+  const liqWallet = walletFor(liq)
+  const liquidateTx = await liqWallet.writeContract({ address, abi: MINIVAULT_ABI, functionName: 'liquidate', args: [target, parseEther('1')] })
+  const receipt = await client.waitForTransactionReceipt({ hash: liquidateTx })
+  const ethAfterLiq = await client.getBalance({ address: liq.address })
+  const gasPaid = receipt.gasUsed * receipt.effectiveGasPrice
+
+  const restoreTx = await oracle.writeContract({ address, abi: MINIVAULT_ABI, functionName: 'setPrice', args: [parseEther(String(restorePriceUsd))] })
+  await client.waitForTransactionReceipt({ hash: restoreTx })
+
+  const after = await readMiniVaultPosition(target)
+  const seizedWei = ethAfterLiq - ethBefore + gasPaid // net ETH in + gas it burned
+  return {
+    liquidator: liq.address,
+    target,
+    crashTx,
+    liquidateTx,
+    restoreTx,
+    repaidGusd: 1,
+    seizedEth: toNum(seizedWei),
+    seizedValueUsd: toNum(seizedWei) * crashPriceUsd,
+    before,
+    after,
   }
 }
 

@@ -1,4 +1,12 @@
-import { deployMiniVault, demoDepositAndMint, readMiniVaultPosition, readMiniVaultState, setMiniVaultPrice } from '@/lib/onchain/mini-vault-chain'
+import {
+  deployMiniVault,
+  demoDepositAndMint,
+  prepLiquidator,
+  readMiniVaultPosition,
+  readMiniVaultState,
+  runLiquidationDemo,
+  setMiniVaultPrice,
+} from '@/lib/onchain/mini-vault-chain'
 import { oracleAccount } from '@/lib/onchain/clients'
 
 /**
@@ -39,6 +47,16 @@ export async function POST(request: Request): Promise<Response> {
       const result = await demoDepositAndMint(eth)
       const position = await readMiniVaultPosition(oracleAccount().address)
       return Response.json({ status: 'ok', action, depositedEth: eth, ...result, position })
+    }
+    if (action === 'liq-prep') {
+      const result = await prepLiquidator()
+      return Response.json({ status: 'ok', action, ...result })
+    }
+    if (action === 'liq-run') {
+      const crash = Number(url.searchParams.get('crash') ?? 1000)
+      const restore = Number(url.searchParams.get('restore') ?? 3000)
+      const result = await runLiquidationDemo(crash, restore)
+      return Response.json({ status: 'ok', action, crashPriceUsd: crash, restorePriceUsd: restore, ...result })
     }
     // read
     const state = await readMiniVaultState()
