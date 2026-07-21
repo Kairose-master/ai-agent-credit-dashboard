@@ -682,29 +682,62 @@ pub async fn generate_image(task: &str) -> Result<(String, String), String> {
         "{IMAGE_API}{}?width=1024&height=1024&nologo=true",
         urlencoding_encode(&prompt)
     );
-    let res = client()
-        .get(&url)
-        .timeout(Duration::from_secs(180))
-        .send()
-        .await
-        .map_err(|e| format!("image API unreachable: {e}"))?;
-    if !res.status().is_success() {
-        return Err(format!("image API responded {}", res.status()));
+
+    // pollinations intermittently returns a tiny error body (a few hundred
+    // bytes of HTML/JSON) instead of a real image — under load, rate limits,
+    // or a transient upstream error. Submitting THAT is what produced the
+    // 441-byte "images" the grader (correctly) rejected. Retry, and never
+    // return a body that isn't a real, non-trivial image.
+    let mut last_err = String::new();
+    for attempt in 0..3u32 {
+        let res = match client().get(&url).timeout(Duration::from_secs(180)).send().await {
+            Ok(r) => r,
+            Err(e) => { last_err = format!("image API unreachable: {e}"); continue }
+        };
+        if !res.status().is_success() {
+            last_err = format!("image API responded {}", res.status());
+            tokio::time::sleep(Duration::from_secs(2 * (attempt as u64 + 1))).await;
+            continue;
+        }
+        let mime = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/jpeg")
+            .split(';')
+            .next()
+            .unwrap_or("image/jpeg")
+            .to_string();
+        let bytes = match res.bytes().await {
+            Ok(b) => b,
+            Err(e) => { last_err = format!("image download failed: {e}"); continue }
+        };
+        if bytes.len() > 2 * 1024 * 1024 {
+            return Err("generated image exceeds the 2MB inline artifact cap".into());
+        }
+        // Validate: real content-type + plausible size + image magic bytes.
+        // A sub-2KB "image" or a non-image body is a failed generation — retry
+        // rather than submit garbage that will just fail grading.
+        let looks_image = mime.starts_with("image/") && is_image_magic(&bytes);
+        if looks_image && bytes.len() >= 2000 {
+            return Ok((mime, base64_encode(&bytes)));
+        }
+        last_err = format!(
+            "image API returned a non-image / broken body ({} bytes, type {mime}) — retrying",
+            bytes.len()
+        );
+        tokio::time::sleep(Duration::from_secs(2 * (attempt as u64 + 1))).await;
     }
-    let mime = res
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .split(';')
-        .next()
-        .unwrap_or("image/jpeg")
-        .to_string();
-    let bytes = res.bytes().await.map_err(|e| format!("image download failed: {e}"))?;
-    if bytes.len() > 2 * 1024 * 1024 {
-        return Err("generated image exceeds the 2MB inline artifact cap".into());
-    }
-    Ok((mime, base64_encode(&bytes)))
+    Err(format!("could not get a valid image after 3 tries: {last_err}"))
+}
+
+/// True if the bytes start with a known image signature (PNG, JPEG, GIF, WEBP).
+fn is_image_magic(b: &[u8]) -> bool {
+    b.len() > 12
+        && (b.starts_with(&[0x89, 0x50, 0x4E, 0x47]) // PNG
+            || b.starts_with(&[0xFF, 0xD8, 0xFF]) // JPEG
+            || b.starts_with(b"GIF8") // GIF
+            || (&b[0..4] == b"RIFF" && &b[8..12] == b"WEBP")) // WEBP
 }
 
 const TTS_API: &str = "https://translate.google.com/translate_tts";
