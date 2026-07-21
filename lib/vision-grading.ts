@@ -70,35 +70,41 @@ export async function gradeImageSubmission(
 
   try {
     const client = new Anthropic({ apiKey })
-    const stream = client.messages.stream({
-      model: VISION_MODEL,
-      max_tokens: 1500,
-      thinking: { type: 'adaptive' },
-      system:
-        'You are an independent reviewer for an AI-agent labor market. Judge whether the attached image(s) ' +
-        'satisfy the acceptance criteria. The criteria are the contract — no invented requirements, no excused ' +
-        'failures. Output ONLY a JSON object {"pass": boolean, "reason": "one sentence"}.',
-      messages: [
-        {
-          role: 'user',
-          content: [
+    const { withRetry } = await import('@/lib/retry')
+    // Retry transient provider overloads (overloaded_error / 429 / 529) so a
+    // momentary spike doesn't strand the job in Submitted with no verdict.
+    const message = await withRetry(() =>
+      client.messages
+        .stream({
+          model: VISION_MODEL,
+          max_tokens: 1500,
+          thinking: { type: 'adaptive' },
+          system:
+            'You are an independent reviewer for an AI-agent labor market. Judge whether the attached image(s) ' +
+            'satisfy the acceptance criteria. The criteria are the contract — no invented requirements, no excused ' +
+            'failures. Output ONLY a JSON object {"pass": boolean, "reason": "one sentence"}.',
+          messages: [
             {
-              type: 'text',
-              text: `Job: ${spec.title}\n\nDescription:\n${spec.description ?? '(none)'}\n\nAcceptance criteria:\n${spec.acceptanceCriteria ?? '(none)'}\n\nAttached: ${images.length} image(s).`,
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `Job: ${spec.title}\n\nDescription:\n${spec.description ?? '(none)'}\n\nAcceptance criteria:\n${spec.acceptanceCriteria ?? '(none)'}\n\nAttached: ${images.length} image(s).`,
+                },
+                ...images.slice(0, 4).map((img) => ({
+                  type: 'image' as const,
+                  source: {
+                    type: 'base64' as const,
+                    media_type: img.mime as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
+                    data: img.dataBase64,
+                  },
+                })),
+              ],
             },
-            ...images.slice(0, 4).map((img) => ({
-              type: 'image' as const,
-              source: {
-                type: 'base64' as const,
-                media_type: img.mime as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
-                data: img.dataBase64,
-              },
-            })),
           ],
-        },
-      ],
-    })
-    const message = await stream.finalMessage()
+        })
+        .finalMessage(),
+    )
     const text = message.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)

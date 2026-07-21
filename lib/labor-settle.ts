@@ -221,18 +221,37 @@ export async function sweepStuckGradedJobs(): Promise<void> {
     const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
     if (!isLaborMarketConfigured()) return
 
-    const specs = await db.select().from(jobSpec)
-    const graded = specs.filter((s) => s.testResult && s.testResult.passed !== null && s.onchainJobId !== null)
-    if (graded.length === 0) return
+    // Every spec that landed on-chain — NOT only ones that already carry a
+    // verdict. A job whose grading never produced a verdict (provider
+    // overload, or no grading key at submission time) is Submitted with a
+    // null/absent testResult; the old query skipped exactly those and they
+    // sat in manual review forever. Now we re-grade them here too.
+    const specs = (await db.select().from(jobSpec)).filter((s) => s.onchainJobId !== null)
+    if (specs.length === 0) return
 
     const { readJobs } = await import('@/lib/onchain/labor')
     const jobs = await readJobs()
 
-    for (const spec of graded) {
+    for (const spec of specs) {
       const job = jobs.find((j) => j.id === spec.onchainJobId)
       if (!job || job.status !== 'Submitted') continue
-      console.log(`[labor-settle] re-driving stuck settlement for job #${spec.onchainJobId} (passed=${spec.testResult!.passed})`)
-      if (spec.testResult!.passed) {
+
+      let verdict = spec.testResult && spec.testResult.passed !== null ? spec.testResult.passed : null
+      if (verdict === null) {
+        // No usable verdict yet — try to grade it now (idempotent; writes
+        // testResult). Returns null if not auto-gradable or the submission
+        // isn't recorded yet, in which case we leave it for manual review.
+        console.log(`[labor-settle] re-grading ungraded Submitted job #${spec.onchainJobId} (${spec.deliverableKind ?? 'text'})`)
+        verdict = await regradeSubmittedSpec(spec).catch((e) => {
+          console.error(`[labor-settle] re-grade of job #${spec.onchainJobId} failed:`, e)
+          return null
+        })
+        if (verdict === null) continue // still no verdict → manual review
+      } else {
+        console.log(`[labor-settle] re-driving stuck settlement for job #${spec.onchainJobId} (passed=${verdict})`)
+      }
+
+      if (verdict) {
         await autoApprovePassedJob(spec)
       } else {
         await returnFailedJobToMarket(spec)
@@ -241,4 +260,61 @@ export async function sweepStuckGradedJobs(): Promise<void> {
   } catch (error) {
     console.error('[labor-settle] stuck sweep failed:', error)
   }
+}
+
+/** Re-run grading for a Submitted job whose spec has no usable verdict yet
+ *  (grading never ran, threw, or returned no verdict — a provider overload or
+ *  a grading key that was missing at submission time). Writes testResult and
+ *  returns the fresh verdict, or null if the job isn't auto-gradable or the
+ *  submission isn't recorded yet. */
+export async function regradeSubmittedSpec(spec: typeof jobSpec.$inferSelect): Promise<boolean | null> {
+  if (spec.onchainJobId === null || !spec.agentTaskId) return null
+  const { agentTask, artifact, agent } = await import('@/lib/db/schema')
+
+  const isImage = spec.deliverableKind === 'image'
+  const isAudio = spec.deliverableKind === 'audio' && Boolean(spec.acceptanceCriteria?.trim())
+  const isLlmText =
+    !spec.testCode && !isImage && (spec.deliverableKind ?? 'text') === 'text' && Boolean(spec.acceptanceCriteria?.trim())
+  if (!spec.testCode && !isImage && !isAudio && !isLlmText) return null
+
+  const [task] = await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId))
+  const output = task?.output ?? ''
+  const [reqAgent] = spec.requesterAgentId
+    ? await db.select().from(agent).where(eq(agent.id, spec.requesterAgentId))
+    : []
+  const ownerId = reqAgent?.userId ?? null
+  const gspec = { title: spec.title, description: spec.description, acceptanceCriteria: spec.acceptanceCriteria }
+
+  let grade: { passed: boolean | null; output: string; gradedAt: string }
+  if (isImage || isAudio) {
+    const arts = await db.select().from(artifact).where(eq(artifact.taskId, spec.agentTaskId))
+    if (!arts.length) return null // submitted on-chain but artifact not recorded yet
+    if (isImage) {
+      const { gradeImageSubmission } = await import('@/lib/vision-grading')
+      grade = await gradeImageSubmission(gspec, arts, ownerId)
+    } else {
+      const { gradeAudioSubmission } = await import('@/lib/audio-grading')
+      grade = await gradeAudioSubmission(gspec, arts, ownerId)
+    }
+  } else if (isLlmText) {
+    if (!output) return null
+    const { gradeTextSubmission } = await import('@/lib/text-grading')
+    grade = await gradeTextSubmission(gspec, output, ownerId)
+  } else {
+    if (!output) return null
+    const { extractPythonCode, gradeSubmission } = await import('@/lib/code-grading')
+    const code = extractPythonCode(output)
+    grade = code
+      ? await gradeSubmission(code, spec.testCode!)
+      : { passed: false, output: 'No Python code block found in the submission.', gradedAt: new Date().toISOString() }
+  }
+
+  await db.update(jobSpec).set({ testResult: grade }).where(eq(jobSpec.specHash, spec.specHash))
+  if (grade.passed !== null) {
+    await logPlatformEvent(
+      grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
+      `"${spec.title}" — re-graded on the settle heartbeat: ${grade.passed ? 'passed' : 'FAILED'}`,
+    )
+  }
+  return grade.passed
 }

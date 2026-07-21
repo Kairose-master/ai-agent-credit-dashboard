@@ -32,6 +32,7 @@ import { getEntryPoint, KERNEL_V3_1 } from '@zerodev/sdk/constants'
 import { signerToEcdsaValidator } from '@zerodev/ecdsa-validator'
 import { CHAIN, agentAccountMode, onchainEnv } from './config'
 import { publicClient, oracleWallet } from './clients'
+import { withRetry } from '@/lib/retry'
 
 const entryPoint = getEntryPoint('0.7')
 const kernelVersion = KERNEL_V3_1
@@ -125,7 +126,48 @@ export async function getAgentKernel(agentId: string) {
     paymaster,
   })
 
-  return { account, kernelClient, address: account.address as Address }
+  // Serialize UserOp submission per smart account. Two UserOps from the same
+  // account sent concurrently (e.g. the settle cron and a poll-triggered
+  // settle) race on the same nonce and one fails with AA25. Chaining sends per
+  // address makes the bundler hand out sequential nonces; an AA25 that still
+  // slips through (cross-instance) is retried with backoff.
+  const address = account.address as Address
+  const rawSend = kernelClient.sendUserOperation.bind(kernelClient)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(kernelClient as any).sendUserOperation = (args: unknown) =>
+    serializedSend(address, () =>
+      withRetry(() => rawSend(args as Parameters<typeof rawSend>[0]), {
+        retries: 4,
+        baseMs: 500,
+        retryable: isNonceCollision,
+      }),
+    )
+
+  return { account, kernelClient, address }
+}
+
+// ---- per-account UserOp serialization -------------------------------------
+const accountSendChains = new Map<string, Promise<unknown>>()
+
+function isNonceCollision(e: unknown): boolean {
+  const m = (e instanceof Error ? e.message : String(e)).toLowerCase()
+  return (
+    m.includes('aa25') ||
+    m.includes('invalid smart account nonce') ||
+    (m.includes('nonce') && (m.includes('already') || m.includes('same sender')))
+  )
+}
+
+/** Run `send` only after any in-flight send for the same address settles, so
+ *  the bundler assigns sequential nonces instead of colliding. */
+async function serializedSend<T>(address: string, send: () => Promise<T>): Promise<T> {
+  const prior = accountSendChains.get(address) ?? Promise.resolve()
+  const run = prior.catch(() => {}).then(send)
+  accountSendChains.set(
+    address,
+    run.catch(() => {}),
+  )
+  return run
 }
 
 // ---------------------------------------------------------------------------
