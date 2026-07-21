@@ -29,15 +29,17 @@ export async function POST(request: Request): Promise<Response> {
 
   let anthropicKey = ''
   let groqKey = ''
+  let hfToken = ''
   try {
     const body = await request.json()
     anthropicKey = String(body?.key ?? body?.anthropicKey ?? '')
     groqKey = String(body?.groqKey ?? body?.openaiKey ?? '')
+    hfToken = String(body?.hfToken ?? body?.hf ?? '')
   } catch {
-    return Response.json({ error: 'body must be JSON: {"key":"sk-ant-..."} and/or {"groqKey":"gsk_..."}' }, { status: 400 })
+    return Response.json({ error: 'body must be JSON: {"key":"sk-ant-..."} / {"groqKey":"gsk_..."} / {"hfToken":"hf_..."}' }, { status: 400 })
   }
-  if (!anthropicKey && !groqKey) {
-    return Response.json({ error: 'provide "key" (Anthropic) and/or "groqKey" (Groq/Whisper) in body' }, { status: 400 })
+  if (!anthropicKey && !groqKey && !hfToken) {
+    return Response.json({ error: 'provide "key" (Anthropic), "groqKey" (Groq/Whisper), and/or "hfToken" (Hugging Face)' }, { status: 400 })
   }
 
   const email = url.searchParams.get('email') ?? undefined // defaults to the faucet account
@@ -45,6 +47,12 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (anthropicKey) stored.anthropicEndsWith = (await setFaucetOwnerAnthropicKey(anthropicKey, email)).keyTail
     if (groqKey) stored.groqEndsWith = (await setFaucetOwnerOpenAiKey(groqKey, undefined, undefined, email)).keyTail
+    if (hfToken) {
+      // Platform-wide (server-side HF image generation), not per-account.
+      const { setPlatformSecret } = await import('@/lib/platform-secret')
+      await setPlatformSecret('hf_token', hfToken.trim())
+      stored.hfEndsWith = hfToken.trim().slice(-4)
+    }
     return Response.json({ status: 'ok', storedFor: email ?? 'faucet@ledgermind.internal', ...stored })
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })

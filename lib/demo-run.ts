@@ -34,6 +34,14 @@ async function faucetOwnerId(): Promise<string | null> {
 
 export async function generateImage(prompt: string): Promise<{ mime: string; base64: string }> {
   const clean = prompt.replace(/\s+/g, ' ').trim().slice(0, 400)
+
+  // Prefer Hugging Face FLUX when a token is configured — higher quality and
+  // more reliable than the keyless fallback. Falls through to pollinations if
+  // HF is unconfigured or fails.
+  const { generateHfImage } = await import('@/lib/hf-image')
+  const hf = await generateHfImage(clean)
+  if (hf) return hf
+
   const url = `${IMAGE_API}${encodeURIComponent(clean)}?width=1024&height=1024&nologo=true`
   const res = await fetch(url, { signal: AbortSignal.timeout(120_000) })
   if (!res.ok) throw new Error(`image API responded ${res.status}`)
