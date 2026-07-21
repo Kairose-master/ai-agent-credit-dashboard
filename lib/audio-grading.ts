@@ -109,11 +109,20 @@ export async function gradeAudioSubmission(
     form.append('model', TRANSCRIBE_MODEL)
     form.append('response_format', 'json')
 
-    const res = await fetch(`${creds.baseUrl.replace(/\/$/, '')}/audio/transcriptions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${creds.apiKey}` },
-      body: form,
-      signal: AbortSignal.timeout(60_000),
+    const { withRetry } = await import('@/lib/retry')
+    // Retry transient provider errors (429/5xx) so a momentary overload
+    // doesn't leave the job ungraded in Submitted.
+    const res = await withRetry(async () => {
+      const r = await fetch(`${creds.baseUrl.replace(/\/$/, '')}/audio/transcriptions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${creds.apiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (r.status === 429 || r.status >= 500) {
+        throw Object.assign(new Error(`transcription provider ${r.status}`), { status: r.status })
+      }
+      return r
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')

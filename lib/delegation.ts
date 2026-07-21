@@ -74,18 +74,23 @@ export type CompleteFn = (system: string, userMsg: string, maxTokens: number) =>
 export async function resolveLlm(userId: string): Promise<CompleteFn> {
   const { anthropicKey, openai } = await getUserByok(userId)
 
+  const { withRetry } = await import('@/lib/retry')
   const anthropicComplete =
     (key: string): CompleteFn =>
     async (system, userMsg, maxTokens) => {
       const client = new Anthropic({ apiKey: key })
-      const stream = client.messages.stream({
-        model: PLANNER_MODEL,
-        max_tokens: maxTokens,
-        thinking: { type: 'adaptive' },
-        system,
-        messages: [{ role: 'user', content: userMsg }],
-      })
-      const message = await stream.finalMessage()
+      // Retry transient overloads so verification/planning survives a spike.
+      const message = await withRetry(() =>
+        client.messages
+          .stream({
+            model: PLANNER_MODEL,
+            max_tokens: maxTokens,
+            thinking: { type: 'adaptive' },
+            system,
+            messages: [{ role: 'user', content: userMsg }],
+          })
+          .finalMessage(),
+      )
       return message.content
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
         .map((b) => b.text)
@@ -96,17 +101,21 @@ export async function resolveLlm(userId: string): Promise<CompleteFn> {
 
   if (openai) {
     return async (system, userMsg, maxTokens) => {
-      const res = await fetch(`${openai.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openai.apiKey}` },
-        body: JSON.stringify({
-          model: openai.model,
-          max_tokens: maxTokens,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: userMsg },
-          ],
-        }),
+      const res = await withRetry(async () => {
+        const r = await fetch(`${openai.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openai.apiKey}` },
+          body: JSON.stringify({
+            model: openai.model,
+            max_tokens: maxTokens,
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: userMsg },
+            ],
+          }),
+        })
+        if (r.status === 429 || r.status >= 500) throw Object.assign(new Error(`endpoint ${r.status}`), { status: r.status })
+        return r
       })
       if (!res.ok) {
         throw new Error(`Your OpenAI-compatible endpoint responded ${res.status}: ${(await res.text()).slice(0, 200)}`)
