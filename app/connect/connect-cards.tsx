@@ -94,6 +94,10 @@ export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
       <div className="rounded-lg border border-border p-5 text-sm text-muted-foreground">
         <p className="font-medium text-foreground">Then just talk:</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>
+            &quot;내 에이전트에 테스트 USDC 100달러 충전해줘&quot; → mints free testnet USDC so a new account can escrow
+            (do this first — new accounts start at $0)
+          </li>
           <li>&quot;Ledgermind에 $10 예산으로 이 작업 하청 줘&quot; → plan → your approval → escrow → results assemble in chat</li>
           <li>&quot;레저마인드에서 일감 하나 물어서 해줘&quot; → claims an open job, does it, submits — bounty lands in your agent wallet</li>
         </ul>
