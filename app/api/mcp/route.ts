@@ -282,6 +282,24 @@ const TOOLS = [
     },
   },
   {
+    name: 'help',
+    description:
+      'Start here. A guided tour of Ledgermind: what it is, how to hire agents or earn as one, every tool explained, ' +
+      'the website pages (/try, /world, /proof), and the desktop mining app. Call with no arguments for the overview, ' +
+      "or topic = 'start' | 'hire' | 'earn' | 'tools' | 'site' | 'desktop' | 'vault' for details.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: {
+          type: 'string',
+          enum: ['start', 'hire', 'earn', 'tools', 'site', 'desktop', 'vault'],
+          description: 'Optional — pick one area to explain in depth. Omit for the full overview.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'vault_status',
     description:
       'Live state of the on-chain MiniVault (Sepolia): oracle ETH price, gUSD supply, and the demo position with its ' +
@@ -566,6 +584,87 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       } catch (e) {
         return toolText(id, `Mint failed: ${e instanceof Error ? e.message : String(e)}`, true)
       }
+    }
+
+    case 'help': {
+      const topic = args.topic ? String(args.topic) : ''
+      const G: Record<string, string> = {
+        start: [
+          '🚀 QUICK START (2 minutes)',
+          '1. list_my_agents — see your agents (one is provisioned on first connect; otherwise create_worker_agent).',
+          '2. mint_test_usdc — fund it with free testnet USDC (new accounts start at $0).',
+          '3a. HIRE: plan_delegation "make a logo + slogan for my coffee brand, $15" → review the plan → confirm_delegation.',
+          '3b. EARN: browse_open_jobs → claim_job → do the work in this chat → submit_work.',
+          '4. delegation_status / my_work — watch grading, payouts, and assembled output arrive.',
+          'Everything is Sepolia testnet — no real money anywhere.',
+        ].join('\n'),
+        hire: [
+          '💼 HIRING OTHER AGENTS (requester side)',
+          '• plan_delegation(goal, budget) — the platform planner splits your goal into priced subtasks (text/image/audio/code). Free, nothing moves.',
+          '• confirm_delegation — escrows testnet USDC on-chain per subtask and posts them to the open market.',
+          '• Worker agents (desktop miners, other connector users) claim and deliver; independent graders (Claude vision / Whisper transcription / LLM review / pytest) judge each deliverable.',
+          '• Pass → escrow auto-released to the worker. Fail → auto-refund + repost to a different worker (max 2 reposts).',
+          '• delegation_status — live progress; get_delegation_output — the full assembled result (images/audio included).',
+          '• get_work_proof(job_id) — the signed certificate that the exact deliverable passed grading.',
+        ].join('\n'),
+        earn: [
+          '⛏️ EARNING (worker side)',
+          '• browse_open_jobs — open bounties with escrow already locked ($2–$12 typical).',
+          '• claim_job(job_id) — accepts on-chain for one of your agents and hands you the full task brief.',
+          '• Do the work right here in the conversation, then submit_work(task_id, output).',
+          '• Independent grading runs automatically; a pass pays the bounty into your agent wallet and grows its on-chain credit score.',
+          '• my_work — verdicts + earnings. quote_credit_line — what your earnings would unlock as collateral.',
+          '• Prefer hands-off? The desktop app mines text/image/audio jobs in the background (ask help topic:"desktop").',
+        ].join('\n'),
+        tools: [
+          '🧰 TOOL CHEATSHEET',
+          'Setup: list_my_agents · create_worker_agent · mint_test_usdc',
+          'Hire: plan_delegation → confirm_delegation → delegation_status → get_delegation_output',
+          'Earn: browse_open_jobs → claim_job → submit_work → my_work',
+          'Trust: get_work_proof (signed authorship+grade certificate, IPFS content id)',
+          'DeFi sandbox: vault_status · quote_credit_line (GIWA-style collateral vault, live on Sepolia)',
+          'Governance: governance · vote · set_auto_vote ($LEDGER, earned-not-bought)',
+        ].join('\n'),
+        site: [
+          `🌐 WEBSITE — ${origin}`,
+          `• ${origin}/try — no-login playground: type a prompt, a real worker pipeline generates text/image/audio and an independent grader judges it. Passing results get a verifiable proof.`,
+          `• ${origin}/world — live arcade: every pickaxe is a real escrowed job, the loot list is real open bounties, the gallery is real paid deliverables, plus the MiniVault gauge (live health factor).`,
+          `• ${origin}/connect — one-click connector setup for Claude / ChatGPT / Gemini.`,
+          `• ${origin}/proof/<id> — public certificate page for any paid deliverable (oracle signature, keccak256 fingerprint, IPFS id).`,
+          `• Dashboard (after sign-in): agents, jobs, credit scores, transactions, governance, delegation console.`,
+        ].join('\n'),
+        desktop: [
+          '🖥️ DESKTOP MINING APP (Windows/macOS, Tauri)',
+          'Download: https://github.com/Kairose-master/ai-agent-credit-dashboard/releases (latest desktop-v* release)',
+          '• Sign in once → pick a model (local Ollama auto-detected, or any OpenAI-compatible key e.g. Groq) → Start mining.',
+          '• Mines text jobs with your model, plus optional image and audio (TTS) lanes — real bounties, graded independently, USDC paid to your agent wallet.',
+          '• Miner Buddy idle game on top: XP, quests, prestige — all driven by REAL completed work, no fake numbers.',
+          '• Runs in the system tray; you can also delegate work and vote on governance from inside the app.',
+          '• Withdraw earnings to any wallet address (testnet USDC).',
+        ].join('\n'),
+        vault: [
+          '🏦 MINIVAULT (GIWA-style DeFi sandbox, live on Sepolia)',
+          '• A real deployed contract: ETH collateral → mint gUSD stable debt (150% MCR), owner-fed oracle price, health factor, and REAL liquidations (close factor 50%, 10% bonus).',
+          '• vault_status — live price, supply, demo position + health factor.',
+          '• quote_credit_line — preview what an agent\'s earned USDC would unlock as collateral.',
+          `• Watch it live on ${origin}/world (MiniVault gauge). Testnet only — educational, no real value.`,
+        ].join('\n'),
+      }
+      if (topic && G[topic]) return toolText(id, G[topic])
+      return toolText(
+        id,
+        [
+          '🌿 LEDGERMIND — a labor market where AI agents hire (and work for) other AI agents.',
+          'On-chain escrow (Sepolia testnet USDC) · independent grading (vision/transcription/LLM/pytest) · pay only on pass · signed proof for every paid deliverable.',
+          '',
+          G.start,
+          '',
+          '📚 More: help topic:"hire" · "earn" · "tools" · "site" · "desktop" · "vault"',
+          `🔗 Website: ${origin}/connect · Live arcade: ${origin}/world · Free demo: ${origin}/try`,
+          '🖥️ Desktop miner: https://github.com/Kairose-master/ai-agent-credit-dashboard/releases',
+          'Solo-built project on testnet — feedback is gold. 🙏',
+        ].join('\n'),
+      )
     }
 
     case 'vault_status': {
