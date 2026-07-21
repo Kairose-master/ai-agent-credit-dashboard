@@ -8,7 +8,10 @@ import { withRetry } from '@/lib/retry'
  * HF_TOKEN env). Returns null when no token is configured or generation
  * fails, so callers can fall back to pollinations.
  */
-const HF_MODEL = process.env.HF_IMAGE_MODEL || 'black-forest-labs/FLUX.1-schnell'
+// HF migrated FLUX off the classic hf-inference API; it's now served through
+// Inference Providers. fal-ai serves FLUX.1-schnell and returns JSON with an
+// image URL (not raw bytes), so we fetch that URL for the pixels.
+const HF_ENDPOINT = process.env.HF_IMAGE_ENDPOINT || 'https://router.huggingface.co/fal-ai/fal-ai/flux/schnell'
 
 function startsWith(b: Buffer, sig: number[]): boolean {
   if (b.length < sig.length) return false
@@ -34,26 +37,30 @@ export async function generateHfImage(prompt: string): Promise<{ mime: string; b
   if (!token) return null
 
   try {
+    // 1) Ask fal-ai (via the HF router) to generate — returns JSON w/ a URL.
     const res = await withRetry(
       async () => {
-        const r = await fetch(`https://api-inference.huggingface.co/models/${HF_MODEL}`, {
+        const r = await fetch(HF_ENDPOINT, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'image/png' },
-          body: JSON.stringify({ inputs: prompt.slice(0, 500), parameters: { width: 1024, height: 1024 } }),
-          signal: AbortSignal.timeout(120_000),
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: prompt.slice(0, 900), image_size: 'square_hd', num_images: 1 }),
+          signal: AbortSignal.timeout(90_000),
         })
-        // 503 = model loading; 429 = rate limited — both worth a retry.
-        if (r.status === 503 || r.status === 429 || r.status >= 500) {
-          throw Object.assign(new Error(`HF image ${r.status}`), { status: r.status })
-        }
+        if (r.status === 429 || r.status >= 500) throw Object.assign(new Error(`HF image ${r.status}`), { status: r.status })
         return r
       },
-      { retries: 3, baseMs: 2500 },
+      { retries: 3, baseMs: 2000 },
     )
     if (!res.ok) return null
-    const mime = (res.headers.get('content-type') || 'image/png').split(';')[0]
-    if (!mime.startsWith('image/')) return null // an error JSON body, not an image
-    const buf = Buffer.from(await res.arrayBuffer())
+    const data = (await res.json().catch(() => null)) as { images?: { url?: string; content_type?: string }[] } | null
+    const img = data?.images?.[0]
+    if (!img?.url) return null
+
+    // 2) Fetch the actual pixels and validate.
+    const imgRes = await fetch(img.url, { signal: AbortSignal.timeout(60_000) })
+    if (!imgRes.ok) return null
+    const mime = (img.content_type || imgRes.headers.get('content-type') || 'image/jpeg').split(';')[0]
+    const buf = Buffer.from(await imgRes.arrayBuffer())
     if (buf.length < 2000 || !isImageMagic(buf) || buf.length > 4 * 1024 * 1024) return null
     return { mime, base64: buf.toString('base64') }
   } catch {
