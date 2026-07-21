@@ -26,8 +26,15 @@ export async function POST(request: Request): Promise<Response> {
   if (!Number.isInteger(jobId)) return Response.json({ error: 'job_id required' }, { status: 400 })
   if (!agentName) return Response.json({ error: 'agent (worker name) required' }, { status: 400 })
 
-  const [worker] = await db.select().from(agent).where(eq(agent.name, agentName))
+  let [worker] = await db.select().from(agent).where(eq(agent.name, agentName))
   if (!worker) return Response.json({ error: `no agent named "${agentName}"` }, { status: 404 })
+
+  // Ensure the worker declares the 'image' capability (admin demo convenience).
+  if (!(worker.capabilities ?? []).includes('image')) {
+    const caps = [...new Set([...(worker.capabilities ?? ['text']), 'image'])]
+    await db.update(agent).set({ capabilities: caps }).where(eq(agent.id, worker.id))
+    worker = { ...worker, capabilities: caps }
+  }
 
   try {
     const { acceptJobForExternalWorker } = await import('@/lib/labor-dispatch')
