@@ -52,6 +52,13 @@ export async function generateImage(prompt: string): Promise<{ mime: string; bas
 }
 
 export async function generateAudio(script: string): Promise<{ mime: string; base64: string }> {
+  // Prefer Hugging Face TTS (Kokoro) when a token + credits are available —
+  // a far more natural voice than the keyless fallback. Falls through to
+  // Google-Translate TTS if HF is unconfigured, out of credits, or fails.
+  const { generateHfAudio } = await import('@/lib/hf-audio')
+  const hf = await generateHfAudio(script)
+  if (hf) return hf
+
   const words = script.replace(/\s+/g, ' ').trim().slice(0, 400).split(' ')
   const chunks: string[] = []
   let cur = ''
