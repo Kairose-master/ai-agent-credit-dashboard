@@ -512,33 +512,54 @@ export async function tickDelegation(
       continue
     }
 
-    // Text subtasks only: the text verifier can't see an image, so image
-    // deliverables settle exclusively through the vision grading that ran
-    // at submission time (pass → auto-release; no verdict → manual review).
-    if (job.status === 'Submitted' && row.autoVerify && (st.deliverableKind ?? 'text') === 'text') {
+    // Grade Submitted work and auto-release on pass. Text uses the LLM
+    // verifier; image is vision-graded and audio is transcription-graded —
+    // each re-run here on the heartbeat (not only at submission time), so a
+    // deliverable that landed before a grading key was configured, or whose
+    // submission-time grade returned no verdict, still settles once it can.
+    if (job.status === 'Submitted' && row.autoVerify) {
+      const kind = st.deliverableKind ?? 'text'
       const task = spec?.agentTaskId
         ? (await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId)))[0]
         : undefined
       const output = task?.output
-      if (!output) continue // submitted on-chain but output not yet recorded — next tick
 
       try {
-        complete = complete ?? (await resolveLlm(row.userId))
-        const verdict = await verifySubmission(complete, st, output)
-        if (verdict.pass) {
+        let passed: boolean | null = null
+        if (kind === 'image' || kind === 'audio') {
+          const { artifact } = await import('@/lib/db/schema')
+          const arts = spec?.agentTaskId
+            ? await db.select().from(artifact).where(eq(artifact.taskId, spec.agentTaskId))
+            : []
+          if (!arts.length) continue // submitted on-chain but artifact not yet recorded — next tick
+          const gradeSpec = { title: st.title, description: st.description ?? null, acceptanceCriteria: st.acceptanceCriteria ?? null }
+          if (kind === 'image') {
+            const { gradeImageSubmission } = await import('@/lib/vision-grading')
+            passed = (await gradeImageSubmission(gradeSpec, arts, row.userId)).passed
+          } else {
+            const { gradeAudioSubmission } = await import('@/lib/audio-grading')
+            passed = (await gradeAudioSubmission(gradeSpec, arts, row.userId)).passed
+          }
+        } else {
+          if (!output) continue // submitted on-chain but output not yet recorded — next tick
+          complete = complete ?? (await resolveLlm(row.userId))
+          passed = (await verifySubmission(complete, st, output)).pass
+        }
+
+        if (passed === true) {
           const txHash = await approveJob(row.primeAgentId, st.onchainJobId)
           const { creditWorkerForJob } = await import('@/app/actions/labor')
           await creditWorkerForJob(job.worker, st.onchainJobId, job.bounty, txHash)
-          st.output = output
+          st.output = output ?? `(${kind} deliverable — see attached artifact)`
           changed = true
           await logPlatformEvent(
             'JOB_AUTO_APPROVED',
-            `"${st.title}" — delegation verifier passed the work, escrow released`,
+            `"${st.title}" — delegation ${kind === 'text' ? 'verifier' : kind + ' grader'} passed the work, escrow released`,
           )
         }
-        // On fail: leave the job Submitted for the owner to judge manually
-        // (auto-disputing on an LLM verdict would spam the admin queue and
-        // an LLM "fail" is weaker evidence than a failed test run).
+        // passed:false or null → leave Submitted for the owner to judge
+        // manually (an LLM/grader "fail" is weaker evidence than a failed
+        // test run, and null means grading was simply unavailable).
       } catch (error) {
         console.error('[delegation] verify/approve failed:', error)
       }
