@@ -19,8 +19,47 @@ async function handle(request: Request): Promise<Response> {
   const given = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? url.searchParams.get('secret') ?? ''
   if (given !== secret) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // List mode: recent specs (title/kind/onchainJobId/verdict) + open on-chain
+  // jobs, to spot linkage gaps (a subtask posted but jobSpec.onchainJobId null).
+  if (url.searchParams.get('list')) {
+    const { desc } = await import('drizzle-orm')
+    const specs = await db
+      .select({
+        title: jobSpec.title,
+        deliverableKind: jobSpec.deliverableKind,
+        onchainJobId: jobSpec.onchainJobId,
+        agentTaskId: jobSpec.agentTaskId,
+        specHash: jobSpec.specHash,
+        testResult: jobSpec.testResult,
+      })
+      .from(jobSpec)
+      .orderBy(desc(jobSpec.createdAt))
+      .limit(25)
+    let openJobs: { id: number; status: string; bounty: number; specHash: string }[] = []
+    try {
+      const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
+      if (isLaborMarketConfigured()) {
+        const { readJobs } = await import('@/lib/onchain/labor')
+        openJobs = (await readJobs())
+          .filter((j) => j.status === 'Open' || j.status === 'Submitted')
+          .map((j) => ({ id: j.id, status: j.status, bounty: j.bounty, specHash: j.specHash }))
+      }
+    } catch { /* ignore */ }
+    return Response.json({
+      specs: specs.map((s) => ({
+        title: s.title,
+        kind: s.deliverableKind,
+        onchainJobId: s.onchainJobId,
+        hasTask: Boolean(s.agentTaskId),
+        specHash: s.specHash.slice(0, 12),
+        verdict: s.testResult?.passed ?? null,
+      })),
+      openOrSubmittedJobs: openJobs.map((j) => ({ ...j, specHash: j.specHash.slice(0, 12) })),
+    })
+  }
+
   const jobId = Number(url.searchParams.get('job_id'))
-  if (!Number.isInteger(jobId)) return Response.json({ error: 'job_id required' }, { status: 400 })
+  if (!Number.isInteger(jobId)) return Response.json({ error: 'job_id or list required' }, { status: 400 })
 
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.onchainJobId, jobId))
   if (!spec) return Response.json({ error: `no spec for onchainJobId ${jobId}` }, { status: 404 })

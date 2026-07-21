@@ -32,7 +32,7 @@ async function faucetOwnerId(): Promise<string | null> {
   return owner?.id ?? null
 }
 
-async function generateImage(prompt: string): Promise<{ mime: string; base64: string }> {
+export async function generateImage(prompt: string): Promise<{ mime: string; base64: string }> {
   const clean = prompt.replace(/\s+/g, ' ').trim().slice(0, 400)
   const url = `${IMAGE_API}${encodeURIComponent(clean)}?width=1024&height=1024&nologo=true`
   const res = await fetch(url, { signal: AbortSignal.timeout(120_000) })
