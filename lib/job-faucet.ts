@@ -461,6 +461,57 @@ export async function postHouseImageJobs(count = 3): Promise<ImagePostReport> {
   return report
 }
 
+/** Post `count` Python-graded code jobs from the house faucet wallet, on
+ *  demand and bypassing the open-count/daily caps — so a worker can be shown
+ *  claiming and settling a mechanically-graded job right now. */
+export async function postHouseCodeJobs(count = 1): Promise<ImagePostReport> {
+  const n = Math.max(1, Math.min(count, 5))
+  const { isLaborMarketConfigured, isAgentAccountConfigured } = await import('@/lib/onchain/config')
+  if (!isLaborMarketConfigured() || !isAgentAccountConfigured()) {
+    return { posted: 0, jobs: [], skipped: 'onchain not configured' }
+  }
+  const faucet = await ensureFaucetAgent()
+  if (!faucet?.smartAccountAddress) return { posted: 0, jobs: [], skipped: 'no faucet wallet' }
+
+  try {
+    const { usdcBalanceOf, mintTestUsdc } = await import('@/lib/onchain/treasury')
+    const balance = await usdcBalanceOf(faucet.smartAccountAddress as `0x${string}`)
+    if (balance < MIN_BALANCE_USD) await mintTestUsdc(faucet.id, REFUEL_USD, faucet.smartAccountAddress as `0x${string}`)
+  } catch (error) {
+    console.error('[faucet] code refuel failed (posting may still succeed):', error)
+  }
+
+  const { keccak256, toHex } = await import('viem')
+  const { postJob } = await import('@/lib/onchain/labor')
+  const report: ImagePostReport = { posted: 0, jobs: [] }
+  for (let i = 0; i < n; i++) {
+    const t = FAUCET_TEMPLATES[i % FAUCET_TEMPLATES.length]
+    try {
+      const specHash = keccak256(toHex(JSON.stringify({ title: t.title, agent: faucet.id, nonce: nanoid() })))
+      await db.insert(jobSpec).values({
+        specHash,
+        title: t.title,
+        description: t.description,
+        acceptanceCriteria: t.acceptanceCriteria,
+        requesterAgentId: faucet.id,
+        testCode: t.testCode,
+        autoApprove: true,
+        deliverableKind: 'text',
+      })
+      if (report.posted > 0) await new Promise((r) => setTimeout(r, 2000))
+      await postJob(faucet.id, t.bountyUsd, 0, specHash)
+      report.posted++
+      report.jobs.push({ title: t.title, specHash, bountyUsd: t.bountyUsd })
+      await logPlatformEvent('JOB_POSTED', `Job Faucet posted code job "${t.title}" — $${t.bountyUsd} bounty`)
+    } catch (error) {
+      console.error('[faucet] code post failed:', error)
+      report.skipped = error instanceof Error ? error.message : String(error)
+      break
+    }
+  }
+  return report
+}
+
 /** Post `count` transcription-graded audio jobs from the house faucet wallet.
  *  Mirrors postHouseImageJobs but for the audio lane: the worker reads the
  *  script aloud, the server transcribes it back and checks the match. */
