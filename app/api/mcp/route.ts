@@ -281,6 +281,42 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'vault_status',
+    description:
+      'Live state of the on-chain MiniVault (Sepolia): oracle ETH price, gUSD supply, and the demo position with its ' +
+      'health factor and liquidation flag. A GIWA-style collateral vault — ETH collateral → gUSD stable debt, ' +
+      'liquidatable below health factor 1. Testnet, read-only.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'quote_credit_line',
+    description:
+      "Preview the stable credit line one of YOUR agents' real earned (test) USDC would open as MiniVault collateral " +
+      '(150% MCR at $1). Read-only — nothing is escrowed or drawn. Great for asking "what could my miner borrow against its earnings?"',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Which agent (by id). If omitted, agent_name is used, else your first agent with a wallet.' },
+        agent_name: { type: 'string', description: 'Which agent, by name (used only if agent_id is omitted).' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_work_proof',
+    description:
+      'Fetch the Proof of Authorship & Grade for a paid labor-market job: keccak256 fingerprint of the exact deliverable, ' +
+      'the oracle signature (workers cannot forge their own pass), IPFS content id, and the public certificate URL.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'number', description: 'On-chain job number, e.g. 143.' },
+      },
+      required: ['job_id'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<string, unknown>, origin: string) {
@@ -530,6 +566,72 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       } catch (e) {
         return toolText(id, `Mint failed: ${e instanceof Error ? e.message : String(e)}`, true)
       }
+    }
+
+    case 'vault_status': {
+      const { readMiniVaultState, readMiniVaultPosition } = await import('@/lib/onchain/mini-vault-chain')
+      const state = await readMiniVaultState()
+      if (!state) return toolText(id, 'MiniVault is not deployed on this deployment yet.')
+      const { oracleAccount } = await import('@/lib/onchain/clients')
+      const pos = await readMiniVaultPosition(oracleAccount().address)
+      const lines = [
+        `🏦 MiniVault ${state.address} (Sepolia testnet)`,
+        `📈 ETH price (oracle mock): $${state.priceUsd.toLocaleString()}`,
+        `🪙 gUSD supply: ${state.totalSupplyGusd.toFixed(2)}`,
+      ]
+      if (pos) {
+        lines.push(
+          `🔒 demo position: ${pos.collateralEth} ETH collateral / ${pos.debtGusd.toFixed(2)} gUSD debt`,
+          `❤️ health factor: ${pos.healthFactor === null ? '∞ (debt-free)' : pos.healthFactor.toFixed(2)} → ${pos.liquidatable ? '⚠️ LIQUIDATABLE (anyone can call liquidate)' : '✅ healthy'}`,
+        )
+      }
+      lines.push(`Live gauge: ${origin}/world · rules: mint gate 150% MCR, liquidation below HF 1 (close factor 50%, bonus 10%).`)
+      return toolText(id, lines.join('\n'))
+    }
+
+    case 'quote_credit_line': {
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.agent_id ? String(args.agent_id) : null
+      const wanted = args.agent_name ? String(args.agent_name) : null
+      const target = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress)
+      if (!target) return toolText(id, 'No matching agent with a wallet — create_worker_agent (and earn or mint_test_usdc) first.', true)
+      if (!target.smartAccountAddress) return toolText(id, `${target.name} has no wallet yet — it gets one on first funding/claim.`, true)
+      const { usdcBalanceOf } = await import('@/lib/onchain/treasury')
+      const balance = await usdcBalanceOf(target.smartAccountAddress as `0x${string}`)
+      const { maxDebtUsd, healthFactor } = await import('@/lib/mini-vault')
+      const pos = { collateralUnits: balance, debtUsd: 0 }
+      const maxDebt = maxDebtUsd(pos, 1)
+      const hfAtMax = maxDebt > 0 ? healthFactor({ ...pos, debtUsd: maxDebt }, 1) : null
+      return toolText(
+        id,
+        `${target.name} has earned ${balance.toFixed(2)} test USDC on-chain.\n` +
+          `As MiniVault collateral (at $1, 150% MCR) that would open a stable credit line of $${maxDebt.toFixed(2)}` +
+          (hfAtMax ? ` (health factor ${hfAtMax.toFixed(2)} if fully drawn)` : '') +
+          `.\nPreview only — testnet, nothing is escrowed or drawn.`,
+      )
+    }
+
+    case 'get_work_proof': {
+      const jobNo = Number(args.job_id)
+      if (!Number.isInteger(jobNo) || jobNo < 0) return toolText(id, 'job_id must be a job number.', true)
+      const { getLatestProofForJob } = await import('@/lib/work-proof-store')
+      const stored = await getLatestProofForJob(`#${jobNo}`)
+      if (!stored) return toolText(id, `No proof recorded for job #${jobNo} — proofs are issued when a job passes grading and auto-settles.`)
+      const { verifyWorkProof } = await import('@/lib/attestation')
+      const v = await verifyWorkProof(stored.proof, stored.signature as `0x${string}`, stored.attester as `0x${string}`)
+      return toolText(
+        id,
+        `📜 Proof of Authorship & Grade — job #${jobNo}\n` +
+          `kind: ${stored.proof.kind} · grader: ${stored.proof.grader} · verdict: ${stored.proof.verdict}\n` +
+          `deliverable fingerprint (keccak256): ${stored.proof.contentHash}\n` +
+          `attested by: ${stored.attester} → signature ${v.valid ? 'VALID ✅ (trusted oracle)' : 'INVALID ⚠️'}\n` +
+          (stored.cid ? `content id: ipfs://${stored.cid}\n` : '') +
+          `certificate: ${origin}/proof/${stored.id}`,
+      )
     }
 
     case 'claim_job': {
