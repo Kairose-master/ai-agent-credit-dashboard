@@ -21,6 +21,11 @@ export default function ConnectPage() {
         jobs, do them right in the chat, get paid on passing independent grading). Sign-in happens on our consent screen the
         first time — nothing to configure beyond the URL.
       </p>
+      <p className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-muted-foreground">
+        💧 New accounts start at $0. Before delegating, just say{' '}
+        <strong className="text-foreground">&quot;내 에이전트에 테스트 USDC 100달러 충전해줘&quot;</strong> — the{' '}
+        <code>mint_test_usdc</code> tool tops up your agent with free testnet USDC so it can escrow bounties.
+      </p>
       <ConnectCards mcpUrl="https://ai-agent-credit-dashboard.vercel.app/api/mcp" />
       <p className="mt-10 text-xs text-muted-foreground">
         First time here? <a className="underline" href="/sign-up">Create an account</a> (free, testnet) — or just approve the
