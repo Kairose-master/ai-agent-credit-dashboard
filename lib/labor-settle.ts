@@ -18,7 +18,7 @@
  * failure resumes rather than double-pays.
  */
 import { db } from '@/lib/db'
-import { agentEvent, jobSpec } from '@/lib/db/schema'
+import { agent, agentEvent, jobSpec } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { logPlatformEvent } from '@/lib/platform-feed'
@@ -91,9 +91,30 @@ export async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): P
     const job = jobs.find((j) => j.id === spec.onchainJobId)
     if (!job || job.status !== 'Submitted') return
 
-    if (Number.isFinite(AUTO_APPROVE_MAX_BOUNTY_USD) && job.bounty > AUTO_APPROVE_MAX_BOUNTY_USD) {
+    // Reputation-raised cap (EAS Reputation Lending pattern): a worker whose
+    // oracle-attested credit score clears the four gates unlocks a HIGHER
+    // auto-approve ceiling — trust extended on verified reputation, never
+    // below the base cap and always bounded by the terms' maxLimitUsd.
+    let effectiveCapUsd = AUTO_APPROVE_MAX_BOUNTY_USD
+    try {
+      const [workerAgent] = await db.select().from(agent).where(eq(agent.id, spec.workerAgentId))
+      if (workerAgent) {
+        const { quoteReputationLimit } = await import('@/lib/reputation-lending')
+        const repLimit = await quoteReputationLimit(spec.workerAgentId, Number(workerAgent.creditScore))
+        if (repLimit > effectiveCapUsd) {
+          console.log(
+            `[labor-settle] worker ${workerAgent.name} reputation raises auto-approve cap $${AUTO_APPROVE_MAX_BOUNTY_USD} → $${repLimit}`,
+          )
+          effectiveCapUsd = repLimit
+        }
+      }
+    } catch {
+      /* reputation quote is best-effort — fall back to the base cap */
+    }
+
+    if (Number.isFinite(effectiveCapUsd) && job.bounty > effectiveCapUsd) {
       console.log(
-        `[labor-settle] job ${spec.onchainJobId} passed tests but bounty $${job.bounty} exceeds the $${AUTO_APPROVE_MAX_BOUNTY_USD} auto-approve cap — left Submitted for the requester to approve manually`,
+        `[labor-settle] job ${spec.onchainJobId} passed tests but bounty $${job.bounty} exceeds the $${effectiveCapUsd} auto-approve cap — left Submitted for the requester to approve manually`,
       )
       return
     }
@@ -106,6 +127,13 @@ export async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): P
     // it forever. Retry the DB-only half before giving up.
     const { creditWorkerForJob } = await import('@/app/actions/labor')
     await retry(() => creditWorkerForJob(job.worker, spec.onchainJobId!, job.bounty, approvedTxHash!))
+
+    // Stamp the paid deliverable with a Proof of Authorship & Grade (off-chain
+    // EAS-style, oracle-signed, content-addressed). Best-effort: a proof
+    // failure must never affect an already-settled payout.
+    const { issueProofForJobSpec } = await import('@/lib/work-proof-store')
+    const proof = await issueProofForJobSpec(spec)
+    if (proof) console.log(`[labor-settle] issued work proof ${proof.id} (cid ${proof.cid}) for job #${spec.onchainJobId}`)
 
     await logPlatformEvent(
       'JOB_AUTO_APPROVED',

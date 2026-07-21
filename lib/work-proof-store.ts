@@ -86,6 +86,57 @@ export async function issueWorkProof(input: {
   }
 }
 
+/**
+ * Issue a proof for a REAL labor-market job that just passed grading and paid
+ * out. Resolves the actual deliverable (inline/blob artifact for image/audio,
+ * task output for text/code) so the fingerprint matches the paid-for bytes.
+ * Best-effort like issueWorkProof — never blocks settlement.
+ */
+export async function issueProofForJobSpec(spec: {
+  onchainJobId: number | null
+  agentTaskId: string | null
+  deliverableKind: string | null
+  testCode: string | null
+  workerAgentId: string | null
+  requesterAgentId: string | null
+}): Promise<StoredProof | null> {
+  try {
+    if (spec.onchainJobId === null || !spec.agentTaskId || !spec.workerAgentId || !spec.requesterAgentId) return null
+    const { db } = await import('@/lib/db')
+    const { agentTask, artifact } = await import('@/lib/db/schema')
+    const { eq } = await import('drizzle-orm')
+
+    const kind = spec.deliverableKind ?? (spec.testCode ? 'code' : 'text')
+    const grader = kind === 'image' ? 'vision' : kind === 'audio' ? 'transcription' : spec.testCode ? 'pytest' : 'llm'
+
+    let deliverable: { base64?: string | null; text?: string | null } | null = null
+    if (kind === 'image' || kind === 'audio') {
+      const arts = await db.select().from(artifact).where(eq(artifact.taskId, spec.agentTaskId))
+      const art = arts.find((a) => a.dataBase64) ?? arts[0]
+      if (art?.dataBase64) deliverable = { base64: art.dataBase64 }
+      else if (art?.url) {
+        const res = await fetch(art.url, { signal: AbortSignal.timeout(20_000) })
+        if (res.ok) deliverable = { base64: Buffer.from(await res.arrayBuffer()).toString('base64') }
+      }
+    } else {
+      const [task] = await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId))
+      if (task?.output) deliverable = { text: task.output }
+    }
+    if (!deliverable) return null
+
+    return await issueWorkProof({
+      jobRef: `#${spec.onchainJobId}`,
+      kind,
+      worker: spec.workerAgentId,
+      requester: spec.requesterAgentId,
+      grader,
+      deliverable,
+    })
+  } catch {
+    return null
+  }
+}
+
 export async function getWorkProof(id: string): Promise<StoredProof | null> {
   try {
     await ensureTable()

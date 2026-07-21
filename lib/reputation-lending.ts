@@ -139,3 +139,22 @@ export async function evaluateReputation(input: {
     checks: { signatureValid, attesterTrusted, subjectMatches, fresh, scoreOk, withinLimit },
   }
 }
+
+/**
+ * Server-side reputation quote: the platform IS the trusted scorer, so it
+ * signs a fresh score proof for the subject and runs it through the SAME four
+ * gates as the public endpoint (one code path, no bypass). Returns the
+ * reputation-derived limit in USD — 0 when the oracle key is unavailable or
+ * any gate fails.
+ */
+export async function quoteReputationLimit(subject: string, score: number, terms?: ReputationTerms): Promise<number> {
+  try {
+    const proof: CreditScoreProof = { subject, score: Math.floor(score), issuedAt: Math.floor(Date.now() / 1000) }
+    const signed = await signCreditScore(proof)
+    if (!signed) return 0
+    const decision = await evaluateReputation({ proof, signature: signed.signature, borrower: subject, terms })
+    return decision.limitUsd
+  } catch {
+    return 0
+  }
+}
