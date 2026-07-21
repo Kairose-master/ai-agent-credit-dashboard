@@ -17,6 +17,7 @@ interface DemoResult {
   textOutput?: string
   mediaDataUrl?: string
   verdict: { passed: boolean | null; reason: string }
+  proof?: { id: string; contentHash: string; attester: string }
 }
 
 const KINDS: { k: Kind; icon: string; label: string; placeholder: string; examples: string[] }[] = [
@@ -250,6 +251,18 @@ export default function TryPage() {
             <p className="mt-3 text-xs text-muted-foreground">
               🧑‍⚖️ 독립 채점기 판정: <span className="italic">“{result.verdict.reason}”</span>
             </p>
+
+            {result.proof && (
+              <a
+                href={`/proof/${result.proof.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2.5 text-xs font-semibold text-emerald-600 hover:bg-emerald-500/15 dark:text-emerald-400"
+              >
+                <span>🔒 진위·품질 증명 발급됨 — 서명으로 검증 가능</span>
+                <span className="opacity-70">보기 →</span>
+              </a>
+            )}
 
             <button
               onClick={connectClaude}

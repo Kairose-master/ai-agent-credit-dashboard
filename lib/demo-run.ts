@@ -21,6 +21,30 @@ export interface DemoResult {
   mediaDataUrl?: string
   mediaMime?: string
   verdict: { passed: boolean | null; reason: string }
+  /** Set when the deliverable passed grading: a gas-free authorship+grade proof
+   *  (keccak256 fingerprint + oracle signature) verifiable at /proof/<id>. */
+  proof?: { id: string; contentHash: string; attester: string }
+}
+
+/** Issue a Proof of Authorship & Grade for a passing demo deliverable.
+ *  Best-effort — a proof failure never breaks the demo response. */
+async function attachProof(
+  kind: DemoKind,
+  passed: boolean | null,
+  deliverable: { base64?: string | null; text?: string | null },
+  grader: string,
+): Promise<DemoResult['proof']> {
+  if (passed !== true) return undefined
+  const { issueWorkProof } = await import('@/lib/work-proof-store')
+  const stored = await issueWorkProof({
+    jobRef: `demo-${kind}-${Date.now()}`,
+    kind,
+    worker: 'demo-worker@ledgermind',
+    requester: FAUCET_EMAIL,
+    grader,
+    deliverable,
+  })
+  return stored ? { id: stored.id, contentHash: stored.proof.contentHash, attester: stored.attester } : undefined
 }
 
 const FAUCET_EMAIL = 'faucet@ledgermind.internal'
@@ -96,6 +120,7 @@ export async function runDemo(kind: DemoKind, prompt: string): Promise<DemoResul
       mediaDataUrl: `data:${img.mime};base64,${img.base64}`,
       mediaMime: img.mime,
       verdict: { passed: g.passed, reason: g.output },
+      proof: await attachProof(kind, g.passed, { base64: img.base64 }, 'vision'),
     }
   }
 
@@ -108,6 +133,7 @@ export async function runDemo(kind: DemoKind, prompt: string): Promise<DemoResul
       mediaDataUrl: `data:${au.mime};base64,${au.base64}`,
       mediaMime: au.mime,
       verdict: { passed: g.passed, reason: g.output },
+      proof: await attachProof(kind, g.passed, { base64: au.base64 }, 'transcription'),
     }
   }
 
@@ -126,5 +152,10 @@ export async function runDemo(kind: DemoKind, prompt: string): Promise<DemoResul
     output,
     ownerId,
   )
-  return { kind, textOutput: output, verdict: { passed: g.passed, reason: g.output } }
+  return {
+    kind,
+    textOutput: output,
+    verdict: { passed: g.passed, reason: g.output },
+    proof: await attachProof(kind, g.passed, { text: output }, 'llm'),
+  }
 }
