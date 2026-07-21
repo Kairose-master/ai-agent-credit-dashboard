@@ -176,12 +176,27 @@ export async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect)
       attachmentUrl: spec.attachmentUrl,
       attachmentName: spec.attachmentName,
       testCode: spec.testCode,
+      // Preserve what the deliverable actually IS — dropping these silently
+      // reset a reposted image/audio job to plain text, so it matched the
+      // wrong workers and skipped vision/transcription grading.
+      deliverableKind: spec.deliverableKind,
+      requiredCapabilities: spec.requiredCapabilities,
       repostCount: spec.repostCount + 1,
       failedWorkerIds: failedWorkers,
       autoApprove: spec.autoApprove, // carry the requester's original consent choice forward, don't silently reset it
       parentSpecHash: spec.specHash, // explicit lineage — lets delegations follow the work to its replacement
     })
     const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
+
+    // Backfill the new spec's onchainJobId so the sweep and diagnostics can
+    // find it by job id (the reverse link was silently missing before).
+    try {
+      const fresh = await retryRpc(() => readJobs())
+      const posted = fresh.find((j) => j.specHash.toLowerCase() === newSpecHash.toLowerCase())
+      if (posted) await db.update(jobSpec).set({ onchainJobId: posted.id }).where(eq(jobSpec.specHash, newSpecHash))
+    } catch (e) {
+      console.error('[labor-settle] repost onchainJobId backfill failed (non-fatal):', e)
+    }
 
     await logPlatformEvent(
       'JOB_AUTO_REPOSTED',
@@ -221,34 +236,38 @@ export async function sweepStuckGradedJobs(): Promise<void> {
     const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
     if (!isLaborMarketConfigured()) return
 
-    // Every spec that landed on-chain — NOT only ones that already carry a
-    // verdict. A job whose grading never produced a verdict (provider
-    // overload, or no grading key at submission time) is Submitted with a
-    // null/absent testResult; the old query skipped exactly those and they
-    // sat in manual review forever. Now we re-grade them here too.
-    const specs = (await db.select().from(jobSpec)).filter((s) => s.onchainJobId !== null)
-    if (specs.length === 0) return
+    // Drive from the ON-CHAIN jobs, matched to specs by specHash — NOT from
+    // specs filtered by a populated onchainJobId column. That reverse link was
+    // sometimes never written (delegation subtasks, reposts), so the old
+    // query silently skipped those jobs forever. specHash is always present on
+    // both sides, so nothing Submitted escapes the sweep now; we backfill the
+    // missing onchainJobId so downstream settlement (which keys off it) works.
+    const allSpecs = await db.select().from(jobSpec)
+    const specByHash = new Map(allSpecs.map((s) => [s.specHash.toLowerCase(), s]))
 
     const { readJobs } = await import('@/lib/onchain/labor')
     const jobs = await readJobs()
 
-    for (const spec of specs) {
-      const job = jobs.find((j) => j.id === spec.onchainJobId)
-      if (!job || job.status !== 'Submitted') continue
+    for (const job of jobs) {
+      if (job.status !== 'Submitted') continue
+      const spec = specByHash.get(job.specHash.toLowerCase())
+      if (!spec) continue
+
+      if (spec.onchainJobId !== job.id) {
+        await db.update(jobSpec).set({ onchainJobId: job.id }).where(eq(jobSpec.specHash, spec.specHash))
+        spec.onchainJobId = job.id // settlement/regrade key off this
+      }
 
       let verdict = spec.testResult && spec.testResult.passed !== null ? spec.testResult.passed : null
       if (verdict === null) {
-        // No usable verdict yet — try to grade it now (idempotent; writes
-        // testResult). Returns null if not auto-gradable or the submission
-        // isn't recorded yet, in which case we leave it for manual review.
-        console.log(`[labor-settle] re-grading ungraded Submitted job #${spec.onchainJobId} (${spec.deliverableKind ?? 'text'})`)
+        console.log(`[labor-settle] re-grading ungraded Submitted job #${job.id} (${spec.deliverableKind ?? 'text'})`)
         verdict = await regradeSubmittedSpec(spec).catch((e) => {
-          console.error(`[labor-settle] re-grade of job #${spec.onchainJobId} failed:`, e)
+          console.error(`[labor-settle] re-grade of job #${job.id} failed:`, e)
           return null
         })
         if (verdict === null) continue // still no verdict → manual review
       } else {
-        console.log(`[labor-settle] re-driving stuck settlement for job #${spec.onchainJobId} (passed=${verdict})`)
+        console.log(`[labor-settle] re-driving stuck settlement for job #${job.id} (passed=${verdict})`)
       }
 
       if (verdict) {
