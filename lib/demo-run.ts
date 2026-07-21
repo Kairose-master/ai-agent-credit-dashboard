@@ -43,7 +43,7 @@ async function generateImage(prompt: string): Promise<{ mime: string; base64: st
   return { mime, base64: buf.toString('base64') }
 }
 
-async function generateAudio(script: string): Promise<{ mime: string; base64: string }> {
+export async function generateAudio(script: string): Promise<{ mime: string; base64: string }> {
   const words = script.replace(/\s+/g, ' ').trim().slice(0, 400).split(' ')
   const chunks: string[] = []
   let cur = ''
