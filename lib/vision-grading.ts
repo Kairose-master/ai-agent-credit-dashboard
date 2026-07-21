@@ -53,6 +53,19 @@ export async function gradeImageSubmission(
     return { passed: false, output: 'No image artifact attached — this job requires an image deliverable.', gradedAt }
   }
 
+  // Reject obviously-broken deliverables before spending a vision call: a real
+  // logo/illustration is never a few hundred bytes. A tiny "image" is a failed
+  // generation (e.g. the generator returned an error body), so FAIL it — the
+  // job reposts for a real worker instead of erroring in the grader.
+  const largest = Math.max(...images.map((i) => Math.floor((i.dataBase64.length * 3) / 4)))
+  if (largest < 1024) {
+    return {
+      passed: false,
+      output: `The submitted image is only ${largest} bytes — an empty or corrupt file, not a real image deliverable.`,
+      gradedAt,
+    }
+  }
+
   let apiKey: string | null = null
   if (requesterOwnerUserId) {
     apiKey = await resolveUserAnthropicKey(requesterOwnerUserId).catch(() => null)
@@ -118,9 +131,24 @@ export async function gradeImageSubmission(
       gradedAt,
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    // "Could not process image" (400 invalid_request) means the DELIVERABLE is
+    // broken/unreadable — a corrupt, empty, or non-image file the worker
+    // submitted. That's a FAILED submission (the worker's fault), not a
+    // grading-infra gap: fail it so the job reposts for a real worker instead
+    // of rotting in manual review. Genuine infra errors (overload, auth,
+    // network) stay null → retry / manual.
+    const unprocessable = /could not process image|invalid.*image|unsupported image|image.*(too large|exceeds)|failed to (decode|parse) image/i.test(msg)
+    if (unprocessable) {
+      return {
+        passed: false,
+        output: `The submitted image could not be read (corrupt, empty, or not a valid image): ${msg.slice(0, 160)}`,
+        gradedAt,
+      }
+    }
     return {
       passed: null,
-      output: `Vision grading errored (${error instanceof Error ? error.message.slice(0, 200) : 'unknown'}) — awaiting manual review.`,
+      output: `Vision grading errored (${msg.slice(0, 200)}) — awaiting manual review.`,
       gradedAt,
     }
   }
