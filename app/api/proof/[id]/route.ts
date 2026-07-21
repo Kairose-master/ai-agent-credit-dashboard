@@ -1,5 +1,6 @@
 import { getWorkProof } from '@/lib/work-proof-store'
 import { verifyWorkProof, trustedAttester } from '@/lib/attestation'
+import { gatewayUrl } from '@/lib/ipfs'
 
 /**
  * Public, keyless verification of a Proof of Authorship & Grade.
@@ -26,6 +27,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     signature: stored.signature,
     attester: stored.attester,
     trustedAttester: trusted,
+    ipfs: stored.cid ? { cid: stored.cid, uri: `ipfs://${stored.cid}`, gateway: gatewayUrl(stored.cid) } : null,
     verification: {
       signatureValid: verification.recovered.toLowerCase() === stored.attester.toLowerCase(),
       recovered: verification.recovered,
