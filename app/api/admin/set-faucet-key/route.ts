@@ -40,11 +40,12 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: 'provide "key" (Anthropic) and/or "groqKey" (Groq/Whisper) in body' }, { status: 400 })
   }
 
+  const email = url.searchParams.get('email') ?? undefined // defaults to the faucet account
   const stored: Record<string, string> = {}
   try {
-    if (anthropicKey) stored.anthropicEndsWith = (await setFaucetOwnerAnthropicKey(anthropicKey)).keyTail
-    if (groqKey) stored.groqEndsWith = (await setFaucetOwnerOpenAiKey(groqKey)).keyTail
-    return Response.json({ status: 'ok', storedFor: 'faucet@ledgermind.internal', ...stored })
+    if (anthropicKey) stored.anthropicEndsWith = (await setFaucetOwnerAnthropicKey(anthropicKey, email)).keyTail
+    if (groqKey) stored.groqEndsWith = (await setFaucetOwnerOpenAiKey(groqKey, undefined, undefined, email)).keyTail
+    return Response.json({ status: 'ok', storedFor: email ?? 'faucet@ledgermind.internal', ...stored })
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }

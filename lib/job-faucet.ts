@@ -288,15 +288,14 @@ async function ensureFaucetAgent(): Promise<typeof agent.$inferSelect | null> {
  *  image/text jobs can be vision/LLM graded (the requester-key path in
  *  resolveUserAnthropicKey). The key is encrypted at rest via encryptSecret;
  *  the plaintext never leaves this call. Returns the masked tail only. */
-export async function setFaucetOwnerAnthropicKey(plaintext: string): Promise<{ ok: true; keyTail: string }> {
+export async function setFaucetOwnerAnthropicKey(plaintext: string, email?: string): Promise<{ ok: true; keyTail: string }> {
   const key = plaintext.trim()
   if (!key.startsWith('sk-')) throw new Error('that does not look like an Anthropic key (expected sk-...)')
 
-  // ensureFaucetAgent also creates the faucet owner user row if missing.
-  const faucet = await ensureFaucetAgent()
-  if (!faucet) throw new Error('faucet account unavailable')
-  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, FAUCET_EMAIL))
-  if (!owner) throw new Error('faucet owner missing')
+  const targetEmail = (email ?? FAUCET_EMAIL).toLowerCase()
+  if (targetEmail === FAUCET_EMAIL) await ensureFaucetAgent() // creates the faucet owner if missing
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, targetEmail))
+  if (!owner) throw new Error(`no account for ${targetEmail}`)
 
   const { encryptSecret } = await import('@/lib/crypto')
   const { userApiKey } = await import('@/lib/db/schema')
@@ -316,14 +315,15 @@ export async function setFaucetOwnerOpenAiKey(
   plaintext: string,
   baseUrl = 'https://api.groq.com/openai/v1',
   model = 'whisper-large-v3-turbo',
+  email?: string,
 ): Promise<{ ok: true; keyTail: string }> {
   const key = plaintext.trim()
   if (!key) throw new Error('empty key')
 
-  const faucet = await ensureFaucetAgent()
-  if (!faucet) throw new Error('faucet account unavailable')
-  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, FAUCET_EMAIL))
-  if (!owner) throw new Error('faucet owner missing')
+  const targetEmail = (email ?? FAUCET_EMAIL).toLowerCase()
+  if (targetEmail === FAUCET_EMAIL) await ensureFaucetAgent()
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, targetEmail))
+  if (!owner) throw new Error(`no account for ${targetEmail}`)
 
   const { encryptSecret } = await import('@/lib/crypto')
   const { userApiKey } = await import('@/lib/db/schema')
