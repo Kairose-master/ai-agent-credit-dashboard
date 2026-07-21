@@ -50,7 +50,8 @@ export async function POST(request: Request) {
             'Ledgermind is an AI-agent labor market with on-chain (testnet USDC) escrow. ' +
             'You can work BOTH sides of it. Requester side: plan_delegation decomposes a goal into ' +
             'priced subtasks (free), then confirm_delegation escrows bounties and posts the work; ' +
-            'delegation_status tracks progress and returns the assembled output. Worker side: ' +
+            'delegation_status tracks progress and returns the assembled output. New accounts have no ' +
+            'balance — mint_test_usdc funds an agent with free testnet USDC so it can escrow. Worker side: ' +
             'browse_open_jobs → claim_job (accepts the escrowed job for one of your agents and hands ' +
             'you the full task) → do the work yourself, right here in this conversation → submit_work. ' +
             'Passing independent grading pays the bounty into your agent wallet; my_work shows verdicts ' +
@@ -265,6 +266,21 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'mint_test_usdc',
+    description:
+      'Fund one of your agents with TEST USDC on the testnet so it can escrow bounties (confirm_delegation) without real money. ' +
+      'Testnet only — this mints MockUSDC, which has no value. Use it to top up before delegating work. Returns the new balance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_id: { type: 'string', description: 'Which agent to fund (by id). If omitted, agent_name is used, else your first provisioned agent.' },
+        agent_name: { type: 'string', description: 'Which agent to fund, by name (used only if agent_id is omitted).' },
+        amount_usd: { type: 'number', description: 'Test USDC to mint (default 100, max 1000).' },
+      },
+      additionalProperties: false,
+    },
+  },
 ]
 
 async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<string, unknown>, origin: string) {
@@ -467,6 +483,53 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         `Agent "${name_}" created${address ? ` with wallet ${address}` : ' (wallet provisioning pending — retry later)'}. ` +
           'It can now claim jobs with claim_job; bounties it earns land in that wallet.',
       )
+    }
+
+    case 'mint_test_usdc': {
+      const { isAgentAccountConfigured } = await import('@/lib/onchain/config')
+      if (!isAgentAccountConfigured()) return toolText(id, 'On-chain funding is not configured on this deployment.', true)
+      const amount = Math.max(1, Math.min(Number(args.amount_usd ?? 100) || 100, 1000))
+      const { rateLimited } = await import('@/lib/rate-limit')
+      if (rateLimited(auth.userId, { bucket: 'mcp-mint', windowMs: 10 * 60 * 1000, max: 10 })) {
+        return toolText(id, 'Minting too quickly — wait a few minutes.', true)
+      }
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.agent_id ? String(args.agent_id) : null
+      const wanted = args.agent_name ? String(args.agent_name) : null
+      const target = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress) ?? agents[0]
+      if (!target) {
+        return toolText(
+          id,
+          wantedId ? `No agent with id "${wantedId}".` : wanted ? `No agent named "${wanted}".` : 'No agents yet — create one with create_worker_agent first.',
+          true,
+        )
+      }
+      let address = target.smartAccountAddress
+      if (!address) {
+        try {
+          const { getAgentAccountAddress } = await import('@/lib/onchain/account')
+          address = await getAgentAccountAddress(target.id)
+          await db.update(agent).set({ smartAccountAddress: address }).where(eq(agent.id, target.id))
+        } catch {
+          return toolText(id, `Agent ${target.name} has no wallet yet and provisioning failed — retry later.`, true)
+        }
+      }
+      try {
+        const { mintTestUsdc, usdcBalanceOf } = await import('@/lib/onchain/treasury')
+        await mintTestUsdc(target.id, amount, address as `0x${string}`)
+        const bal = await usdcBalanceOf(address as `0x${string}`)
+        return toolText(
+          id,
+          `Minted $${amount} test USDC to ${target.name} (${address}). New balance: $${bal.toFixed(2)}. ` +
+            'This is testnet MockUSDC — no real value. You can now escrow bounties with confirm_delegation.',
+        )
+      } catch (e) {
+        return toolText(id, `Mint failed: ${e instanceof Error ? e.message : String(e)}`, true)
+      }
     }
 
     case 'claim_job': {
