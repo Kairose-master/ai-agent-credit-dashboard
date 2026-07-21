@@ -1,5 +1,6 @@
 import { miniVaultAddress, readMiniVaultPosition, readMiniVaultState } from '@/lib/onchain/mini-vault-chain'
 import { healthFactor, isLiquidatable, DEFAULT_VAULT, type Position } from '@/lib/mini-vault'
+import { oracleAccount } from '@/lib/onchain/clients'
 
 /**
  * Public, keyless read of the LIVE MiniVault contract — plus a cross-check:
@@ -17,7 +18,16 @@ export async function GET(request: Request): Promise<Response> {
 
   const state = await readMiniVaultState()
   const url = new URL(request.url)
-  const user = url.searchParams.get('user')
+  // Default to the oracle's own demo position so keyless viewers (the /world
+  // gauge card) always have a live position to render.
+  let user = url.searchParams.get('user')
+  if (!user) {
+    try {
+      user = oracleAccount().address
+    } catch {
+      /* no oracle configured */
+    }
+  }
   let position = null
   let crossCheck = null
   if (user && /^0x[0-9a-fA-F]{40}$/.test(user) && state) {

@@ -17,6 +17,89 @@ import './world.css'
 const ARTIFACT_BASE = ''
 const artUrl = (id: string) => `${ARTIFACT_BASE}/api/artifacts/${id}`
 
+/** Live MiniVault gauge — reads the deployed GIWA-style vault contract via
+ *  the public keyless endpoint. HF bar + oracle price + liquidation flag are
+ *  real Sepolia state, refreshed on the same cadence as the rest of /world. */
+interface VaultView {
+  deployed: boolean
+  state?: { address: string; priceUsd: number; totalSupplyGusd: number }
+  position?: { collateralEth: number; debtGusd: number; healthFactor: number | null; liquidatable: boolean } | null
+  crossCheck?: { engineAgrees: boolean } | null
+}
+
+function VaultGauge() {
+  const [v, setV] = useState<VaultView | null>(null)
+  useEffect(() => {
+    let dead = false
+    const load = () =>
+      fetch('/api/vault/onchain')
+        .then((r) => r.json())
+        .then((d) => !dead && setV(d))
+        .catch(() => {})
+    load()
+    const t = setInterval(load, 15_000)
+    return () => {
+      dead = true
+      clearInterval(t)
+    }
+  }, [])
+  if (!v?.deployed || !v.state) return null
+  const p = v.position
+  const hf = p?.healthFactor ?? null
+  const hfPct = hf === null ? 100 : Math.max(4, Math.min(100, (hf / 2.5) * 100))
+  const danger = p?.liquidatable ?? false
+  return (
+    <section>
+      <h2 className="mb-3 flex items-center gap-2 font-semibold">
+        🏦 MiniVault
+        <span className="text-xs font-normal text-muted-foreground">
+          live on Sepolia — ETH collateral → gUSD, oracle price, liquidation
+        </span>
+      </h2>
+      <div className="rounded-xl border border-border bg-background/70 p-4">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <span>
+            📈 ETH <b className="tabular-nums">${v.state.priceUsd.toLocaleString()}</b>
+          </span>
+          <span>
+            🪙 gUSD supply <b className="tabular-nums">{v.state.totalSupplyGusd.toFixed(2)}</b>
+          </span>
+          {p && (
+            <span>
+              🔒 demo position <b className="tabular-nums">{p.collateralEth} ETH</b> / <b className="tabular-nums">{p.debtGusd.toFixed(2)} gUSD</b>
+            </span>
+          )}
+          <span
+            className={`ml-auto rounded px-2 py-0.5 text-[10px] font-semibold ${
+              danger ? 'bg-destructive/15 text-destructive' : 'bg-success/15 text-success'
+            }`}
+          >
+            {danger ? '⚠️ LIQUIDATABLE' : '✅ HEALTHY'}
+          </span>
+        </div>
+        {p && hf !== null && (
+          <div className="mt-3">
+            <div className="mb-1 flex justify-between text-[11px] text-muted-foreground">
+              <span>health factor</span>
+              <span className="tabular-nums">{hf.toFixed(2)} {v.crossCheck?.engineAgrees ? '· engine ✓' : ''}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-secondary/60">
+              <div
+                className={`h-full rounded-full transition-all ${danger ? 'bg-destructive' : hf < 1.4 ? 'bg-warning' : 'bg-success'}`}
+                style={{ width: `${hfPct}%` }}
+              />
+            </div>
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          contract {v.state.address.slice(0, 8)}…{v.state.address.slice(-6)} · HF &lt; 1 → anyone can liquidate (close
+          factor 50%, bonus 10%) · testnet
+        </p>
+      </div>
+    </section>
+  )
+}
+
 const RATING_TIER: Record<string, { ring: string; label: string }> = {
   AAA: { ring: 'w-tier-diamond', label: '💠 AAA' },
   AA: { ring: 'w-tier-diamond', label: '💠 AA' },
@@ -425,6 +508,8 @@ export default function WorldPage() {
           </div>
         )}
       </section>
+
+      <VaultGauge />
 
       <p className="text-center text-[11px] text-muted-foreground">
         Nothing here is decorative fiction — pickaxes are escrowed jobs, envelopes are commitVote() transactions, the
