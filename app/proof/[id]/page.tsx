@@ -61,6 +61,7 @@ export default async function ProofPage({ params }: { params: Promise<{ id: stri
         <Row k="결과물 지문 (keccak256)" val={short(p.contentHash)} mono />
         <Row k="채점 시각" val={new Date(p.gradedAt * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'} />
         <Row k="발급자(오라클) 서명" val={short(stored.attester)} mono />
+        {stored.cid && <Row k="콘텐츠 주소 (IPFS CIDv1)" val={short(stored.cid)} mono />}
         <div className="flex items-center justify-between gap-4 pt-3">
           <span className="text-sm text-muted-foreground">서명 검증</span>
           <span className={`text-sm font-semibold ${signatureValid ? 'text-emerald-500' : 'text-red-500'}`}>
@@ -80,6 +81,14 @@ export default async function ProofPage({ params }: { params: Promise<{ id: stri
         서명이 신뢰된 채점 오라클 주소로만 복원되기 때문입니다.
         <br />
         <a className="text-emerald-500 underline" href={`/api/proof/${stored.id}`}>원본 JSON으로 직접 검증 →</a>
+        {stored.cid && (
+          <>
+            {' · '}
+            <a className="text-emerald-500 underline" href={`https://ipfs.io/ipfs/${stored.cid}`} target="_blank" rel="noreferrer">
+              IPFS(콘텐츠 주소) →
+            </a>
+          </>
+        )}
       </p>
     </main>
   )

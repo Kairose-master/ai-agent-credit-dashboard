@@ -1,5 +1,6 @@
 import { pool } from '@/lib/db'
 import { contentHashOf, signWorkProof, trustedAttester, WORK_PROOF_SCHEMA, type WorkProof } from '@/lib/attestation'
+import { cidOfJson, pinBytes } from '@/lib/ipfs'
 
 /**
  * Persistence + issuance for Proof of Authorship & Grade. Self-migrating: the
@@ -14,6 +15,9 @@ export interface StoredProof {
   proof: WorkProof
   signature: string
   attester: string
+  /** Content-addressed id (CIDv1) of the {proof, signature, attester} record —
+   *  an ipfs:// identity that resolves on any gateway once pinned. */
+  cid: string | null
 }
 
 async function ensureTable(): Promise<void> {
@@ -25,10 +29,13 @@ async function ensureTable(): Promise<void> {
        attester text NOT NULL,
        signature text NOT NULL,
        proof jsonb NOT NULL,
+       cid text,
        created_at timestamptz NOT NULL DEFAULT now()
      )`,
   )
   await pool.query(`CREATE INDEX IF NOT EXISTS work_proofs_job_ref_idx ON work_proofs (job_ref)`)
+  // Additive migration for tables created before the cid column existed.
+  await pool.query(`ALTER TABLE work_proofs ADD COLUMN IF NOT EXISTS cid text`)
 }
 
 /**
@@ -60,14 +67,20 @@ export async function issueWorkProof(input: {
     const signed = await signWorkProof(proof)
     if (!signed) return null
 
+    // Content-address the whole signed record (IPFS + ENS pattern). The CID is
+    // derived locally with no deps; pinning is best-effort (only if configured).
+    const record = { proof, signature: signed.signature, attester: signed.attester }
+    const cid = cidOfJson(record)
+    void pinBytes(Buffer.from(JSON.stringify(record), 'utf8')) // fire-and-forget
+
     const id = crypto.randomUUID()
     await ensureTable()
     await pool.query(
-      `INSERT INTO work_proofs (id, job_ref, content_hash, attester, signature, proof)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [id, proof.jobRef, proof.contentHash, signed.attester, signed.signature, JSON.stringify(proof)],
+      `INSERT INTO work_proofs (id, job_ref, content_hash, attester, signature, proof, cid)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, proof.jobRef, proof.contentHash, signed.attester, signed.signature, JSON.stringify(proof), cid],
     )
-    return { id, proof, signature: signed.signature, attester: signed.attester }
+    return { id, proof, signature: signed.signature, attester: signed.attester, cid }
   } catch {
     return null
   }
@@ -76,12 +89,12 @@ export async function issueWorkProof(input: {
 export async function getWorkProof(id: string): Promise<StoredProof | null> {
   try {
     await ensureTable()
-    const { rows } = await pool.query<{ id: string; proof: WorkProof; signature: string; attester: string }>(
-      `SELECT id, proof, signature, attester FROM work_proofs WHERE id = $1`,
+    const { rows } = await pool.query<{ id: string; proof: WorkProof; signature: string; attester: string; cid: string | null }>(
+      `SELECT id, proof, signature, attester, cid FROM work_proofs WHERE id = $1`,
       [id],
     )
     if (!rows[0]) return null
-    return { id: rows[0].id, proof: rows[0].proof, signature: rows[0].signature, attester: rows[0].attester }
+    return { id: rows[0].id, proof: rows[0].proof, signature: rows[0].signature, attester: rows[0].attester, cid: rows[0].cid ?? null }
   } catch {
     return null
   }
@@ -91,12 +104,12 @@ export async function getWorkProof(id: string): Promise<StoredProof | null> {
 export async function getLatestProofForJob(jobRef: string): Promise<StoredProof | null> {
   try {
     await ensureTable()
-    const { rows } = await pool.query<{ id: string; proof: WorkProof; signature: string; attester: string }>(
-      `SELECT id, proof, signature, attester FROM work_proofs WHERE job_ref = $1 ORDER BY created_at DESC LIMIT 1`,
+    const { rows } = await pool.query<{ id: string; proof: WorkProof; signature: string; attester: string; cid: string | null }>(
+      `SELECT id, proof, signature, attester, cid FROM work_proofs WHERE job_ref = $1 ORDER BY created_at DESC LIMIT 1`,
       [jobRef],
     )
     if (!rows[0]) return null
-    return { id: rows[0].id, proof: rows[0].proof, signature: rows[0].signature, attester: rows[0].attester }
+    return { id: rows[0].id, proof: rows[0].proof, signature: rows[0].signature, attester: rows[0].attester, cid: rows[0].cid ?? null }
   } catch {
     return null
   }
