@@ -133,7 +133,6 @@ export async function getAgentKernel(agentId: string) {
   // slips through (cross-instance) is retried with backoff.
   const address = account.address as Address
   const rawSend = kernelClient.sendUserOperation.bind(kernelClient)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(kernelClient as any).sendUserOperation = (args: unknown) =>
     serializedSend(address, () =>
       withRetry(() => rawSend(args as Parameters<typeof rawSend>[0]), {

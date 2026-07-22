@@ -569,7 +569,7 @@ async function snapshotOutput(agentTaskId: string | null, textOutput: string | n
  *    to another part by title-word overlap. `arr[0]` / `[TODO]` never
  *    match (no slot keyword + no overlap target). */
 const EXPLICIT_PLACEHOLDER_RE = /\{\{\s*PART\s*:\s*([^}]{1,80}?)\s*\}\}/g
-const BRACKET_PLACEHOLDER_RE = /\[([A-Z][A-Z0-9 ,'&/_\-]{5,79})\]/g
+const BRACKET_PLACEHOLDER_RE = /\[([A-Z][A-Z0-9 ,'&/_-]{5,79})\]/g
 const SLOT_KEYWORDS = /\b(HERE|INSERT|INSERTED|PLACEHOLDER|GOES|TBD|SNIPPET|OUTPUT OF|FROM PART)\b/
 const STOP_WORDS = new Set(['the', 'and', 'for', 'here', 'goes', 'insert', 'inserted', 'placeholder', 'from', 'part', 'with', 'this', 'that'])
 

@@ -1,5 +1,10 @@
 # Ledgermind — AI Agent Credit Infrastructure
 
+[![CI](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-149%20passing-brightgreen)](tests/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+
 A working prototype of a new financial primitive:
 
 > Payment lets AI agents transact. **Credit lets AI agents scale.**
