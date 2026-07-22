@@ -40,6 +40,24 @@ export async function publicJobs(limit = 10) {
   const tasks = taskIds.length > 0 ? await db.select().from(agentTask) : []
   const taskById = new Map(tasks.map((t) => [t.id, t]))
 
+  // Agent DISPLAY NAMES for the two sides of a job. The truncated addresses
+  // below identify a wallet, not a participant anyone can recognise, which
+  // makes a job impossible to match against the public agent leaderboard
+  // (that's the §17 matching gap the Minecraft village hits). Names are
+  // already public on /world and GET /api/world/agents, so exposing them
+  // here adds no new disclosure — agent IDs deliberately stay hidden.
+  const partyIds = [
+    ...new Set(
+      specs
+        .flatMap((s) => [s.requesterAgentId, s.workerAgentId])
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ]
+  const parties = partyIds.length > 0
+    ? await db.select({ id: agent.id, name: agent.name }).from(agent).where(inArray(agent.id, partyIds))
+    : []
+  const nameByAgentId = new Map(parties.map((p) => [p.id, p.name]))
+
   return onchainJobs
     .slice(0, limit)
     .map((j) => {
@@ -55,6 +73,8 @@ export async function publicJobs(limit = 10) {
         minScore: j.minScore,
         requesterLabel: truncate(j.requester),
         workerLabel: truncate(j.worker),
+        requesterName: spec?.requesterAgentId ? nameByAgentId.get(spec.requesterAgentId) ?? null : null,
+        workerName: spec?.workerAgentId ? nameByAgentId.get(spec.workerAgentId) ?? null : null,
         workerRunStatus: task?.status ?? null,
         output: task?.status === 'completed' ? task.output : null,
         disputeNote: spec?.disputeNote ?? null,

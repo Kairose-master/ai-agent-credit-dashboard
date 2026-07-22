@@ -45,8 +45,14 @@ export interface TaskSpec {
   status: string
   requesterAgentId: string | null
   requesterLabel: string | null
+  /** Agent DISPLAY name for the requester, when the job carries one. Lets a
+   *  caller match a job against GET /api/world/agents, which the truncated
+   *  wallet label above cannot do. Null for jobs posted outside an agent. */
+  requesterName: string | null
   workerAgentId: string | null
   workerLabel: string | null
+  /** Agent display name for the worker, once one has accepted. */
+  workerName: string | null
   verification: VerificationMethod
   createdAt: string | null
 }
@@ -86,6 +92,8 @@ type PublicJob = {
   minScore: number
   requesterLabel: string | null
   workerLabel: string | null
+  requesterName?: string | null
+  workerName?: string | null
   testResult: { passed: boolean | null; output: string; gradedAt: string } | null
   hasTests: boolean
 }
@@ -105,8 +113,10 @@ export function jobToTaskSpec(job: PublicJob): TaskSpec {
     status: job.status,
     requesterAgentId: null, // publicJobs() only exposes truncated address labels, not agent IDs, for non-owners
     requesterLabel: job.requesterLabel,
+    requesterName: job.requesterName ?? null,
     workerAgentId: null,
     workerLabel: job.workerLabel,
+    workerName: job.workerName ?? null,
     verification: job.testResult || job.hasTests ? 'auto_graded_tests' : 'manual_review',
     createdAt: null, // on-chain reads don't currently carry a posted-at timestamp
   }
@@ -138,8 +148,10 @@ export function verifiedTaskToTaskSpec(task: VerifiedTaskRow): TaskSpec {
     status: task.status,
     requesterAgentId: null,
     requesterLabel: task.requester,
+    requesterName: null, // verified tasks carry agent labels, not display names
     workerAgentId: null,
     workerLabel: task.solver,
+    workerName: null,
     verification: 'independent_grader',
     createdAt: typeof task.createdAt === 'string' ? task.createdAt : task.createdAt.toISOString(),
   }
