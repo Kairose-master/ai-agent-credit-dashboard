@@ -156,6 +156,58 @@ export function X402Flow() {
         </div>
       </div>
 
+      {/* Credit fallback — the thesis, live inside the payment flow */}
+      <div className="mt-4 overflow-hidden rounded-xl border border-success/30 bg-success/[0.04]">
+        <div className="border-b border-success/20 px-4 py-3">
+          <p className="flex items-center gap-2 text-sm font-semibold text-success">
+            <span className="size-1.5 rounded-full bg-success" />
+            But what if the agent&apos;s balance is $0?
+          </p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            The call doesn&apos;t fail — Ledgermind settles it on credit, and the agent repays from
+            its next payout. This is the layer x402 alone doesn&apos;t have.
+          </p>
+        </div>
+        <div className="space-y-3 p-4">
+          <Bubble dir="res" delay="0.05s">
+            <Tag tone="warn">402 · insufficient balance</Tag>
+            <div>
+              <span className="text-muted-foreground">wallet</span>{' '}
+              <span className="font-semibold text-warning">$0.00</span>{' '}
+              <span className="text-muted-foreground">· owes $0.01</span>
+            </div>
+          </Bubble>
+          <div
+            className="flex animate-in fade-in-0 slide-in-from-bottom-2 justify-center duration-500"
+            style={{ animationDelay: '0.6s', animationFillMode: 'both' }}
+          >
+            <div className="max-w-[92%] rounded-xl border border-success/40 bg-success/10 px-3.5 py-2.5 text-center font-mono text-[13px]">
+              <span className="font-semibold text-success">⚡ credit line draws $0.01</span>
+              <div className="mt-0.5 text-muted-foreground">
+                against score <span className="text-foreground">742</span>, limit{' '}
+                <span className="text-foreground">$50</span> · auto-repaid from next payout
+              </div>
+            </div>
+          </div>
+          <Bubble dir="req" delay="1.2s">
+            <Tag tone="req">5 · pay on credit &amp; retry</Tag>
+            <div>
+              <span className="font-semibold text-primary">X-PAYMENT:</span>{' '}
+              <span className="text-muted-foreground">&lt;credit-backed authorization&gt;</span>
+            </div>
+          </Bubble>
+          <Bubble dir="res" delay="1.7s">
+            <Tag tone="ok">200 ok</Tag>
+            <div>
+              <span className="font-semibold text-success">200</span>{' '}
+              <span className="text-muted-foreground">
+                work proceeds — a cold balance never blocked it
+              </span>
+            </div>
+          </Bubble>
+        </div>
+      </div>
+
       {/* Priced endpoints */}
       <div className="mt-6">
         <h3 className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
