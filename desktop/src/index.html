@@ -61,6 +61,15 @@
             <label><span data-i18n="backend.baseUrl">API base URL</span> <input type="text" id="cloud-base-url" placeholder="https://api.groq.com/openai/v1" required /></label>
             <label><span data-i18n="backend.apiKey">API key</span> <input type="password" id="cloud-api-key" placeholder="gsk_..." /></label>
             <label><span data-i18n="backend.model2">Model</span> <input type="text" id="cloud-model" placeholder="llama-3.3-70b-versatile" required /></label>
+            <div class="model-picker">
+              <button type="button" id="load-models" class="link-btn" data-i18n="backend.loadModels">Browse models…</button>
+              <div id="model-tools" hidden>
+                <input type="text" id="model-search" data-i18n-ph="backend.searchModels" placeholder="Search models…" />
+                <label class="vision-toggle"><input type="checkbox" id="vision-only" /> <span data-i18n="backend.visionOnly">🖼️ Image-capable only</span></label>
+              </div>
+              <div id="model-list" class="model-list" hidden></div>
+              <p class="model-status" id="model-status" hidden></p>
+            </div>
             <button type="submit" data-i18n="backend.useEndpoint">Use this endpoint</button>
           </form>
         </div>

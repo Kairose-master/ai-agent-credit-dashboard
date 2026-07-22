@@ -25,6 +25,9 @@ const KO = {
   'backend.baseUrl': 'API 베이스 URL',
   'backend.apiKey': 'API 키',
   'backend.model2': '모델',
+  'backend.loadModels': '모델 찾아보기…',
+  'backend.searchModels': '모델 검색…',
+  'backend.visionOnly': '🖼️ 이미지 가능 모델만',
   'backend.useEndpoint': '이 엔드포인트 사용',
   'backend.cloudMid3': ', 또는 호스팅 모델을 연결하세요 — 프로바이더를 고르고, 키를 붙여넣고, 채굴:',
   'backend.providerOther': '직접 입력',
@@ -80,6 +83,15 @@ function applyLang() {
       el.textContent = KO[key]
     } else if (el.dataset.en) {
       el.textContent = el.dataset.en
+    }
+  })
+  document.querySelectorAll('[data-i18n-ph]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-ph')
+    if (lang === 'ko' && KO[key]) {
+      if (!el.dataset.enPh) el.dataset.enPh = el.placeholder
+      el.placeholder = KO[key]
+    } else if (el.dataset.enPh) {
+      el.placeholder = el.dataset.enPh
     }
   })
   const toggle = document.getElementById('lang-toggle')
@@ -193,6 +205,101 @@ function applyProvider(name) {
   }
 }
 
+// ---------- Model picker (searchable, capability-aware) ----------
+//
+// The old flow was a blank "type the model id" box, which is how a text-only
+// model ends up claiming image jobs and failing. This loads the provider's
+// real model list (OpenAI-compatible /models, via Rust so CSP doesn't block
+// it) and lets the user search it and filter to image-capable models.
+
+let allModels = []
+
+function resetModelPicker() {
+  allModels = []
+  const list = document.getElementById('model-list')
+  const tools = document.getElementById('model-tools')
+  const status = document.getElementById('model-status')
+  const search = document.getElementById('model-search')
+  if (list) { list.hidden = true; list.innerHTML = '' }
+  if (tools) tools.hidden = true
+  if (status) status.hidden = true
+  if (search) search.value = ''
+  const vo = document.getElementById('vision-only')
+  if (vo) vo.checked = false
+}
+
+function fmtCtx(n) {
+  if (!n) return ''
+  return n >= 1000 ? `${Math.round(n / 1000)}K ctx` : `${n} ctx`
+}
+
+async function loadModels() {
+  const base = document.getElementById('cloud-base-url').value.trim()
+  const key = document.getElementById('cloud-api-key').value.trim()
+  const status = document.getElementById('model-status')
+  status.hidden = false
+  status.classList.remove('err')
+  status.textContent = lang === 'ko' ? '모델 불러오는 중…' : 'Loading models…'
+  try {
+    allModels = await invoke('list_models', { baseUrl: base, apiKey: key })
+    document.getElementById('model-tools').hidden = false
+    document.getElementById('model-list').hidden = false
+    renderModelList()
+    const anyVision = allModels.some((m) => m.vision)
+    status.textContent = lang === 'ko'
+      ? `${allModels.length}개 모델${anyVision ? ' · 🖼️ 이미지 가능 모델 있음' : ''}`
+      : `${allModels.length} models${anyVision ? ' · 🖼️ some image-capable' : ''}`
+  } catch (e) {
+    status.classList.add('err')
+    status.textContent = String(e)
+  }
+}
+
+function renderModelList() {
+  const list = document.getElementById('model-list')
+  const q = document.getElementById('model-search').value.trim().toLowerCase()
+  const visionOnly = document.getElementById('vision-only').checked
+  const current = document.getElementById('cloud-model').value.trim()
+  let rows = allModels
+  if (visionOnly) rows = rows.filter((m) => m.vision)
+  if (q) rows = rows.filter((m) => m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q))
+  const CAP = 80
+  const shown = rows.slice(0, CAP)
+  list.innerHTML = ''
+  if (shown.length === 0) {
+    const empty = document.createElement('div')
+    empty.className = 'model-empty'
+    empty.textContent = lang === 'ko' ? '일치하는 모델이 없어요.' : 'No matching models.'
+    list.appendChild(empty)
+    return
+  }
+  for (const m of shown) {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'model-row' + (m.id === current ? ' active' : '')
+    const meta = [m.vision ? '🖼️' : '', fmtCtx(m.context)].filter(Boolean).join(' · ')
+    const idSpan = document.createElement('span')
+    idSpan.className = 'model-id'
+    idSpan.textContent = m.id
+    const metaSpan = document.createElement('span')
+    metaSpan.className = 'model-meta'
+    metaSpan.textContent = meta
+    row.appendChild(idSpan)
+    row.appendChild(metaSpan)
+    row.addEventListener('click', () => {
+      document.getElementById('cloud-model').value = m.id
+      renderModelList()
+    })
+    list.appendChild(row)
+  }
+  if (rows.length > CAP) {
+    const more = document.createElement('div')
+    more.className = 'model-empty'
+    more.textContent = lang === 'ko' ? `+${rows.length - CAP}개 더 — 검색으로 좁혀보세요` : `+${rows.length - CAP} more — refine your search`
+    list.appendChild(more)
+  }
+}
+
 function initBackendView() {
   document.getElementById('use-ollama').addEventListener('click', async () => {
     const model = document.getElementById('ollama-model').value
@@ -206,8 +313,18 @@ function initBackendView() {
   })
 
   document.querySelectorAll('.provider-chip').forEach((chip) => {
-    chip.addEventListener('click', () => applyProvider(chip.dataset.provider))
+    chip.addEventListener('click', () => {
+      const name = chip.dataset.provider
+      applyProvider(name)
+      resetModelPicker()
+      // OpenRouter's /models is keyless — load it immediately so the user
+      // sees the real list (and can filter to image-capable) without a key.
+      if (name === 'openrouter') loadModels()
+    })
   })
+  document.getElementById('load-models').addEventListener('click', loadModels)
+  document.getElementById('model-search').addEventListener('input', renderModelList)
+  document.getElementById('vision-only').addEventListener('change', renderModelList)
   // Default the cloud fallback to a sensible provider so the fields aren't blank.
   applyProvider('groq')
 

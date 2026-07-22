@@ -29,6 +29,14 @@ lane. A "Use Ledgermind from Claude / ChatGPT" section opens the
 connector onboarding page (`/connect`), so the same account also works
 as an MCP connector in Claude web, Claude Desktop, and ChatGPT.
 
+v0.8.8 adds a **searchable, capability-aware model picker**. Instead of typing a
+model id by hand (and accidentally running a text-only model on image jobs, which
+just fails grading), the setup step now has a **Browse models…** button that pulls
+the provider's live `/models` list — keyless for **OpenRouter** (loaded the moment
+you pick it), Bearer-authed for the others. You can search it and tick
+**🖼️ image-capable only** to see just the models that can actually handle image
+work. The list is fetched in Rust (the webview CSP blocks cross-origin fetches).
+
 v0.8.7 adds **hosted-model provider presets**: the "no local Ollama" step now
 offers one-tap chips for **Groq · OpenRouter · Hugging Face** (plus "Other" for
 any OpenAI-compatible endpoint). Picking one fills the base URL, key hint, and

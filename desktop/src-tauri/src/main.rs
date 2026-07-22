@@ -159,6 +159,15 @@ async fn detect_ollama() -> Result<Vec<String>, String> {
     protocol::detect_ollama_models("http://localhost:11434").await
 }
 
+/// List a hosted provider's models (OpenAI-compatible `/models`) so the setup
+/// screen can offer a searchable picker with vision/context hints instead of a
+/// blank "type the model id" box. Runs in Rust because the webview CSP blocks
+/// cross-origin fetches.
+#[tauri::command]
+async fn list_models(base_url: String, api_key: String) -> Result<Vec<protocol::ModelInfo>, String> {
+    protocol::list_openai_models(&base_url, &api_key).await
+}
+
 #[tauri::command]
 fn save_backend(app: tauri::AppHandle, backend: ModelBackend) -> Result<(), String> {
     let mut cfg = load_stored_config(&app);
@@ -499,6 +508,7 @@ fn main() {
             register_agent,
             forget_account,
             detect_ollama,
+            list_models,
             save_backend,
             start_mining,
             stop_mining,

@@ -877,3 +877,93 @@ pub async fn detect_ollama_models(base_url: &str) -> Result<Vec<String>, String>
     let tags: Tags = res.json().await.map_err(|e| format!("unexpected Ollama response: {e}"))?;
     Ok(tags.models.into_iter().map(|m| m.name).collect())
 }
+
+/// A model offered by an OpenAI-compatible provider, with the metadata the
+/// picker needs to help a user choose the RIGHT one — context window and,
+/// crucially, whether it can see images, so image jobs go to a vision model
+/// instead of a text-only one that would only emit ASCII/code and fail
+/// grading.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub context: Option<u64>,
+    pub vision: bool,
+}
+
+/// List models from any OpenAI-compatible `{base}/models` endpoint. Keyless
+/// where the provider allows it (OpenRouter), Bearer-authed otherwise (Groq,
+/// Hugging Face). OpenRouter returns rich metadata (context length + input
+/// modalities) which we surface; plainer providers return ids only — still
+/// enough to pick from a searchable list instead of typing an id by hand.
+pub async fn list_openai_models(base_url: &str, api_key: &str) -> Result<Vec<ModelInfo>, String> {
+    let base = base_url.trim_end_matches('/');
+    if base.is_empty() {
+        return Err("Enter the API base URL first (or pick a provider chip).".to_string());
+    }
+    let url = format!("{base}/models");
+    let mut req = client().get(&url).timeout(Duration::from_secs(15));
+    if !api_key.is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+    let res = req
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach {url}: {e}"))?;
+    if !res.status().is_success() {
+        let code = res.status().as_u16();
+        return Err(match code {
+            401 | 403 => "The API key was rejected — check the key for this provider.".to_string(),
+            404 => format!("No /models endpoint at {base} — is the base URL right?"),
+            _ => format!("Provider returned HTTP {code} for {url}"),
+        });
+    }
+
+    #[derive(Deserialize)]
+    struct ModelsResp {
+        data: Vec<RawModel>,
+    }
+    #[derive(Deserialize)]
+    struct RawModel {
+        id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        context_length: Option<u64>,
+        #[serde(default)]
+        architecture: Option<Arch>,
+    }
+    #[derive(Deserialize)]
+    struct Arch {
+        #[serde(default)]
+        modality: Option<String>,
+        #[serde(default)]
+        input_modalities: Option<Vec<String>>,
+    }
+
+    let parsed: ModelsResp = res
+        .json()
+        .await
+        .map_err(|e| format!("unexpected /models response: {e}"))?;
+    let mut out: Vec<ModelInfo> = parsed
+        .data
+        .into_iter()
+        .map(|m| {
+            let vision = m
+                .architecture
+                .as_ref()
+                .map(|a| {
+                    a.input_modalities
+                        .as_ref()
+                        .map(|v| v.iter().any(|s| s == "image"))
+                        .unwrap_or(false)
+                        || a.modality.as_ref().map(|s| s.contains("image")).unwrap_or(false)
+                })
+                .unwrap_or(false);
+            ModelInfo { id: m.id, name: m.name, context: m.context_length, vision }
+        })
+        .collect();
+    out.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    Ok(out)
+}
