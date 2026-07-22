@@ -152,6 +152,23 @@ type Treasury = {
   dailyCap: number
 }
 
+/**
+ * Wallet-card visual tier, derived from the agent's real credit rating —
+ * a better rating literally upgrades the metal of its card. Every tier keeps
+ * a dark base so the white card content stays legible.
+ */
+function cardTier(rating: string): { gradient: string; label: string; badge: string } {
+  const r = (rating ?? '').toUpperCase()
+  const sheen = 'radial-gradient(130% 130% at 0% 0%, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0) 44%), '
+  if (r === 'AAA' || r === 'AA')
+    return { gradient: sheen + 'linear-gradient(135deg, #1c1608 0%, #8a6d1e 58%, #caa544 100%)', label: 'Gold', badge: '#ecd68a' }
+  if (r === 'A' || r === 'BBB')
+    return { gradient: sheen + 'linear-gradient(135deg, #12224a 0%, #1f5fd0 60%, #2f83ef 100%)', label: 'Sapphire', badge: '#c2d9ff' }
+  if (r === 'BB' || r === 'B')
+    return { gradient: sheen + 'linear-gradient(135deg, #1c110b 0%, #7a4a2a 58%, #b9713f 100%)', label: 'Bronze', badge: '#e8b892' }
+  return { gradient: sheen + 'linear-gradient(135deg, #15171c 0%, #33404f 58%, #566577 100%)', label: 'Graphite', badge: '#c7d0dc' }
+}
+
 export default function ProfilePage() {
   const { t } = useI18n()
   const router = useRouter()
@@ -775,13 +792,10 @@ export default function ProfilePage() {
             <p className="text-sm text-muted-foreground mt-1">{t('profile.treasury.subtitle')}</p>
           </div>
 
-          {/* The card — a fixed material object, same face in light & dark */}
+          {/* The card — a material object whose metal is set by credit tier */}
           <div
             className="relative mx-auto w-full max-w-md overflow-hidden rounded-[22px] p-6 text-white shadow-[0_18px_40px_-12px_rgba(15,40,90,0.5)]"
-            style={{
-              background:
-                'radial-gradient(130% 130% at 0% 0%, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0) 44%), linear-gradient(135deg, #12224a 0%, #1f5fd0 60%, #2f83ef 100%)',
-            }}
+            style={{ background: cardTier(credit.rating).gradient }}
           >
             {/* diagonal gloss */}
             <div
@@ -795,6 +809,12 @@ export default function ProfilePage() {
                   Agent Treasury
                 </p>
                 <p className="mt-1 text-sm font-semibold">{identity.name}</p>
+                <p
+                  className="mt-1 text-[11px] font-semibold uppercase tracking-wider"
+                  style={{ color: cardTier(credit.rating).badge }}
+                >
+                  {cardTier(credit.rating).label} · {credit.rating}-rated
+                </p>
               </div>
               <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm">
                 {onchain?.chainName ?? 'Sepolia'} · testnet

@@ -66,7 +66,20 @@ export default function GuestPage() {
           <p className="text-sm font-semibold tracking-tight">Ledgermind</p>
           <p className="text-[11px] text-muted-foreground">Agent Credit Infrastructure · Guest view</p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <nav className="ml-auto flex items-center gap-1">
+          <Link
+            href="/try"
+            className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-flex"
+          >
+            Try
+          </Link>
+          <Link
+            href="/connect"
+            className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-flex"
+          >
+            Connect
+          </Link>
+          <span className="mx-1 hidden h-4 w-px bg-border sm:block" />
           <LanguageSwitcher />
           <ThemeToggle />
           <Link
@@ -81,7 +94,7 @@ export default function GuestPage() {
           >
             Sign up
           </Link>
-        </div>
+        </nav>
       </header>
 
       <main className="mx-auto max-w-[1100px] space-y-6 p-4 md:p-6">

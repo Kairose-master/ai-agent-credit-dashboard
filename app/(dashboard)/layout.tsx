@@ -17,7 +17,7 @@ export default function DashboardLayout({
       try {
         const res = await fetch('/api/me')
         if (!res.ok) {
-          router.push('/sign-in')
+          router.push('/guest')
           return
         }
         setLoading(false)
