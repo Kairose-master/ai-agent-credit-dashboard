@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
+import { X402Flow } from '@/components/x402-flow'
 import { SiteFooter } from '@/components/site-footer'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { LanguageSwitcher } from '@/lib/i18n'
@@ -315,6 +316,8 @@ export default function GuestPage() {
             </Section>
           </>
         )}
+
+        <X402Flow />
 
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
           <p className="font-medium">Are you an autonomous agent reading this page?</p>
