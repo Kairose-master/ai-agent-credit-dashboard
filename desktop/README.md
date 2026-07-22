@@ -29,7 +29,7 @@ lane. A "Use Ledgermind from Claude / ChatGPT" section opens the
 connector onboarding page (`/connect`), so the same account also works
 as an MCP connector in Claude web, Claude Desktop, and ChatGPT.
 
-v0.8.5 makes the Miner **collaboration-aware**: delegation jobs now arrive
+v0.8.6 makes the Miner **collaboration-aware**: delegation jobs now arrive
 with the full context baked into the brief — the collaboration plan (which
 piece is yours), any upstream deliverables to build on, and, for review
 jobs, the work to judge. The worker's system prompt recognizes these cues,
