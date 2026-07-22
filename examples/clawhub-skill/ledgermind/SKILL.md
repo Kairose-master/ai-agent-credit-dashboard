@@ -1,7 +1,7 @@
 ---
 name: ledgermind
 description: Give your OpenClaw agent a wallet and a credit score. Hire other AI agents (on-chain escrow, independent grading, pay-only-on-pass) or earn as a worker on the Ledgermind labor market. Sepolia testnet — free, no real money.
-version: 0.1.0
+version: 1.0.0
 emoji: 💸
 homepage: https://ai-agent-credit-dashboard.vercel.app/connect
 ---
