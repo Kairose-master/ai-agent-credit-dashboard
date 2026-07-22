@@ -39,8 +39,11 @@ const DOCS_URL = 'https://github.com/Kairose-master/ai-agent-credit-dashboard/bl
  *
  * The returned `secret` is shown once, exactly like "Connect a local
  * worker" in the dashboard — store it; it can't be recovered later, only
- * rotated (re-register isn't idempotent for a given agent name; register a
- * new agent instead).
+ * rotated. Re-registering with the SAME account + SAME agent name RECONNECTS
+ * to that existing agent (rotating its secret and returning it, with
+ * `reconnected: true`) rather than erroring — so a desktop/SDK worker can
+ * reconnect to the agent that already holds its credit and balance. Use a
+ * different name to create an additional agent.
  */
 // ---- Abuse guards ------------------------------------------------------
 // This endpoint mints accounts, agents, and on-chain wallets with zero
@@ -112,16 +115,61 @@ export async function POST(request: Request) {
     }
     userId = existing.id
 
-    // Cap agents per account — an account farming hundreds of agents is
-    // abuse, not adoption (each agent gets a provisioned wallet).
-    const owned = await db.select({ id: agent.id, name: agent.name }).from(agent).where(eq(agent.userId, userId))
+    const owned = await db
+      .select({ id: agent.id, name: agent.name, smartAccountAddress: agent.smartAccountAddress })
+      .from(agent)
+      .where(eq(agent.userId, userId))
+
+    // RECONNECT: same account + same agent name = "connect me back to my
+    // existing agent", not "make a new one". Without this, re-connecting from
+    // the desktop (which sends email+password+name) 409'd on the name and
+    // forced a brand-new, score-0 agent — orphaning the one with earned
+    // credit and balance. Rotate the worker secret and hand back the EXISTING
+    // agent, preserving its history. (The secret rotates each connect, so the
+    // most recent client wins — expected for a single-agent desktop worker.)
+    const match = owned.find((a) => a.name === name)
+    if (match) {
+      const secret = generateWebhookSecret()
+      await db
+        .update(agent)
+        .set({
+          runtimeType: 'local',
+          webhookSecretEnc: encryptWebhookSecret(secret),
+          autoMine,
+          capabilities,
+          ...(description ? { description } : {}),
+        })
+        .where(eq(agent.id, match.id))
+
+      // Ensure the smart account is provisioned (older agents may predate it).
+      let smartAccountAddress: string | null = match.smartAccountAddress ?? null
+      try {
+        const { isAgentAccountConfigured } = await import('@/lib/onchain/config')
+        if (!smartAccountAddress && isAgentAccountConfigured()) {
+          const { getAgentAccountAddress } = await import('@/lib/onchain/account')
+          smartAccountAddress = await getAgentAccountAddress(match.id)
+          await db.update(agent).set({ smartAccountAddress }).where(eq(agent.id, match.id))
+        }
+      } catch (error) {
+        console.error('[agents/register] reconnect provisioning failed (non-fatal):', error)
+      }
+
+      const url = new URL(request.url)
+      return Response.json({
+        user_id: userId,
+        agent_id: match.id,
+        secret,
+        platform_url: `${url.protocol}//${url.host}`,
+        smart_account_address: smartAccountAddress,
+        reconnected: true,
+        docs: DOCS_URL,
+      })
+    }
+
+    // No name match → creating a NEW agent; enforce the per-account cap
+    // (an account farming hundreds of provisioned wallets is abuse).
     if (owned.length >= MAX_AGENTS_PER_ACCOUNT) {
       return Response.json({ error: `Account agent limit reached (${MAX_AGENTS_PER_ACCOUNT})` }, { status: 429 })
-    }
-    // Unique agent name per account — re-registering the same name would
-    // create an ambiguous duplicate (the requester-by-name lookup bug).
-    if (owned.some((a) => a.name === name)) {
-      return Response.json({ error: `You already have an agent named "${name}" — pick a different name` }, { status: 409 })
     }
   } else {
     // Durable platform-wide throttle on NEW accounts — survives lambda
