@@ -39,10 +39,16 @@ export async function GET(request: Request) {
 
   const report: Record<string, unknown> = {}
 
-  const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
+  const { sweepStuckGradedJobs, sweepDisputedJobs } = await import('@/lib/labor-settle')
   await sweepStuckGradedJobs()
     .then(() => { report.sweep = 'ok' })
     .catch((e) => { report.sweep = String(e) })
+
+  // Return jobs stuck in dispute to the market so a different worker can take
+  // them instead of the delegation waiting on them forever.
+  await sweepDisputedJobs()
+    .then((n) => { report.disputedReposted = n })
+    .catch((e) => { report.disputedReposted = String(e) })
 
   let active: (typeof delegation.$inferSelect)[] = []
   try {

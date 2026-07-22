@@ -254,6 +254,105 @@ export async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect)
   }
 }
 
+/**
+ * A job left sitting in on-chain 'Disputed' status is a dispute-refund-repost
+ * flow that died mid-flight (or a dispute nobody resolved) — the worker and
+ * any delegation waiting on it hang forever. FINISH the interrupted flow:
+ * resolve the dispute in the requester's favour (refund) and repost the spec
+ * as a fresh job for a DIFFERENT worker. No raiseDispute (already disputed).
+ * Same cap, lineage, and capability-preserving repost as the failed-grading
+ * path; the live status re-check keeps it safe to run from the heartbeat
+ * alongside that path. Capped by MAX_AUTO_REPOSTS per lineage.
+ */
+export async function returnDisputedJobToMarket(spec: typeof jobSpec.$inferSelect): Promise<void> {
+  if (!spec.requesterAgentId || spec.onchainJobId === null) return
+  if (spec.repostCount >= MAX_AUTO_REPOSTS) {
+    console.warn(`[labor-settle] disputed job ${spec.onchainJobId} hit the auto-repost cap — leaving for manual review`)
+    return
+  }
+  let refunded = false
+  try {
+    const { readJobs, resolveDispute, postJob } = await import('@/lib/onchain/labor')
+    const jobs = await retryRpc(() => readJobs())
+    const job = jobs.find((j) => j.id === spec.onchainJobId)
+    if (!job || job.status !== 'Disputed') return // already moved by the other path
+
+    await db
+      .update(jobSpec)
+      .set({ disputeNote: spec.disputeNote ?? 'Auto: job stuck in dispute — refunded and reposted for a different worker' })
+      .where(eq(jobSpec.specHash, spec.specHash))
+    await retryRpc(() => resolveDispute(spec.onchainJobId!, false)) // false = refund the requester
+    refunded = true
+
+    const { keccak256, toHex } = await import('viem')
+    const newSpecHash = keccak256(
+      toHex(JSON.stringify({ title: spec.title, agent: spec.requesterAgentId, nonce: nanoid() })),
+    )
+    const failedWorkers = [
+      ...new Set([...(spec.failedWorkerIds ?? []), spec.workerAgentId].filter(Boolean) as string[]),
+    ]
+    await db.insert(jobSpec).values({
+      specHash: newSpecHash,
+      title: spec.title,
+      description: spec.description,
+      acceptanceCriteria: spec.acceptanceCriteria,
+      requesterAgentId: spec.requesterAgentId,
+      attachmentUrl: spec.attachmentUrl,
+      attachmentName: spec.attachmentName,
+      testCode: spec.testCode,
+      deliverableKind: spec.deliverableKind, // preserve what the deliverable actually IS
+      requiredCapabilities: spec.requiredCapabilities,
+      repostCount: spec.repostCount + 1,
+      failedWorkerIds: failedWorkers,
+      autoApprove: spec.autoApprove,
+      parentSpecHash: spec.specHash, // lineage — delegations follow the replacement
+    })
+    const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
+    try {
+      const fresh = await retryRpc(() => readJobs())
+      const posted = fresh.find((j) => j.specHash.toLowerCase() === newSpecHash.toLowerCase())
+      if (posted) await db.update(jobSpec).set({ onchainJobId: posted.id }).where(eq(jobSpec.specHash, newSpecHash))
+    } catch (e) {
+      console.error('[labor-settle] disputed repost onchainJobId backfill failed (non-fatal):', e)
+    }
+    await logPlatformEvent(
+      'JOB_DISPUTE_REPOSTED',
+      `"${spec.title}" — stuck in dispute, escrow refunded and reposted for a different worker (attempt ${spec.repostCount + 2})`,
+    )
+    console.log(`[labor-settle] disputed job ${spec.onchainJobId} returned to market (repost tx ${txHash})`)
+  } catch (error) {
+    console.error('[labor-settle] disputed return-to-market failed:', error)
+    if (refunded) {
+      await logPlatformEvent(
+        'JOB_REPOST_FAILED',
+        `"${spec.title}" — dispute refund completed but repost failed — job #${spec.onchainJobId} needs a manual repost`,
+      ).catch(() => {})
+    }
+  }
+}
+
+/**
+ * Sweep on-chain Disputed jobs and return each (with a spec under the repost
+ * cap) to the market so a different worker can pick it up. Best-effort,
+ * heartbeat-safe: every mutation re-checks live status first.
+ */
+export async function sweepDisputedJobs(): Promise<number> {
+  let reposted = 0
+  try {
+    const { readJobs } = await import('@/lib/onchain/labor')
+    const jobs = await readJobs().catch(() => [])
+    for (const job of jobs.filter((j) => j.status === 'Disputed')) {
+      const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
+      if (!spec || spec.repostCount >= MAX_AUTO_REPOSTS) continue
+      await returnDisputedJobToMarket(spec)
+      reposted++
+    }
+  } catch (error) {
+    console.error('[labor-settle] disputed sweep failed:', error)
+  }
+  return reposted
+}
+
 const STUCK_SWEEP_COOLDOWN_MS = 20_000
 let lastStuckSweepAt = 0
 
