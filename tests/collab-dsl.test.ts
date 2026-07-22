@@ -90,6 +90,23 @@ describe('collab DSL', () => {
     expect(back.subtasks.find((s) => s.isIntegration)?.isIntegration).toBe(true)
   })
 
+  it('round-trips a peer-review subtask', () => {
+    const withReview: CollabPlan = {
+      task: 'Landing copy',
+      budgetUsd: 12,
+      subtasks: [
+        { title: 'Write the copy', description: 'Write the hero copy.', acceptanceCriteria: 'One strong hero paragraph.', bountyUsd: 8, deliverableKind: 'text', testCode: null },
+        { title: 'Review the copy', description: 'Judge the hero copy.', acceptanceCriteria: 'Approve or request one revision.', bountyUsd: 2, deliverableKind: 'text', testCode: null, reviewOf: 'Write the copy', dependsOn: ['Write the copy'] },
+      ],
+    }
+    const dsl = graphToDsl(withReview)
+    expect(dsl).toMatch(/= review \$2 "Review the copy" of write-the-copy/)
+    const back = dslToGraph(dsl)
+    const rev = back.subtasks.find((s) => s.reviewOf)!
+    expect(rev.reviewOf).toBe('Write the copy')
+    expect(rev.dependsOn).toEqual(['Write the copy'])
+  })
+
   it('collapses multi-line descriptions to one DSL line', () => {
     const multi: CollabPlan = {
       task: 'x',

@@ -4,7 +4,7 @@
  * pinned: count bounds, per-subtask validation, and the budget ceiling.
  */
 import { describe, it, expect } from 'vitest'
-import { parsePlannerOutput, MAX_SUBTASKS } from '@/lib/delegation'
+import { parsePlannerOutput, parseReviewVerdict, MAX_SUBTASKS } from '@/lib/delegation'
 
 const goodSubtask = (over: Record<string, unknown> = {}) => ({
   title: 'Write flatten(xs)',
@@ -98,5 +98,43 @@ describe('parsePlannerOutput', () => {
     const a = goodSubtask({ title: 'A', bountyUsd: 4, dependsOn: ['B'] })
     const b = goodSubtask({ title: 'B', bountyUsd: 4, dependsOn: ['A'] })
     expect(() => parsePlannerOutput(JSON.stringify([a, b]), 15)).toThrow(/circular/)
+  })
+
+  // --- peer review (reviewOf) ---
+
+  it('parses a peer review and auto-depends it on its target', () => {
+    const out = parsePlannerOutput(
+      JSON.stringify([A, B({ title: 'Review the copy', reviewOf: 'Draft the copy' })]),
+      15,
+    )
+    const rev = out.find((s) => s.reviewOf)!
+    expect(rev.reviewOf).toBe('Draft the copy')
+    expect(rev.dependsOn).toContain('Draft the copy') // review implies dependency
+  })
+
+  it('rejects a review of an unknown or self subtask, and a review of a review', () => {
+    expect(() =>
+      parsePlannerOutput(JSON.stringify([A, B({ title: 'R', reviewOf: 'Nope' })]), 15),
+    ).toThrow(/reviews unknown/)
+    expect(() =>
+      parsePlannerOutput(JSON.stringify([B({ title: 'R', reviewOf: 'R' })]), 15),
+    ).toThrow(/reviews itself/)
+    const r1 = goodSubtask({ title: 'R1', bountyUsd: 4, reviewOf: 'Draft the copy' })
+    const r2 = goodSubtask({ title: 'R2', bountyUsd: 4, reviewOf: 'R1' })
+    expect(() => parsePlannerOutput(JSON.stringify([A, r1, r2]), 15)).toThrow(/review another review/)
+  })
+})
+
+describe('parseReviewVerdict', () => {
+  it('reads an explicit approval', () => {
+    expect(parseReviewVerdict('APPROVE — reads well').approve).toBe(true)
+    expect(parseReviewVerdict('LGTM').approve).toBe(true)
+  })
+  it('reads a revision request, and REVISE wins over a stray approve word', () => {
+    expect(parseReviewVerdict('REVISE: tighten the second sentence').approve).toBe(false)
+    expect(parseReviewVerdict('I would approve it, but please REVISE the ending').approve).toBe(false)
+  })
+  it('treats an unclear verdict as a revision — silence is not approval', () => {
+    expect(parseReviewVerdict('hmm, interesting work').approve).toBe(false)
   })
 })

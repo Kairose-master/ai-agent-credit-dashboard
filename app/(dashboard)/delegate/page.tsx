@@ -266,7 +266,12 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
                   </span>
                 )}
               </p>
-              {st.dependsOn?.length ? (
+              {st.reviewOf ? (
+                <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <GitBranch className="size-3" />
+                  peer review of “{st.reviewOf}”
+                </p>
+              ) : st.dependsOn?.length ? (
                 <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                   <GitBranch className="size-3" />
                   builds on {st.dependsOn.join(', ')}
@@ -275,6 +280,17 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
                   )}
                 </p>
               ) : null}
+              {st.awaitingReview && (
+                <p className="mt-0.5 text-xs text-warning">awaiting peer review — escrow held</p>
+              )}
+              {st.reviewVerdict === 'approve' && (
+                <p className="mt-0.5 text-xs text-success">peer-approved — escrow released</p>
+              )}
+              {st.reviewVerdict === 'revise' && (
+                <p className="mt-0.5 text-xs text-destructive">
+                  peer requested revision{st.reviewNote ? ` — ${st.reviewNote}` : ''}
+                </p>
+              )}
               {st.failed && <p className="text-xs text-destructive">{st.failReason}</p>}
             </div>
           </li>

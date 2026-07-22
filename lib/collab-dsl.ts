@@ -66,6 +66,14 @@ export function graphToDsl(plan: CollabPlan, opts: { compact?: boolean } = {}): 
       out.push('')
       continue
     }
+    if (st.reviewOf) {
+      const rid = idByTitle.get(st.title)!
+      const targetId = idByTitle.get(st.reviewOf) ?? slugId(st.reviewOf, used)
+      out.push(`${rid} = review $${st.bountyUsd} "${safe(st.title)}" of ${targetId}`)
+      if (!opts.compact && st.acceptanceCriteria) out.push(`  ok ${oneLine(st.acceptanceCriteria)}`)
+      out.push('')
+      continue
+    }
     const id = idByTitle.get(st.title)!
     const kind = st.deliverableKind ?? 'text'
     const needs = (st.dependsOn ?? []).map((t) => idByTitle.get(t)).filter(Boolean)
@@ -95,6 +103,7 @@ export function dslToGraph(dsl: string): CollabPlan {
     doText?: string
     ok?: string
     isIntegration?: boolean
+    reviewOfId?: string
   }
   const raws: Raw[] = []
   let cur: Raw | null = null
@@ -112,6 +121,12 @@ export function dslToGraph(dsl: string): CollabPlan {
     const checkM = trimmed.match(/^check\s+"([^"]*)"/i)
     if (checkM) {
       cur = { title: checkM[1], kind: 'text', bounty: 0, needs: [], isIntegration: true }
+      raws.push(cur)
+      continue
+    }
+    const revM = trimmed.match(/^([a-z0-9-]+)\s*=\s*review\s+\$?([\d.]+)\s+"([^"]*)"\s+of\s+([a-z0-9-]+)$/i)
+    if (revM) {
+      cur = { id: revM[1], kind: 'text', bounty: Number(revM[2]), title: revM[3], needs: [], reviewOfId: revM[4] }
       raws.push(cur)
       continue
     }
@@ -154,7 +169,12 @@ export function dslToGraph(dsl: string): CollabPlan {
         isIntegration: true,
       }
     }
-    const dependsOn = r.needs.map((id) => titleById.get(id)).filter((t): t is string => Boolean(t))
+    const reviewOf = r.reviewOfId ? titleById.get(r.reviewOfId) : undefined
+    const dependsOn = r.needs
+      .map((id) => titleById.get(id))
+      .filter((t): t is string => Boolean(t))
+    // A review implicitly depends on the work it reviews.
+    if (reviewOf && !dependsOn.includes(reviewOf)) dependsOn.unshift(reviewOf)
     return {
       title: r.title,
       description: r.doText ?? '',
@@ -162,6 +182,7 @@ export function dslToGraph(dsl: string): CollabPlan {
       bountyUsd: r.bounty,
       deliverableKind: r.kind,
       testCode: null,
+      ...(reviewOf ? { reviewOf } : {}),
       ...(dependsOn.length ? { dependsOn } : {}),
     }
   })

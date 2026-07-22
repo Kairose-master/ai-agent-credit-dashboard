@@ -66,6 +66,30 @@ export interface DelegationSubtask {
   /** Set once the upstream outputs have been merged into `description`, so a
    *  retried post (on-chain hiccup) doesn't inject them twice. */
   dependencyInjected?: boolean
+  /** Peer review: this subtask is an independent second opinion on another
+   *  subtask (by title). A different agent than the target's worker reviews
+   *  the delivered work and returns APPROVE or REVISE. Its verdict gates the
+   *  target's escrow — the target does not auto-release until a peer approves. */
+  reviewOf?: string
+  /** On a REVIEWED target: its delivered output, held here while a peer review
+   *  is pending (escrow stays locked). Released to `output` on approval. */
+  submittedOutput?: string
+  /** On a REVIEWED target: true while a peer review is outstanding. */
+  awaitingReview?: boolean
+  /** On a REVIEWED target: the peer's decision once it lands. */
+  reviewVerdict?: 'approve' | 'revise'
+  reviewNote?: string
+}
+
+/** Parse a peer reviewer's free-text verdict into a decision. Pure. Defaults
+ *  to 'revise' when no clear approval is present — silence is not approval. */
+export function parseReviewVerdict(text: string): { approve: boolean; note: string } {
+  const t = (text ?? '').trim()
+  const firstLine = t.split('\n')[0]?.slice(0, 240) ?? ''
+  // An explicit REVISE anywhere wins; otherwise require an explicit APPROVE.
+  if (/\brevise\b|\breject\b|\bchanges? needed\b|\bfail(ed)?\b/i.test(t)) return { approve: false, note: firstLine }
+  if (/\bapprove(d)?\b|\baccept(ed)?\b|\blgtm\b|\bpass(ed)?\b/i.test(t)) return { approve: true, note: firstLine }
+  return { approve: false, note: firstLine || 'no clear verdict — treated as revision requested' }
 }
 
 /** Live view derived at read time — never persisted. */
@@ -153,9 +177,10 @@ Rules:
 - If one subtask's deliverable must EMBED another subtask's output (e.g. a guide that includes a code example a different worker writes), mark the exact spot with {{PART: exact title of that other subtask}} in the description's required output — the assembler substitutes the real output there after completion. Never invent other placeholder syntaxes.
 - Each subtask has deliverableKind: "text" (writing, code, analysis — the default), "image" (the worker must PRODUCE an image, e.g. a logo or illustration; vision-graded), or "audio" (the worker must produce spoken audio, e.g. narration; graded by transcribing it back and matching the script — so for audio put the EXACT words to be spoken in acceptanceCriteria). Use non-text kinds only when the client's goal genuinely requires that output — such workers are scarcer, so never mark a describable-in-text deliverable as image/audio.
 - HANDOFF (dependsOn): when subtask B genuinely needs subtask A's FINISHED output to do its own work — it refines, extends, reviews, translates, or assembles what A produced — set B's "dependsOn": ["A's exact title"]. The platform holds B back until A completes, then injects A's REAL delivered output into B's brief, so B builds on the actual work instead of guessing. Prefer this over restating A's spec. Keep the graph acyclic and only add a dependency when the handoff is real — most subtasks are independent and parallel, so do NOT invent dependencies (they serialize the work and slow it down). A subtask may list up to 2 dependencies.
+- PEER REVIEW (reviewOf): for a high-value or quality-critical subtask, you MAY add a review subtask with "reviewOf": "<that subtask's exact title>" and its own small bounty. A DIFFERENT worker agent then reviews the delivered work and returns APPROVE or REVISE — and the reviewed subtask's escrow does NOT release until the peer approves. Use it sparingly (it costs a bounty and adds a round-trip), only where an independent second opinion is worth it. A review's acceptanceCriteria should tell the reviewer what to check. Do not review trivial subtasks, and never review a review.
 - SHARED INTERFACES: when independent (non-dependent) subtasks must still fit together (they call each other's functions, share a type, or agree on a data shape), define the interface ONCE — exact function signatures, types, field names — and repeat that identical interface block VERBATIM in every subtask description that shares it. Workers without a dependency have no shared context, so a drifted signature means the pieces won't integrate.
 - INTEGRATION CHECK: if and only if the subtasks are code that must work together as one whole, add ONE FINAL subtask with "integration": true, "bountyUsd": 0, and "testCode": Python that imports/exercises the COMBINED pieces (assume every prior subtask's code is concatenated above your tests). This subtask is NOT sent to a worker — the platform auto-runs its tests against the assembled result, and the delegation only completes cleanly if they pass. Omit it entirely for non-code or independent work.
-- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "dependsOn"?, "testCode"?, "integration"?}] — no commentary, no code fences.`
+- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "dependsOn"?, "reviewOf"?, "testCode"?, "integration"?}] — no commentary, no code fences.`
 
 /** Parse + validate raw planner output into subtasks. Pure — separated
  *  from the LLM call so the guardrails (count bounds, bounty bounds,
@@ -195,17 +220,29 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
     if (!Number.isFinite(bountyUsd) || bountyUsd < MIN_SUBTASK_BOUNTY_USD) {
       throw new Error(`Planner subtask ${i + 1} has an invalid bounty`)
     }
-    const dependsOn: string[] | undefined = Array.isArray(raw?.dependsOn)
+    const reviewOf = typeof raw?.reviewOf === 'string' && raw.reviewOf.trim() ? raw.reviewOf.trim() : undefined
+    const rawDeps: string[] | undefined = Array.isArray(raw?.dependsOn)
       ? Array.from(new Set(raw.dependsOn.map((d: any) => String(d).trim()).filter((d: string) => d.length > 0)))
       : undefined
+    // A peer review always depends on the work it reviews.
+    const dependsOn = reviewOf
+      ? Array.from(new Set([reviewOf, ...(rawDeps ?? [])]))
+      : rawDeps
     return {
       title,
       description,
       acceptanceCriteria,
       bountyUsd: Math.round(bountyUsd * 100) / 100,
-      deliverableKind:
-        raw?.deliverableKind === 'image' ? ('image' as const) : raw?.deliverableKind === 'audio' ? ('audio' as const) : ('text' as const),
+      // A peer review is a text verdict regardless of what it reviews.
+      deliverableKind: reviewOf
+        ? ('text' as const)
+        : raw?.deliverableKind === 'image'
+          ? ('image' as const)
+          : raw?.deliverableKind === 'audio'
+            ? ('audio' as const)
+            : ('text' as const),
       testCode,
+      ...(reviewOf ? { reviewOf } : {}),
       ...(dependsOn && dependsOn.length ? { dependsOn } : {}),
     }
   })
@@ -225,7 +262,13 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
   // subtask (never the integration one, never itself), and the whole graph
   // is acyclic — otherwise the wave scheduler could deadlock.
   const workTitles = new Set(subtasks.filter((s) => !s.isIntegration).map((s) => s.title))
+  const reviewTitles = new Set(subtasks.filter((s) => s.reviewOf).map((s) => s.title))
   for (const st of subtasks) {
+    if (st.reviewOf) {
+      if (st.reviewOf === st.title) throw new Error(`Review "${st.title}" reviews itself`)
+      if (!workTitles.has(st.reviewOf)) throw new Error(`Review "${st.title}" reviews unknown subtask "${st.reviewOf}"`)
+      if (reviewTitles.has(st.reviewOf)) throw new Error(`Review "${st.title}" cannot review another review`)
+    }
     if (!st.dependsOn?.length) continue
     if (st.isIntegration) throw new Error('The integration subtask cannot declare dependsOn')
     for (const dep of st.dependsOn) {
@@ -545,8 +588,17 @@ export async function tickDelegation(
   let complete: CompleteFn | null = null
   let changed = false
 
+  // Which subtasks have an unresolved peer reviewer — their escrow must not
+  // auto-release until the peer approves.
+  const reviewerFor = (targetTitle: string): DelegationSubtask | undefined =>
+    subtasks.find((s) => s.reviewOf === targetTitle)
+
   for (const st of subtasks) {
     if (st.failed || st.output != null || st.onchainJobId === undefined) continue
+    // A target holding on peer review is resolved in the post-review section.
+    // (A 'revise' target is NOT skipped here: if the owner later approves it
+    // on-chain, the Completed branch below still snapshots its deliverable.)
+    if (st.awaitingReview) continue
     const job = jobs.find((j) => j.id === st.onchainJobId)
     if (!job) continue
     const spec = st.specHash ? specByHash.get(st.specHash) : undefined
@@ -591,7 +643,7 @@ export async function tickDelegation(
     // each re-run here on the heartbeat (not only at submission time), so a
     // deliverable that landed before a grading key was configured, or whose
     // submission-time grade returned no verdict, still settles once it can.
-    if (job.status === 'Submitted' && row.autoVerify) {
+    if (job.status === 'Submitted' && row.autoVerify && st.reviewVerdict !== 'revise') {
       const kind = st.deliverableKind ?? 'text'
       const task = spec?.agentTaskId
         ? (await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId)))[0]
@@ -621,15 +673,27 @@ export async function tickDelegation(
         }
 
         if (passed === true) {
-          const txHash = await approveJob(row.primeAgentId, st.onchainJobId)
-          const { creditWorkerForJob } = await import('@/app/actions/labor')
-          await creditWorkerForJob(job.worker, st.onchainJobId, job.bounty, txHash)
-          st.output = output ?? `(${kind} deliverable — see attached artifact)`
-          changed = true
-          await logPlatformEvent(
-            'JOB_AUTO_APPROVED',
-            `"${st.title}" — delegation ${kind === 'text' ? 'verifier' : kind + ' grader'} passed the work, escrow released`,
-          )
+          // If a peer reviewer is assigned, hold the escrow: the work is
+          // graded-good but a different agent must sign off before it releases.
+          if (reviewerFor(st.title) && st.reviewVerdict === undefined) {
+            st.submittedOutput = output ?? `(${kind} deliverable — see attached artifact)`
+            st.awaitingReview = true
+            changed = true
+            await logPlatformEvent(
+              'JOB_SUBMITTED',
+              `"${st.title}" — passed grading, now awaiting an independent peer review before escrow releases`,
+            )
+          } else {
+            const txHash = await approveJob(row.primeAgentId, st.onchainJobId)
+            const { creditWorkerForJob } = await import('@/app/actions/labor')
+            await creditWorkerForJob(job.worker, st.onchainJobId, job.bounty, txHash)
+            st.output = output ?? `(${kind} deliverable — see attached artifact)`
+            changed = true
+            await logPlatformEvent(
+              'JOB_AUTO_APPROVED',
+              `"${st.title}" — delegation ${kind === 'text' ? 'verifier' : kind + ' grader'} passed the work, escrow released`,
+            )
+          }
         }
         // passed:false or null → leave Submitted for the owner to judge
         // manually (an LLM/grader "fail" is weaker evidence than a failed
@@ -647,6 +711,13 @@ export async function tickDelegation(
   const doneOutputs = new Map(
     subtasks.filter((s) => s.output != null).map((s) => [s.title, s.output as string]),
   )
+  // A peer review can start the moment its target has DELIVERED (submittedOutput),
+  // even though that target's escrow is still held pending this very review.
+  const reviewableOutputs = new Map(
+    subtasks
+      .filter((s) => s.output != null || s.submittedOutput != null)
+      .map((s) => [s.title, (s.output ?? s.submittedOutput) as string]),
+  )
   const failedDepTitles = new Set(subtasks.filter((s) => s.failed).map((s) => s.title))
   const heldBack = subtasks.filter(
     (s) => !s.isIntegration && !s.failed && s.output == null && s.onchainJobId === undefined && s.dependsOn?.length,
@@ -658,18 +729,22 @@ export async function tickDelegation(
         ? graphToDsl({ task: row.task, budgetUsd: Number(row.budgetUsd), subtasks }, { compact: true })
         : undefined
     for (const st of heldBack) {
+      const ready = st.reviewOf ? reviewableOutputs : doneOutputs
       if (st.dependsOn!.some((d) => failedDepTitles.has(d))) {
         st.failed = true
         st.failReason = 'upstream subtask did not complete — its input never arrived'
         changed = true
         continue
       }
-      if (!st.dependsOn!.every((d) => doneOutputs.has(d))) continue // deps still in flight
+      if (!st.dependsOn!.every((d) => ready.has(d))) continue // deps still in flight
       if (!st.dependencyInjected) {
+        const header = st.reviewOf
+          ? `## The work to review — judge it against the criteria, then reply APPROVE or REVISE with a one-line reason`
+          : `## Inputs from upstream work — build directly on these, do not redo them`
         const inputs = st.dependsOn!
-          .map((d) => `### ${d}\n${(doneOutputs.get(d) ?? '').slice(0, 8000)}`)
+          .map((d) => `### ${d}\n${(ready.get(d) ?? '').slice(0, 8000)}`)
           .join('\n\n')
-        st.description = `${st.description}\n\n## Inputs from upstream work — build directly on these, do not redo them\n\n${inputs}`
+        st.description = `${st.description}\n\n${header}\n\n${inputs}`
         st.dependencyInjected = true
       }
       try {
@@ -678,6 +753,51 @@ export async function tickDelegation(
       } catch (error) {
         console.error('[delegation] failed to post dependent subtask (will retry):', error)
       }
+    }
+  }
+
+  // Peer-review resolution: a target holding on review whose reviewer has now
+  // delivered a verdict is either released (approve) or handed to the owner
+  // with the peer's reason (revise). A worker cannot review its own work — a
+  // same-agent verdict carries no authority and falls back to the grade.
+  for (const target of subtasks) {
+    if (!target.awaitingReview || target.reviewVerdict !== undefined) continue
+    const reviewer = subtasks.find((s) => s.reviewOf === target.title)
+    if (!reviewer || reviewer.output == null) continue // verdict not in yet
+
+    const targetJob = jobs.find((j) => j.id === target.onchainJobId)
+    const reviewerJob = jobs.find((j) => j.id === reviewer.onchainJobId)
+    const samePerson = Boolean(
+      targetJob?.worker &&
+        reviewerJob?.worker &&
+        targetJob.worker.toLowerCase() === reviewerJob.worker.toLowerCase(),
+    )
+    const { approve, note } = parseReviewVerdict(reviewer.output)
+    const verdict: 'approve' | 'revise' = samePerson ? 'approve' : approve ? 'approve' : 'revise'
+    target.reviewNote = samePerson ? 'peer review discarded — a worker cannot review its own work' : note
+    target.awaitingReview = false
+    changed = true
+
+    if (verdict === 'approve') {
+      if (targetJob && target.onchainJobId !== undefined && targetJob.status === 'Submitted') {
+        try {
+          const txHash = await approveJob(row.primeAgentId, target.onchainJobId)
+          const { creditWorkerForJob } = await import('@/app/actions/labor')
+          await creditWorkerForJob(targetJob.worker, target.onchainJobId, targetJob.bounty, txHash)
+        } catch (error) {
+          console.error('[delegation] post-review release failed (will retry):', error)
+          target.awaitingReview = true // undo so the next tick retries the release
+          continue
+        }
+      }
+      target.reviewVerdict = 'approve'
+      target.output = target.submittedOutput ?? '(delivered)'
+      await logPlatformEvent('JOB_AUTO_APPROVED', `"${target.title}" — peer review approved, escrow released`)
+    } else {
+      // Held for the owner: escrow stays locked (Submitted) with the peer's
+      // reason on record. Not auto-failed — the owner decides.
+      target.reviewVerdict = 'revise'
+      await logPlatformEvent('JOB_DISPUTED', `"${target.title}" — peer review requested revision: ${note.slice(0, 120)}`)
     }
   }
 
