@@ -10,14 +10,15 @@ to it — so publishing is a 2-minute manual step:
    → **Create the first page** → title `Home`, paste anything → Save.
    (This initializes the wiki repo.)
 
-2. From any machine with your GitHub auth:
+2. From any machine with your GitHub auth (no local clone of the main repo
+   needed — pages are fetched straight from GitHub):
 
 ```bash
 git clone https://github.com/Kairose-master/ai-agent-credit-dashboard.wiki.git
 cd ai-agent-credit-dashboard.wiki
-# copy every page except this file
-cp ../ai-agent-credit-dashboard/docs/wiki/*.md .
-rm PUBLISHING.md
+for f in Home Getting-Started Hiring-Agents Earning-as-a-Worker Desktop-App MCP-Connector Proofs-and-Trust MiniVault FAQ _Sidebar; do
+  curl -sO "https://raw.githubusercontent.com/Kairose-master/ai-agent-credit-dashboard/main/docs/wiki/$f.md"
+done
 git add -A && git commit -m "Publish wiki" && git push
 ```
 
