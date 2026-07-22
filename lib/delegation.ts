@@ -79,6 +79,18 @@ export interface DelegationSubtask {
   /** On a REVIEWED target: the peer's decision once it lands. */
   reviewVerdict?: 'approve' | 'revise'
   reviewNote?: string
+  /** Synthesis: titles of the pieces this subtask integrates into one coherent
+   *  deliverable. A real worker reads the actual pieces (injected as inputs)
+   *  and weaves them together — replacing mechanical placeholder concatenation
+   *  with genuine assembly. Implies a dependency on every listed piece. */
+  synthesizes?: string[]
+  /** Recursive subcontract: the planner marked this piece to be decomposed
+   *  again. Expanded before posting into child subtasks + a synthesis that
+   *  reassembles them — one more turn of the same machine, one level deep. */
+  subcontract?: boolean
+  /** Set on child subtasks produced by expanding a subcontract, naming the
+   *  parent piece — for display and lineage. */
+  parentTitle?: string
 }
 
 /** Parse a peer reviewer's free-text verdict into a decision. Pure. Defaults
@@ -178,9 +190,11 @@ Rules:
 - Each subtask has deliverableKind: "text" (writing, code, analysis — the default), "image" (the worker must PRODUCE an image, e.g. a logo or illustration; vision-graded), or "audio" (the worker must produce spoken audio, e.g. narration; graded by transcribing it back and matching the script — so for audio put the EXACT words to be spoken in acceptanceCriteria). Use non-text kinds only when the client's goal genuinely requires that output — such workers are scarcer, so never mark a describable-in-text deliverable as image/audio.
 - HANDOFF (dependsOn): when subtask B genuinely needs subtask A's FINISHED output to do its own work — it refines, extends, reviews, translates, or assembles what A produced — set B's "dependsOn": ["A's exact title"]. The platform holds B back until A completes, then injects A's REAL delivered output into B's brief, so B builds on the actual work instead of guessing. Prefer this over restating A's spec. Keep the graph acyclic and only add a dependency when the handoff is real — most subtasks are independent and parallel, so do NOT invent dependencies (they serialize the work and slow it down). A subtask may list up to 2 dependencies.
 - PEER REVIEW (reviewOf): for a high-value or quality-critical subtask, you MAY add a review subtask with "reviewOf": "<that subtask's exact title>" and its own small bounty. A DIFFERENT worker agent then reviews the delivered work and returns APPROVE or REVISE — and the reviewed subtask's escrow does NOT release until the peer approves. Use it sparingly (it costs a bounty and adds a round-trip), only where an independent second opinion is worth it. A review's acceptanceCriteria should tell the reviewer what to check. Do not review trivial subtasks, and never review a review.
+- SYNTHESIS (synthesizes): when the pieces must be woven into ONE coherent deliverable (a report from sections, an article from parts), add a final subtask with "synthesizes": ["title of each piece it integrates"] and a small bounty. A worker reads the actual delivered pieces and produces the unified result — this becomes the final deliverable instead of mechanical concatenation. Use it only when integration genuinely needs judgment.
+- SUBCONTRACT (subcontract): if one piece is itself large enough to be its own mini-project, set "subcontract": true on it. The platform decomposes THAT piece again into its own sub-jobs and a synthesis that reassembles them, funded from its bounty. Use rarely — only for a piece that clearly needs its own breakdown.
 - SHARED INTERFACES: when independent (non-dependent) subtasks must still fit together (they call each other's functions, share a type, or agree on a data shape), define the interface ONCE — exact function signatures, types, field names — and repeat that identical interface block VERBATIM in every subtask description that shares it. Workers without a dependency have no shared context, so a drifted signature means the pieces won't integrate.
 - INTEGRATION CHECK: if and only if the subtasks are code that must work together as one whole, add ONE FINAL subtask with "integration": true, "bountyUsd": 0, and "testCode": Python that imports/exercises the COMBINED pieces (assume every prior subtask's code is concatenated above your tests). This subtask is NOT sent to a worker — the platform auto-runs its tests against the assembled result, and the delegation only completes cleanly if they pass. Omit it entirely for non-code or independent work.
-- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "dependsOn"?, "reviewOf"?, "testCode"?, "integration"?}] — no commentary, no code fences.`
+- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "dependsOn"?, "reviewOf"?, "synthesizes"?, "subcontract"?, "testCode"?, "integration"?}] — no commentary, no code fences.`
 
 /** Parse + validate raw planner output into subtasks. Pure — separated
  *  from the LLM call so the guardrails (count bounds, bounty bounds,
@@ -221,29 +235,37 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
       throw new Error(`Planner subtask ${i + 1} has an invalid bounty`)
     }
     const reviewOf = typeof raw?.reviewOf === 'string' && raw.reviewOf.trim() ? raw.reviewOf.trim() : undefined
+    const synthesizes: string[] | undefined = Array.isArray(raw?.synthesizes)
+      ? Array.from(new Set(raw.synthesizes.map((d: any) => String(d).trim()).filter((d: string) => d.length > 0)))
+      : undefined
+    const subcontract = raw?.subcontract === true
     const rawDeps: string[] | undefined = Array.isArray(raw?.dependsOn)
       ? Array.from(new Set(raw.dependsOn.map((d: any) => String(d).trim()).filter((d: string) => d.length > 0)))
       : undefined
-    // A peer review always depends on the work it reviews.
-    const dependsOn = reviewOf
-      ? Array.from(new Set([reviewOf, ...(rawDeps ?? [])]))
-      : rawDeps
+    // A review depends on the work it reviews; a synthesis depends on every
+    // piece it integrates.
+    const dependsOn = Array.from(
+      new Set([...(reviewOf ? [reviewOf] : []), ...(synthesizes ?? []), ...(rawDeps ?? [])]),
+    )
     return {
       title,
       description,
       acceptanceCriteria,
       bountyUsd: Math.round(bountyUsd * 100) / 100,
-      // A peer review is a text verdict regardless of what it reviews.
-      deliverableKind: reviewOf
-        ? ('text' as const)
-        : raw?.deliverableKind === 'image'
-          ? ('image' as const)
-          : raw?.deliverableKind === 'audio'
-            ? ('audio' as const)
-            : ('text' as const),
+      // Reviews and syntheses are text deliverables regardless of their target.
+      deliverableKind:
+        reviewOf || synthesizes
+          ? ('text' as const)
+          : raw?.deliverableKind === 'image'
+            ? ('image' as const)
+            : raw?.deliverableKind === 'audio'
+              ? ('audio' as const)
+              : ('text' as const),
       testCode,
       ...(reviewOf ? { reviewOf } : {}),
-      ...(dependsOn && dependsOn.length ? { dependsOn } : {}),
+      ...(synthesizes && synthesizes.length ? { synthesizes } : {}),
+      ...(subcontract ? { subcontract } : {}),
+      ...(dependsOn.length ? { dependsOn } : {}),
     }
   })
 
@@ -268,6 +290,12 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
       if (st.reviewOf === st.title) throw new Error(`Review "${st.title}" reviews itself`)
       if (!workTitles.has(st.reviewOf)) throw new Error(`Review "${st.title}" reviews unknown subtask "${st.reviewOf}"`)
       if (reviewTitles.has(st.reviewOf)) throw new Error(`Review "${st.title}" cannot review another review`)
+    }
+    if (st.synthesizes) {
+      for (const piece of st.synthesizes) {
+        if (piece === st.title) throw new Error(`Synthesis "${st.title}" integrates itself`)
+        if (!workTitles.has(piece)) throw new Error(`Synthesis "${st.title}" integrates unknown subtask "${piece}"`)
+      }
     }
     if (!st.dependsOn?.length) continue
     if (st.isIntegration) throw new Error('The integration subtask cannot declare dependsOn')
@@ -299,8 +327,88 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
  *  or escrowed here; the owner reviews the plan before confirming. */
 export async function planDelegation(userId: string, task: string, budgetUsd: number): Promise<DelegationSubtask[]> {
   const complete = await resolveLlm(userId)
-  const text = await complete(PLANNER_SYSTEM, `Budget: $${budgetUsd} total.\n\nClient task:\n${task}`, 8000)
-  return parsePlannerOutput(text, budgetUsd)
+  const planOnce = async (t: string, b: number): Promise<DelegationSubtask[]> => {
+    const text = await complete(PLANNER_SYSTEM, `Budget: $${b} total.\n\nClient task:\n${t}`, 8000)
+    return parsePlannerOutput(text, b)
+  }
+  const top = await planOnce(task, budgetUsd)
+  // Recursive subcontract, one level deep: any piece the planner marked is
+  // decomposed again into a child sub-plan + a synthesis that reassembles it.
+  return expandSubcontracts(top, planOnce)
+}
+
+/**
+ * Expand `subcontract` pieces one level: each becomes a child sub-plan (via
+ * `planFn`) whose pieces are inlined (name-spaced under the parent, so their
+ * cross-references stay intact), and the parent turns into a SYNTHESIS that
+ * reassembles those children — ④ recursion built on ③ synthesis. The child
+ * budgets + a small synthesis fee always fit inside the parent's bounty, so
+ * the total never exceeds what was approved. Pure but for `planFn`, so it
+ * unit-tests with a stub. Bounded to one level: children never re-expand.
+ */
+export async function expandSubcontracts(
+  subtasks: DelegationSubtask[],
+  planFn: (task: string, budgetUsd: number) => Promise<DelegationSubtask[]>,
+): Promise<DelegationSubtask[]> {
+  const out: DelegationSubtask[] = []
+  for (const st of subtasks) {
+    if (!st.subcontract || st.isIntegration) {
+      const rest = { ...st }
+      delete rest.subcontract
+      out.push(rest)
+      continue
+    }
+    const synthFee = Math.min(st.bountyUsd, Math.max(MIN_SUBTASK_BOUNTY_USD, Math.round(st.bountyUsd * 0.2 * 100) / 100))
+    const childBudget = Math.round((st.bountyUsd - synthFee) * 100) / 100
+
+    let children: DelegationSubtask[] = []
+    if (childBudget >= MIN_SUBTASK_BOUNTY_USD) {
+      try {
+        children = (await planFn(st.description, childBudget)).filter((c) => !c.isIntegration)
+      } catch {
+        children = []
+      }
+    }
+    if (children.length === 0) {
+      // Sub-planning failed or was too small to split — keep it as one job.
+      const rest = { ...st }
+      delete rest.subcontract
+      out.push(rest)
+      continue
+    }
+
+    // Namespace child titles under the parent and remap their internal
+    // references so the sub-plan's dependencies/reviews/syntheses still resolve.
+    const rename = new Map(children.map((c) => [c.title, `${st.title} · ${c.title}`]))
+    const remap = (arr?: string[]) => arr?.map((t) => rename.get(t) ?? t)
+    const childTitles: string[] = []
+    for (const c of children) {
+      const title = rename.get(c.title)!
+      childTitles.push(title)
+      out.push({
+        ...c,
+        title,
+        subcontract: false,
+        parentTitle: st.title,
+        ...(c.dependsOn ? { dependsOn: remap(c.dependsOn) } : {}),
+        ...(c.synthesizes ? { synthesizes: remap(c.synthesizes) } : {}),
+        ...(c.reviewOf ? { reviewOf: rename.get(c.reviewOf) ?? c.reviewOf } : {}),
+      })
+    }
+
+    // The parent becomes a synthesis that reassembles its children.
+    out.push({
+      title: st.title,
+      description: `Assemble the sub-parts into the single deliverable this piece was hired for. Original brief: ${st.description}`,
+      acceptanceCriteria: st.acceptanceCriteria,
+      bountyUsd: synthFee,
+      deliverableKind: 'text',
+      testCode: null,
+      synthesizes: childTitles,
+      dependsOn: childTitles,
+    })
+  }
+  return out
 }
 
 /** Post ONE planned subtask as a real escrowed job from the prime agent's
@@ -504,6 +612,14 @@ function resolvePlaceholderTarget(text: string, selfIdx: number, subtasks: Deleg
  * document, no Part headers at all. Exported for unit tests.
  */
 export function assembleFinalOutput(task: string, subtasks: DelegationSubtask[]): string {
+  // If a single TOP-LEVEL synthesis worker integrated the pieces, its
+  // deliverable IS the result — real assembly beats mechanical concatenation.
+  // (Subcontract-parent syntheses have a parentTitle and only cover their own
+  // children, so they don't count; with more than one top synthesis we fall
+  // back to safe concatenation.)
+  const finalSyntheses = subtasks.filter((s) => s.synthesizes?.length && !s.parentTitle && !s.failed && s.output)
+  if (finalSyntheses.length === 1) return finalSyntheses[0].output as string
+
   const originals = subtasks.map((st) => (st.failed ? null : (st.output ?? null)))
   const consumed = new Set<number>()
 

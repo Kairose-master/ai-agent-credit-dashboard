@@ -107,6 +107,24 @@ describe('collab DSL', () => {
     expect(rev.dependsOn).toEqual(['Write the copy'])
   })
 
+  it('round-trips a synthesis subtask', () => {
+    const withSynth: CollabPlan = {
+      task: 'Report',
+      budgetUsd: 20,
+      subtasks: [
+        { title: 'Section A', description: 'Write A.', acceptanceCriteria: 'A written.', bountyUsd: 6, deliverableKind: 'text', testCode: null },
+        { title: 'Section B', description: 'Write B.', acceptanceCriteria: 'B written.', bountyUsd: 6, deliverableKind: 'text', testCode: null },
+        { title: 'Final report', description: 'Weave A and B.', acceptanceCriteria: 'One coherent report.', bountyUsd: 4, deliverableKind: 'text', testCode: null, synthesizes: ['Section A', 'Section B'], dependsOn: ['Section A', 'Section B'] },
+      ],
+    }
+    const dsl = graphToDsl(withSynth)
+    expect(dsl).toMatch(/= assemble \$4 "Final report" of section-a, section-b/)
+    const back = dslToGraph(dsl)
+    const synth = back.subtasks.find((s) => s.synthesizes)!
+    expect(synth.synthesizes).toEqual(['Section A', 'Section B'])
+    expect(synth.dependsOn).toEqual(['Section A', 'Section B'])
+  })
+
   it('collapses multi-line descriptions to one DSL line', () => {
     const multi: CollabPlan = {
       task: 'x',

@@ -74,6 +74,14 @@ export function graphToDsl(plan: CollabPlan, opts: { compact?: boolean } = {}): 
       out.push('')
       continue
     }
+    if (st.synthesizes?.length) {
+      const sid = idByTitle.get(st.title)!
+      const pieceIds = st.synthesizes.map((t) => idByTitle.get(t) ?? slugId(t, used))
+      out.push(`${sid} = assemble $${st.bountyUsd} "${safe(st.title)}" of ${pieceIds.join(', ')}`)
+      if (!opts.compact && st.acceptanceCriteria) out.push(`  ok ${oneLine(st.acceptanceCriteria)}`)
+      out.push('')
+      continue
+    }
     const id = idByTitle.get(st.title)!
     const kind = st.deliverableKind ?? 'text'
     const needs = (st.dependsOn ?? []).map((t) => idByTitle.get(t)).filter(Boolean)
@@ -104,6 +112,7 @@ export function dslToGraph(dsl: string): CollabPlan {
     ok?: string
     isIntegration?: boolean
     reviewOfId?: string
+    synthesizesIds?: string[]
   }
   const raws: Raw[] = []
   let cur: Raw | null = null
@@ -127,6 +136,19 @@ export function dslToGraph(dsl: string): CollabPlan {
     const revM = trimmed.match(/^([a-z0-9-]+)\s*=\s*review\s+\$?([\d.]+)\s+"([^"]*)"\s+of\s+([a-z0-9-]+)$/i)
     if (revM) {
       cur = { id: revM[1], kind: 'text', bounty: Number(revM[2]), title: revM[3], needs: [], reviewOfId: revM[4] }
+      raws.push(cur)
+      continue
+    }
+    const asmM = trimmed.match(/^([a-z0-9-]+)\s*=\s*assemble\s+\$?([\d.]+)\s+"([^"]*)"\s+of\s+(.+)$/i)
+    if (asmM) {
+      cur = {
+        id: asmM[1],
+        kind: 'text',
+        bounty: Number(asmM[2]),
+        title: asmM[3],
+        needs: [],
+        synthesizesIds: asmM[4].split(',').map((s) => s.trim()).filter(Boolean),
+      }
       raws.push(cur)
       continue
     }
@@ -170,11 +192,15 @@ export function dslToGraph(dsl: string): CollabPlan {
       }
     }
     const reviewOf = r.reviewOfId ? titleById.get(r.reviewOfId) : undefined
+    const synthesizes = r.synthesizesIds
+      ?.map((id) => titleById.get(id))
+      .filter((t): t is string => Boolean(t))
     const dependsOn = r.needs
       .map((id) => titleById.get(id))
       .filter((t): t is string => Boolean(t))
-    // A review implicitly depends on the work it reviews.
+    // A review depends on the work it reviews; a synthesis on every piece.
     if (reviewOf && !dependsOn.includes(reviewOf)) dependsOn.unshift(reviewOf)
+    for (const piece of synthesizes ?? []) if (!dependsOn.includes(piece)) dependsOn.push(piece)
     return {
       title: r.title,
       description: r.doText ?? '',
@@ -183,6 +209,7 @@ export function dslToGraph(dsl: string): CollabPlan {
       deliverableKind: r.kind,
       testCode: null,
       ...(reviewOf ? { reviewOf } : {}),
+      ...(synthesizes && synthesizes.length ? { synthesizes } : {}),
       ...(dependsOn.length ? { dependsOn } : {}),
     }
   })

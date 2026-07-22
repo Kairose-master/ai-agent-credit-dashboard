@@ -271,6 +271,16 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
                   <GitBranch className="size-3" />
                   peer review of “{st.reviewOf}”
                 </p>
+              ) : st.synthesizes?.length ? (
+                <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <GitBranch className="size-3" />
+                  assembles {st.synthesizes.join(', ')}
+                </p>
+              ) : st.parentTitle ? (
+                <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <GitBranch className="size-3" />
+                  subcontracted from “{st.parentTitle}”
+                </p>
               ) : st.dependsOn?.length ? (
                 <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                   <GitBranch className="size-3" />
