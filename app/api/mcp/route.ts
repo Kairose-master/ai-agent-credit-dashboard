@@ -156,6 +156,17 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'get_job',
+    description:
+      'Look up ONE labor-market job by its number (the #n you see on /world or in browse_open_jobs) — full detail: status and what it means, bounty, min credit score, required deliverable kind + capabilities, the task and acceptance criteria, who posted it, who (if anyone) is working it, and whether it is claimable now.',
+    inputSchema: {
+      type: 'object',
+      properties: { job: { type: 'number', description: 'The job number, e.g. 144.' } },
+      required: ['job'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'create_worker_agent',
     description:
       'Create a worker agent on this account (with its own on-chain wallet) so you can claim and earn from jobs. ' +
@@ -485,6 +496,43 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       return toolText(id, lines.join('\n'))
     }
 
+    case 'get_job': {
+      const jobNo = Number(args.job)
+      if (!Number.isInteger(jobNo) || jobNo < 0) return toolText(id, 'job must be a job number, e.g. 144.', true)
+      const { readJobs } = await import('@/lib/onchain/labor')
+      const jobs = await readJobs().catch(() => [])
+      const job = jobs.find((j) => j.id === jobNo)
+      if (!job) return toolText(id, `No job #${jobNo} on the market. Use browse_open_jobs to see what's currently open.`)
+      const { jobSpec } = await import('@/lib/db/schema')
+      const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
+      const ZERO = '0x0000000000000000000000000000000000000000'
+      const kind = spec?.deliverableKind ?? 'text'
+      const reqCaps = (spec?.requiredCapabilities ?? []) as string[]
+      const trunc = (s: string | null | undefined, n: number) => (s && s.length > n ? `${s.slice(0, n)}…` : (s ?? ''))
+      const statusHint: Record<string, string> = {
+        Open: 'claimable now — claim_job to take it',
+        Accepted: 'a worker has accepted it and is working',
+        Submitted: 'submitted — awaiting independent grading / settlement',
+        Completed: 'done and paid — see get_work_proof for the signed proof',
+        Disputed: 'in dispute — being returned to the market for a different worker',
+        Refunded: 'refunded to the requester',
+        Cancelled: 'cancelled by the requester',
+      }
+      const lines = [
+        `📋 Job #${job.id} — ${spec?.title ?? 'Untitled'}`,
+        `status: ${job.status} (${statusHint[job.status] ?? '—'})`,
+        `bounty: $${job.bounty} · min credit score: ${job.minScore}`,
+        `deliverable: ${kind}${reqCaps.length ? ` · requires [${reqCaps.join(', ')}]` : ''}`,
+        `requester: ${job.requester}`,
+        job.worker && job.worker.toLowerCase() !== ZERO ? `worker: ${job.worker}` : 'worker: (unclaimed)',
+        spec?.testCode ? 'grading: automated acceptance tests (objective)' : 'grading: independent grader',
+        spec?.description ? `\ntask:\n${trunc(spec.description, 700)}` : '',
+        spec?.acceptanceCriteria ? `\nacceptance criteria:\n${trunc(spec.acceptanceCriteria, 400)}` : '',
+        job.status === 'Open' ? '\n→ claim_job to take this for one of your agents.' : '',
+      ].filter(Boolean)
+      return toolText(id, lines.join('\n'))
+    }
+
     case 'create_worker_agent': {
       const name_ = String(args.name ?? '').trim()
       if (!name_ || name_.length > 100) return toolText(id, 'name must be 1-100 characters.', true)
@@ -610,6 +658,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         earn: [
           '⛏️ EARNING (worker side)',
           '• browse_open_jobs — open bounties with escrow already locked ($2–$12 typical).',
+          '• get_job(job) — full detail on any job #n from /world (status, bounty, deliverable kind, task, criteria, who is on it).',
           '• claim_job(job_id) — accepts on-chain for one of your agents and hands you the full task brief.',
           '• Do the work right here in the conversation, then submit_work(task_id, output).',
           '• Independent grading runs automatically; a pass pays the bounty into your agent wallet and grows its on-chain credit score.',

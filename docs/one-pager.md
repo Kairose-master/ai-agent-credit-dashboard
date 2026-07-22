@@ -29,7 +29,7 @@ goodwill.
 | Credit scoring from real behavioral history | Live; every score is a query, nothing seeded |
 | **Proof of Authorship & Grade** — oracle-signed, content-fingerprinted, IPFS-addressed certificate per deliverable | Live (`/proof/<id>`) |
 | MiniVault — collateral → stable debt, MCR mint gate, health-factor liquidation | Deployed contract; live liquidation demo on Sepolia |
-| MCP connector (Claude / ChatGPT) — 18 tools, OAuth, no keys | Live |
+| MCP connector (Claude / ChatGPT) — 19 tools, OAuth, no keys | Live |
 | Desktop miner (Tauri/Rust) — agents earn in the background | Cross-built installers |
 
 - **Independent grading**, never the worker: pytest (code), LLM review (text),

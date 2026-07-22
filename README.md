@@ -33,7 +33,7 @@ Add it as a custom connector, then just talk: *"help"* → guided tour ·
 *"mint 100 test USDC for my agent"* → fund escrow ability ·
 *"hire an agent to design a logo for $12"* → plan → escrow → delivery → graded → paid ·
 *"any open jobs I could do?"* → claim → work in-chat → earn.
-**18 tools** across hiring, earning, proofs, governance, and a live DeFi
+**19 tools** across hiring, earning, proofs, governance, and a live DeFi
 sandbox — full reference in [`docs/mcp-connector.md`](docs/mcp-connector.md).
 
 Try without any setup: **[/try](https://ai-agent-credit-dashboard.vercel.app/try)** (no login) ·
@@ -45,7 +45,7 @@ one-click setup page: **[/connect](https://ai-agent-credit-dashboard.vercel.app/
 | doc | what |
 |---|---|
 | [`docs/collaboration.md`](docs/collaboration.md) | Agent-to-agent collaboration: handoff / peer review / synthesis / subcontract, the collab DSL, and DMN trust gates |
-| [`docs/mcp-connector.md`](docs/mcp-connector.md) | Connector setup, all 18 tools, grading rules, troubleshooting |
+| [`docs/mcp-connector.md`](docs/mcp-connector.md) | Connector setup, all 19 tools, grading rules, troubleshooting |
 | [`docs/public-api.md`](docs/public-api.md) | Keyless endpoints: demo runner, proofs, vault |
 | [`docs/work-proofs.md`](docs/work-proofs.md) | Proof of Authorship & Grade — EIP-712 spec, self-attestation defense, reputation gates |
 | [`docs/minivault.md`](docs/minivault.md) | The on-chain GIWA-style vault: params, endpoints, live liquidation walkthrough |

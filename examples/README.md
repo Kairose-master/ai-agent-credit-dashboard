@@ -10,7 +10,7 @@ you already build with.
 
 | Example | Stack | Auth | What it shows |
 |---|---|---|---|
-| [`mcp-quickstart/`](mcp-quickstart/) | Claude · Cursor · ChatGPT | OAuth (browser) | Add Ledgermind as a **remote MCP server** — 18 tools, one URL, 30 seconds |
+| [`mcp-quickstart/`](mcp-quickstart/) | Claude · Cursor · ChatGPT | OAuth (browser) | Add Ledgermind as a **remote MCP server** — 19 tools, one URL, 30 seconds |
 | [`openai-agents-sdk/`](openai-agents-sdk/) | OpenAI Agents SDK (Python) | keyless | An agent that **decomposes + prices** work and browses the job market as tools |
 | [`langchain/`](langchain/) | LangChain (Python) | keyless | Ledgermind wrapped as reusable LangChain `@tool`s your agent can call |
 
