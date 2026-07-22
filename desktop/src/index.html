@@ -48,10 +48,15 @@
         <div id="backend-cloud" hidden>
           <p class="hint">
             <span data-i18n="backend.cloudIntro">No local Ollama detected. You can either</span>
-            <a href="#" id="retry-ollama" data-i18n="backend.retry">install Ollama and retry</a><span data-i18n="backend.cloudMid">, or paste a free/cheap cloud API key (e.g. a</span>
-            <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">Groq</a>
-            <span data-i18n="backend.cloudEnd">key — OpenAI-compatible, generous free tier) to mine with a hosted model instead:</span>
+            <a href="#" id="retry-ollama" data-i18n="backend.retry">install Ollama and retry</a><span data-i18n="backend.cloudMid3">, or connect a hosted model — pick a provider, paste your key, and mine:</span>
           </p>
+          <div class="provider-chips" id="provider-chips">
+            <button type="button" class="provider-chip" data-provider="groq">Groq</button>
+            <button type="button" class="provider-chip" data-provider="openrouter">OpenRouter</button>
+            <button type="button" class="provider-chip" data-provider="huggingface">Hugging Face</button>
+            <button type="button" class="provider-chip" data-provider="other" data-i18n="backend.providerOther">Other</button>
+          </div>
+          <p class="hint" id="provider-hint"></p>
           <form id="cloud-form">
             <label><span data-i18n="backend.baseUrl">API base URL</span> <input type="text" id="cloud-base-url" placeholder="https://api.groq.com/openai/v1" required /></label>
             <label><span data-i18n="backend.apiKey">API key</span> <input type="password" id="cloud-api-key" placeholder="gsk_..." /></label>

@@ -26,6 +26,8 @@ const KO = {
   'backend.apiKey': 'API 키',
   'backend.model2': '모델',
   'backend.useEndpoint': '이 엔드포인트 사용',
+  'backend.cloudMid3': ', 또는 호스팅 모델을 연결하세요 — 프로바이더를 고르고, 키를 붙여넣고, 채굴:',
+  'backend.providerOther': '직접 입력',
   'stat.completed': '완료',
   'stat.failed': '실패',
   'stat.balance': 'USDC 수익',
@@ -162,6 +164,35 @@ function showBackendCloudFallback(note) {
   if (note) showError('backend-error', note)
 }
 
+// Hosted model providers. All are OpenAI-compatible, so they all save as the
+// same `open_ai_compatible` backend — the chips just pre-fill the endpoint,
+// key hint, and a sensible default model so the user never types a base URL.
+const PROVIDERS = {
+  groq: { base: 'https://api.groq.com/openai/v1', keyHint: 'gsk_...', model: 'llama-3.3-70b-versatile', keys: 'https://console.groq.com/keys' },
+  openrouter: { base: 'https://openrouter.ai/api/v1', keyHint: 'sk-or-...', model: 'meta-llama/llama-3.3-70b-instruct', keys: 'https://openrouter.ai/keys' },
+  huggingface: { base: 'https://router.huggingface.co/v1', keyHint: 'hf_...', model: 'meta-llama/Llama-3.3-70B-Instruct', keys: 'https://huggingface.co/settings/tokens' },
+  other: { base: '', keyHint: 'API key', model: '', keys: null },
+}
+
+function applyProvider(name) {
+  const p = PROVIDERS[name]
+  if (!p) return
+  const baseEl = document.getElementById('cloud-base-url')
+  const keyEl = document.getElementById('cloud-api-key')
+  const modelEl = document.getElementById('cloud-model')
+  baseEl.value = p.base
+  keyEl.placeholder = p.keyHint
+  if (p.model) modelEl.value = p.model
+  document.querySelectorAll('.provider-chip').forEach((c) => c.classList.toggle('active', c.dataset.provider === name))
+  const hint = document.getElementById('provider-hint')
+  if (p.keys) {
+    const label = lang === 'ko' ? '무료/저가 키 발급 → ' : 'Get a free / low-cost key → '
+    hint.innerHTML = `${label}<a href="${p.keys}" target="_blank" rel="noreferrer">${p.keys.replace(/^https?:\/\//, '')}</a>`
+  } else {
+    hint.textContent = lang === 'ko' ? '아무 OpenAI 호환 엔드포인트나 직접 입력하세요.' : 'Enter any OpenAI-compatible endpoint manually.'
+  }
+}
+
 function initBackendView() {
   document.getElementById('use-ollama').addEventListener('click', async () => {
     const model = document.getElementById('ollama-model').value
@@ -173,6 +204,12 @@ function initBackendView() {
     e.preventDefault()
     enterBackendView()
   })
+
+  document.querySelectorAll('.provider-chip').forEach((chip) => {
+    chip.addEventListener('click', () => applyProvider(chip.dataset.provider))
+  })
+  // Default the cloud fallback to a sensible provider so the fields aren't blank.
+  applyProvider('groq')
 
   document.getElementById('cloud-form').addEventListener('submit', async (e) => {
     e.preventDefault()

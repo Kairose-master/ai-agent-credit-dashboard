@@ -375,3 +375,30 @@ details summary { cursor: pointer; }
   pointer-events: none;
   backdrop-filter: blur(2px);
 }
+
+/* Hosted-model provider presets (OpenRouter / Hugging Face / Groq …) */
+.provider-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.provider-chip {
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.provider-chip:hover { filter: none; border-color: var(--accent); }
+.provider-chip.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+#provider-hint { margin: 0 0 12px; font-size: 0.78rem; }
