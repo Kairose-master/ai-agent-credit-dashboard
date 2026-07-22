@@ -59,6 +59,9 @@ const KO = {
   'game.shop': '상점',
   'mine.imageToggle': '🖼️ 이미지 일감도 채굴 (무료 생성 API — 경쟁 적고 보수 좋은 레인)',
   'mine.audioToggle': '🔊 오디오 일감도 채굴 (무료 TTS — 스크립트를 읽어 음성 생성, 음성인식으로 채점)',
+  'mine.imageModel': '이미지 모델',
+  'mine.audioVoice': '음성 / 언어',
+  'mine.default': '기본',
   'connect.title': '🔗 Claude / ChatGPT에서 Ledgermind 쓰기',
   'connect.hint': '이 계정은 MCP 커넥터로도 동작해요: Claude나 ChatGPT 대화 안에서 "10달러로 하청 줘"라고 위임하거나, 모델이 직접 일감을 수주해 USDC를 벌게 할 수 있어요. URL 하나면 되고 이 계정으로 승인합니다 — Claude 웹·Claude Desktop·ChatGPT(개발자 모드) 모두 지원.',
   'connect.open': '연결 가이드 열기',
@@ -691,6 +694,45 @@ function applyLanes() {
     // revert optimistic state if the platform rejects the update
     appendLog(`Lane update failed: ${e}`)
   })
+}
+
+// ---------- Lane model / voice pickers ----------
+//
+// Each generation lane can pick WHICH model/voice it uses, not just on/off:
+// image jobs → a pollinations image model, audio jobs → a TTS voice/language.
+
+let imageModelsLoaded = false
+
+async function loadImageModelOptions() {
+  const sel = document.getElementById('image-model-select')
+  if (!sel || imageModelsLoaded) return
+  try {
+    const models = await invoke('list_image_models')
+    for (const m of models) {
+      const o = document.createElement('option')
+      o.value = m
+      o.textContent = m
+      sel.appendChild(o)
+    }
+    if (sel.dataset.saved) sel.value = sel.dataset.saved
+    imageModelsLoaded = true
+  } catch (e) {
+    appendLog(`Image model list unavailable: ${e}`)
+  }
+}
+
+function updateLaneModelRows() {
+  const imgRow = document.getElementById('image-model-row')
+  const audRow = document.getElementById('audio-voice-row')
+  if (imgRow) imgRow.hidden = !game.lanes.image
+  if (audRow) audRow.hidden = !game.lanes.audio
+  if (game.lanes.image) loadImageModelOptions()
+}
+
+function saveLaneModels() {
+  const imageModel = document.getElementById('image-model-select').value
+  const audioVoice = document.getElementById('audio-voice-select').value
+  invoke('save_lane_models', { imageModel, audioVoice }).catch((e) => appendLog(`Saving model choice failed: ${e}`))
 }
 
 /** Graduate the buddy: a game-layer reset for a permanent 💎/XP multiplier,
@@ -1664,6 +1706,7 @@ function initMiningView() {
       errEl.hidden = false
     } finally {
       box.disabled = false
+      updateLaneModelRows()
     }
   })
 
@@ -1689,8 +1732,12 @@ function initMiningView() {
       errEl.hidden = false
     } finally {
       box.disabled = false
+      updateLaneModelRows()
     }
   })
+
+  document.getElementById('image-model-select').addEventListener('change', saveLaneModels)
+  document.getElementById('audio-voice-select').addEventListener('change', saveLaneModels)
 
   document.getElementById('connect-open-btn').addEventListener('click', async () => {
     try {
@@ -1715,6 +1762,10 @@ async function enterMiningView() {
   document.getElementById('image-mining-toggle').checked = Boolean(game.lanes.image || cfg.image_mining)
   game.lanes.image = document.getElementById('image-mining-toggle').checked
   document.getElementById('audio-mining-toggle').checked = Boolean(game.lanes.audio)
+  // Restore the saved lane model / voice, then show the pickers for on lanes.
+  document.getElementById('image-model-select').dataset.saved = cfg.image_model || ''
+  document.getElementById('audio-voice-select').value = cfg.audio_voice || 'en'
+  updateLaneModelRows()
 
   renderGame()
   startIdleWorld() // canvas scene + passive drone production + offline catch-up

@@ -39,6 +39,14 @@ struct StoredConfig {
     /// generation API instead of the chat model.
     #[serde(default)]
     image_mining: bool,
+    /// Which image-generation model to use for image jobs (pollinations model
+    /// name, e.g. "flux"). None → the API default.
+    #[serde(default)]
+    image_model: Option<String>,
+    /// Which TTS voice/language to narrate audio jobs in (Google TTS `tl`
+    /// code, e.g. "en", "ko"). None → English.
+    #[serde(default)]
+    audio_voice: Option<String>,
 }
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -166,6 +174,26 @@ async fn detect_ollama() -> Result<Vec<String>, String> {
 #[tauri::command]
 async fn list_models(base_url: String, api_key: String) -> Result<Vec<protocol::ModelInfo>, String> {
     protocol::list_openai_models(&base_url, &api_key).await
+}
+
+/// The image-generation models the keyless lane can use (pollinations).
+#[tauri::command]
+async fn list_image_models() -> Result<Vec<String>, String> {
+    protocol::list_image_models().await
+}
+
+/// Persist which image model / audio voice the generation lanes should use.
+/// Empty strings clear back to the API defaults.
+#[tauri::command]
+fn save_lane_models(
+    app: tauri::AppHandle,
+    image_model: Option<String>,
+    audio_voice: Option<String>,
+) -> Result<(), String> {
+    let mut cfg = load_stored_config(&app);
+    cfg.image_model = image_model.filter(|s| !s.is_empty());
+    cfg.audio_voice = audio_voice.filter(|s| !s.is_empty());
+    save_stored_config(&app, &cfg)
 }
 
 #[tauri::command]
@@ -323,8 +351,13 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                 // Image-deliverable tasks (only routed here when image
                 // mining declared the capability) go to the generation
                 // API; everything else goes to the chat model.
+                // Read the current lane-model choices each poll so changing
+                // the image model / audio voice takes effect without a restart.
+                let lane_cfg = load_stored_config(&app);
+                let img_model = lane_cfg.image_model.clone();
+                let aud_voice = lane_cfg.audio_voice.clone();
                 let (success, output, artifacts) = if task.deliverable_kind == "image" {
-                    match protocol::generate_image(&task.task).await {
+                    match protocol::generate_image(&task.task, img_model.as_deref()).await {
                         Ok((mime, data_base64)) => (
                             true,
                             "Generated image attached (desktop miner, prompt derived from the task spec).".to_string(),
@@ -337,7 +370,7 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                         Err(e) => (false, format!("Image generation failed: {e}"), vec![]),
                     }
                 } else if task.deliverable_kind == "audio" {
-                    match protocol::generate_audio(&task.task).await {
+                    match protocol::generate_audio(&task.task, aud_voice.as_deref()).await {
                         Ok((mime, data_base64)) => (
                             true,
                             "Narration audio attached (desktop miner, text-to-speech of the task script).".to_string(),
@@ -509,6 +542,8 @@ fn main() {
             forget_account,
             detect_ollama,
             list_models,
+            list_image_models,
+            save_lane_models,
             save_backend,
             start_mining,
             stop_mining,

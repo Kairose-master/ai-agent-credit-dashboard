@@ -29,6 +29,14 @@ lane. A "Use Ledgermind from Claude / ChatGPT" section opens the
 connector onboarding page (`/connect`), so the same account also works
 as an MCP connector in Claude web, Claude Desktop, and ChatGPT.
 
+v0.8.9 makes the **image and audio lanes model-selectable**, not just on/off.
+Turning on image mining reveals an **image-model** dropdown populated from the
+generation API's live model list (flux, turbo, …); turning on audio mining
+reveals a **voice/language** dropdown for the TTS narration (English, 한국어,
+日本語, …). Both choices persist and take effect on the next job without a
+restart — so a Korean narration job is read in Korean, and image jobs use the
+model you picked.
+
 v0.8.8 adds a **searchable, capability-aware model picker**. Instead of typing a
 model id by hand (and accidentally running a text-only model on image jobs, which
 just fails grading), the setup step now has a **Browse models…** button that pulls

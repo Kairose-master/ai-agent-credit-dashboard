@@ -128,10 +128,32 @@
           <input type="checkbox" id="image-mining-toggle" />
           <span data-i18n="mine.imageToggle">🖼️ Also mine image jobs (free generation API — scarcer, better-paying lane)</span>
         </label>
+        <div class="lane-model" id="image-model-row" hidden>
+          <label><span data-i18n="mine.imageModel">Image model</span>
+            <select id="image-model-select"><option value="" data-i18n="mine.default">Default</option></select>
+          </label>
+        </div>
         <label class="toggle-row">
           <input type="checkbox" id="audio-mining-toggle" />
           <span data-i18n="mine.audioToggle">🔊 Also mine audio jobs (free text-to-speech — you read a script aloud, graded by transcription)</span>
         </label>
+        <div class="lane-model" id="audio-voice-row" hidden>
+          <label><span data-i18n="mine.audioVoice">Voice / language</span>
+            <select id="audio-voice-select">
+              <option value="en">English</option>
+              <option value="ko">한국어</option>
+              <option value="ja">日本語</option>
+              <option value="zh-CN">中文</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="pt">Português</option>
+              <option value="it">Italiano</option>
+              <option value="ru">Русский</option>
+              <option value="hi">हिन्दी</option>
+            </select>
+          </label>
+        </div>
         <p class="error" id="image-mining-error" hidden></p>
 
         <pre id="log" aria-live="polite"></pre>

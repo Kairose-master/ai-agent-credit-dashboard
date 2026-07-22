@@ -676,7 +676,26 @@ const IMAGE_API: &str = "https://image.pollinations.ai/prompt/";
 /// pollinations.ai API — the same backend the SDK's image-worker example
 /// uses. Returns (mime, base64). The task text is squeezed into a compact
 /// visual prompt; the platform's independent reviewer judges the result.
-pub async fn generate_image(task: &str) -> Result<(String, String), String> {
+/// List the image models the keyless generation API offers, so the setup
+/// screen can present a picker instead of a hidden hardcoded default.
+pub async fn list_image_models() -> Result<Vec<String>, String> {
+    let res = client()
+        .get("https://image.pollinations.ai/models")
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach image model list: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("image model list responded {}", res.status()));
+    }
+    let models: Vec<String> = res
+        .json()
+        .await
+        .map_err(|e| format!("unexpected image model list: {e}"))?;
+    Ok(models)
+}
+
+pub async fn generate_image(task: &str, model: Option<&str>) -> Result<(String, String), String> {
     let prompt: String = task
         .replace("Acceptance criteria (what \"done\" means):", " ")
         .split_whitespace()
@@ -687,8 +706,12 @@ pub async fn generate_image(task: &str) -> Result<(String, String), String> {
         .collect();
     // 1024×1024: image jobs commonly require ≥1024px, and a 768px render
     // fails that acceptance check outright (independent of visual quality).
+    let model_q = match model {
+        Some(m) if !m.is_empty() => format!("&model={}", urlencoding_encode(m)),
+        _ => String::new(),
+    };
     let url = format!(
-        "{IMAGE_API}{}?width=1024&height=1024&nologo=true",
+        "{IMAGE_API}{}?width=1024&height=1024&nologo=true{model_q}",
         urlencoding_encode(&prompt)
     );
 
@@ -754,7 +777,11 @@ const TTS_API: &str = "https://translate.google.com/translate_tts";
 /// Turn a task into narration audio (real, keyless). Derives a script from
 /// the task text, chunks it to the TTS endpoint's ~200-char limit, and
 /// concatenates the MP3 frames — the audio lane's genuine deliverable.
-pub async fn generate_audio(task: &str) -> Result<(String, String), String> {
+pub async fn generate_audio(task: &str, voice: Option<&str>) -> Result<(String, String), String> {
+    let tl = match voice {
+        Some(v) if !v.is_empty() => v,
+        _ => "en",
+    };
     // Prefer an explicit script marker: audio jobs put the exact line to
     // speak after `Script to read:` (often quoted). Reading only that keeps
     // the deliverable clean and matches what the grader transcribes against.
@@ -796,7 +823,7 @@ pub async fn generate_audio(task: &str) -> Result<(String, String), String> {
     let mut audio: Vec<u8> = Vec::new();
     for (i, chunk) in chunks.iter().take(6).enumerate() {
         let url = format!(
-            "{TTS_API}?ie=UTF-8&tl=en&client=tw-ob&idx={i}&q={}",
+            "{TTS_API}?ie=UTF-8&tl={tl}&client=tw-ob&idx={i}&q={}",
             urlencoding_encode(chunk)
         );
         let res = client()
