@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Invalid credentials' }, { status: 401 })
   }
 
-  let to = toRaw || u.payoutAddress || ''
+  const to = toRaw || u.payoutAddress || ''
   if (!to) {
     return Response.json(
       { error: 'No destination: pass "to" (a wallet address) or save a payout address on the dashboard first' },

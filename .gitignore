@@ -17,6 +17,10 @@ node_modules
 # Build artifacts
 tsconfig.tsbuildinfo
 
+# Test coverage output
+coverage/
+.eslintcache
+
 # Python
 __pycache__/
 *.pyc

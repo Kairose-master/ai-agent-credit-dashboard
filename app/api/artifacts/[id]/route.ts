@@ -42,7 +42,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const [row] = await db.select().from(artifact).where(eq(artifact.id, id))
   if (!row) return new Response('Not found', { status: 404 })
 
-  const safeName = row.name.replace(/[^\w.\-]/g, '_') || 'artifact'
+  const safeName = row.name.replace(/[^\w.-]/g, '_') || 'artifact'
   const disposition = inlineable(row.mime) ? 'inline' : 'attachment'
   const securityHeaders: Record<string, string> = {
     'X-Content-Type-Options': 'nosniff',
