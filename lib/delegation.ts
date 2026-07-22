@@ -56,6 +56,15 @@ export interface DelegationSubtask {
    *  interdependent work (a library split across workers, say) is proven
    *  to actually fit together, not just individually graded. */
   isIntegration?: boolean
+  /** Titles of subtasks whose COMPLETED output this subtask consumes. The
+   *  platform holds this subtask back until every dependency finishes, then
+   *  injects their real delivered output into this worker's brief — so
+   *  agents build on each other's actual work, not a copy of a shared spec.
+   *  The dependency graph must be acyclic. */
+  dependsOn?: string[]
+  /** Set once the upstream outputs have been merged into `description`, so a
+   *  retried post (on-chain hiccup) doesn't inject them twice. */
+  dependencyInjected?: boolean
 }
 
 /** Live view derived at read time — never persisted. */
@@ -133,7 +142,7 @@ export async function resolveLlm(userId: string): Promise<CompleteFn> {
   )
 }
 
-const PLANNER_SYSTEM = `You decompose a client's task into subcontractable units for an AI-agent labor market. Each subtask is done independently by a different worker agent (an LLM with no shared context), so every subtask must be fully self-contained: include everything the worker needs in the description, never reference "the other subtask" or shared state.
+const PLANNER_SYSTEM = `You decompose a client's task into subcontractable units for an AI-agent labor market. Each subtask is done by a different worker agent (an LLM). By default a subtask has no shared context, so it must be self-contained — include everything the worker needs, never reference "the other subtask". The ONE exception is a real handoff: if a subtask genuinely builds on another's finished result, declare it with dependsOn (see the HANDOFF rule) and the platform will feed it that real output.
 
 Rules:
 - 2 to ${MAX_SUBTASKS} subtasks, only as many as genuinely parallelizable — do NOT pad.
@@ -142,9 +151,10 @@ Rules:
 - If (and only if) a subtask is "write a single Python function" shaped, include testCode: plain Python asserts calling that function. Otherwise omit testCode.
 - If one subtask's deliverable must EMBED another subtask's output (e.g. a guide that includes a code example a different worker writes), mark the exact spot with {{PART: exact title of that other subtask}} in the description's required output — the assembler substitutes the real output there after completion. Never invent other placeholder syntaxes.
 - Each subtask has deliverableKind: "text" (writing, code, analysis — the default), "image" (the worker must PRODUCE an image, e.g. a logo or illustration; vision-graded), or "audio" (the worker must produce spoken audio, e.g. narration; graded by transcribing it back and matching the script — so for audio put the EXACT words to be spoken in acceptanceCriteria). Use non-text kinds only when the client's goal genuinely requires that output — such workers are scarcer, so never mark a describable-in-text deliverable as image/audio.
-- SHARED INTERFACES: when subtasks must fit together (they call each other's functions, share a type, or agree on a data shape), define the interface ONCE — exact function signatures, types, field names — and repeat that identical interface block VERBATIM in every subtask description that depends on it. Independent workers have no shared context, so a drifted signature means the pieces won't integrate.
+- HANDOFF (dependsOn): when subtask B genuinely needs subtask A's FINISHED output to do its own work — it refines, extends, reviews, translates, or assembles what A produced — set B's "dependsOn": ["A's exact title"]. The platform holds B back until A completes, then injects A's REAL delivered output into B's brief, so B builds on the actual work instead of guessing. Prefer this over restating A's spec. Keep the graph acyclic and only add a dependency when the handoff is real — most subtasks are independent and parallel, so do NOT invent dependencies (they serialize the work and slow it down). A subtask may list up to 2 dependencies.
+- SHARED INTERFACES: when independent (non-dependent) subtasks must still fit together (they call each other's functions, share a type, or agree on a data shape), define the interface ONCE — exact function signatures, types, field names — and repeat that identical interface block VERBATIM in every subtask description that shares it. Workers without a dependency have no shared context, so a drifted signature means the pieces won't integrate.
 - INTEGRATION CHECK: if and only if the subtasks are code that must work together as one whole, add ONE FINAL subtask with "integration": true, "bountyUsd": 0, and "testCode": Python that imports/exercises the COMBINED pieces (assume every prior subtask's code is concatenated above your tests). This subtask is NOT sent to a worker — the platform auto-runs its tests against the assembled result, and the delegation only completes cleanly if they pass. Omit it entirely for non-code or independent work.
-- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "testCode"?, "integration"?}] — no commentary, no code fences.`
+- Output ONLY a JSON array: [{"title", "description", "acceptanceCriteria", "bountyUsd", "deliverableKind", "dependsOn"?, "testCode"?, "integration"?}] — no commentary, no code fences.`
 
 /** Parse + validate raw planner output into subtasks. Pure — separated
  *  from the LLM call so the guardrails (count bounds, bounty bounds,
@@ -184,6 +194,9 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
     if (!Number.isFinite(bountyUsd) || bountyUsd < MIN_SUBTASK_BOUNTY_USD) {
       throw new Error(`Planner subtask ${i + 1} has an invalid bounty`)
     }
+    const dependsOn: string[] | undefined = Array.isArray(raw?.dependsOn)
+      ? Array.from(new Set(raw.dependsOn.map((d: any) => String(d).trim()).filter((d: string) => d.length > 0)))
+      : undefined
     return {
       title,
       description,
@@ -192,6 +205,7 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
       deliverableKind:
         raw?.deliverableKind === 'image' ? ('image' as const) : raw?.deliverableKind === 'audio' ? ('audio' as const) : ('text' as const),
       testCode,
+      ...(dependsOn && dependsOn.length ? { dependsOn } : {}),
     }
   })
 
@@ -205,6 +219,30 @@ export function parsePlannerOutput(rawText: string, budgetUsd: number): Delegati
   if (subtasks.filter((s) => !s.isIntegration).length < 1) {
     throw new Error('Planner must produce at least one work subtask')
   }
+
+  // Validate the dependency graph: every dependency names a real work
+  // subtask (never the integration one, never itself), and the whole graph
+  // is acyclic — otherwise the wave scheduler could deadlock.
+  const workTitles = new Set(subtasks.filter((s) => !s.isIntegration).map((s) => s.title))
+  for (const st of subtasks) {
+    if (!st.dependsOn?.length) continue
+    if (st.isIntegration) throw new Error('The integration subtask cannot declare dependsOn')
+    for (const dep of st.dependsOn) {
+      if (dep === st.title) throw new Error(`Subtask "${st.title}" depends on itself`)
+      if (!workTitles.has(dep)) throw new Error(`Subtask "${st.title}" depends on unknown subtask "${dep}"`)
+    }
+  }
+  // Cycle check via DFS over the work-subtask dependency edges.
+  const byTitle = new Map(subtasks.map((s) => [s.title, s]))
+  const state = new Map<string, 0 | 1 | 2>() // 0=unseen 1=in-stack 2=done
+  const visit = (title: string): void => {
+    if (state.get(title) === 2) return
+    if (state.get(title) === 1) throw new Error('Planner produced a circular dependency between subtasks')
+    state.set(title, 1)
+    for (const dep of byTitle.get(title)?.dependsOn ?? []) visit(dep)
+    state.set(title, 2)
+  }
+  for (const st of subtasks) if (!st.isIntegration) visit(st.title)
 
   const total = subtasks.reduce((s, x) => s + x.bountyUsd, 0)
   if (total > budgetUsd + 0.01) {
@@ -221,11 +259,49 @@ export async function planDelegation(userId: string, task: string, budgetUsd: nu
   return parsePlannerOutput(text, budgetUsd)
 }
 
+/** Post ONE planned subtask as a real escrowed job from the prime agent's
+ *  wallet, filling in its specHash/onchainJobId. Shared by the initial wave
+ *  (postDelegationJobs) and the dependency scheduler (tickDelegation). */
+async function postOneSubtask(
+  primeAgentId: string,
+  primeName: string,
+  st: DelegationSubtask,
+  autoVerify: boolean,
+  spaceOut: boolean,
+): Promise<void> {
+  const { keccak256, toHex } = await import('viem')
+  const { postJob, readJobs } = await import('@/lib/onchain/labor')
+  const specHash = keccak256(
+    toHex(JSON.stringify({ title: st.title, description: st.description, agent: primeAgentId, nonce: nanoid() })),
+  )
+  await db.insert(jobSpec).values({
+    specHash,
+    title: st.title,
+    description: st.description,
+    acceptanceCriteria: st.acceptanceCriteria,
+    requesterAgentId: primeAgentId,
+    testCode: st.testCode ?? null,
+    deliverableKind: st.deliverableKind ?? 'text',
+    autoApprove: autoVerify || Boolean(st.testCode),
+  })
+  // Bundler rate-limits back-to-back userops (free tier) — space them.
+  if (spaceOut) await new Promise((r) => setTimeout(r, 2000))
+  await postJob(primeAgentId, st.bountyUsd, 0, specHash)
+  // postJob doesn't return the id — resolve via specHash. maxAgeMs 0: we JUST
+  // wrote this job; a cached read from before the tx would miss it.
+  const jobs = await readJobs({ maxAgeMs: 0 })
+  st.specHash = specHash
+  st.onchainJobId = jobs.find((j) => j.specHash === specHash)?.id
+  await logPlatformEvent('JOB_POSTED', `${primeName} subcontracted "${st.title}" — $${st.bountyUsd} bounty (delegation)`)
+}
+
 /** Post every planned subtask as a real escrowed job from the prime
  *  agent's wallet. Mutates and returns the subtask list with
- *  specHash/onchainJobId filled in. Budget was validated at plan time and
- *  is enforced here again (defense in depth — the plan jsonb could have
- *  been tampered with between plan and confirm). */
+ *  specHash/onchainJobId filled in. Subtasks that declare `dependsOn` are
+ *  held back — tickDelegation posts them once their upstream output is ready.
+ *  Budget was validated at plan time and is enforced here again (defense in
+ *  depth — the plan jsonb could have been tampered with between plan and
+ *  confirm). */
 export async function postDelegationJobs(
   primeAgentId: string,
   budgetUsd: number,
@@ -234,9 +310,6 @@ export async function postDelegationJobs(
 ): Promise<DelegationSubtask[]> {
   const total = subtasks.reduce((s, x) => s + x.bountyUsd, 0)
   if (total > budgetUsd + 0.01) throw new Error('Subtask bounties exceed the approved budget')
-
-  const { keccak256, toHex } = await import('viem')
-  const { postJob, readJobs } = await import('@/lib/onchain/labor')
 
   const [prime] = await db.select().from(agent).where(eq(agent.id, primeAgentId))
   if (!prime?.smartAccountAddress) throw new Error('Prime agent has no provisioned wallet')
@@ -261,43 +334,17 @@ export async function postDelegationJobs(
     console.error('[delegation] balance pre-check failed (continuing):', error)
   }
 
-  for (let i = 0; i < subtasks.length; i++) {
-    const st = subtasks[i]
+  // Initial wave: post only the roots — subtasks with no unfinished
+  // dependencies. A subtask that declares dependsOn is held back and posted
+  // by tickDelegation once its upstream output is actually in hand, so its
+  // worker builds on real deliverables instead of a guessed spec.
+  let postedCount = 0
+  for (const st of subtasks) {
     if (st.isIntegration) continue // platform-verified after work completes — never posted/escrowed
     if (st.onchainJobId !== undefined) continue // already posted (confirm retried)
-
-    const specHash = keccak256(
-      toHex(JSON.stringify({ title: st.title, description: st.description, agent: primeAgentId, nonce: nanoid() })),
-    )
-    await db.insert(jobSpec).values({
-      specHash,
-      title: st.title,
-      description: st.description,
-      acceptanceCriteria: st.acceptanceCriteria,
-      requesterAgentId: primeAgentId,
-      testCode: st.testCode ?? null,
-      deliverableKind: st.deliverableKind ?? 'text',
-      // The delegation-level autoVerify IS the owner's standing consent
-      // for graded work to release escrow automatically — it now covers
-      // all three grading paths (Python tests, vision review, LLM text
-      // review at submission time). Test-graded subtasks keep releasing
-      // on mechanical passes regardless, matching the original contract.
-      autoApprove: autoVerify || Boolean(st.testCode),
-    })
-
-    // Bundler rate limits back-to-back userops (free tier) — space them.
-    if (i > 0) await new Promise((r) => setTimeout(r, 2000))
-    await postJob(primeAgentId, st.bountyUsd, 0, specHash)
-
-    // postJob doesn't return the job id — resolve it via the specHash.
-    // maxAgeMs: 0 — we JUST wrote this job; a cached read from before the
-    // tx would miss it and leave the subtask untracked.
-    const jobs = await readJobs({ maxAgeMs: 0 })
-    const posted = jobs.find((j) => j.specHash === specHash)
-    st.specHash = specHash
-    st.onchainJobId = posted?.id
-
-    await logPlatformEvent('JOB_POSTED', `${prime.name} subcontracted "${st.title}" — $${st.bountyUsd} bounty (delegation)`)
+    if (st.dependsOn?.length) continue // waits on upstream — the wave scheduler posts it later
+    await postOneSubtask(primeAgentId, prime.name, st, autoVerify, postedCount > 0)
+    postedCount++
   }
   return subtasks
 }
@@ -571,6 +618,43 @@ export async function tickDelegation(
         // test run, and null means grading was simply unavailable).
       } catch (error) {
         console.error('[delegation] verify/approve failed:', error)
+      }
+    }
+  }
+
+  // DAG advance: for every held-back subtask whose dependencies are now all
+  // done, merge their REAL deliverables into the worker's brief and post it —
+  // so the next agent builds on actual upstream work. If a dependency failed,
+  // cascade the failure (its input will never arrive).
+  const doneOutputs = new Map(
+    subtasks.filter((s) => s.output != null).map((s) => [s.title, s.output as string]),
+  )
+  const failedDepTitles = new Set(subtasks.filter((s) => s.failed).map((s) => s.title))
+  const heldBack = subtasks.filter(
+    (s) => !s.isIntegration && !s.failed && s.output == null && s.onchainJobId === undefined && s.dependsOn?.length,
+  )
+  if (heldBack.length) {
+    const [prime] = await db.select().from(agent).where(eq(agent.id, row.primeAgentId))
+    for (const st of heldBack) {
+      if (st.dependsOn!.some((d) => failedDepTitles.has(d))) {
+        st.failed = true
+        st.failReason = 'upstream subtask did not complete — its input never arrived'
+        changed = true
+        continue
+      }
+      if (!st.dependsOn!.every((d) => doneOutputs.has(d))) continue // deps still in flight
+      if (!st.dependencyInjected) {
+        const inputs = st.dependsOn!
+          .map((d) => `### ${d}\n${(doneOutputs.get(d) ?? '').slice(0, 8000)}`)
+          .join('\n\n')
+        st.description = `${st.description}\n\n## Inputs from upstream work — build directly on these, do not redo them\n\n${inputs}`
+        st.dependencyInjected = true
+      }
+      try {
+        if (prime) await postOneSubtask(row.primeAgentId, prime.name, st, row.autoVerify, false)
+        changed = true
+      } catch (error) {
+        console.error('[delegation] failed to post dependent subtask (will retry):', error)
       }
     }
   }

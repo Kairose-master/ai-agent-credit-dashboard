@@ -264,6 +264,15 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
                   </span>
                 )}
               </p>
+              {st.dependsOn?.length ? (
+                <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <GitBranch className="size-3" />
+                  builds on {st.dependsOn.join(', ')}
+                  {st.output == null && !st.failed && st.onchainJobId === undefined && (
+                    <span className="rounded bg-warning/15 px-1.5 py-0.5 text-warning">waiting for upstream</span>
+                  )}
+                </p>
+              ) : null}
               {st.failed && <p className="text-xs text-destructive">{st.failReason}</p>}
             </div>
           </li>

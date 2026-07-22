@@ -61,4 +61,42 @@ describe('parsePlannerOutput', () => {
     const plan = [goodSubtask({ bountyUsd: 7.5 }), goodSubtask({ bountyUsd: 7.5 })]
     expect(parsePlannerOutput(JSON.stringify(plan), 15)).toHaveLength(2)
   })
+
+  // --- dependency graph (dependsOn) — the DAG handoff ---
+
+  const A = goodSubtask({ title: 'Draft the copy', bountyUsd: 4 })
+  const B = (over: Record<string, unknown> = {}) =>
+    goodSubtask({ title: 'Polish the copy', bountyUsd: 4, ...over })
+
+  it('parses a valid handoff and carries dependsOn through', () => {
+    const out = parsePlannerOutput(JSON.stringify([A, B({ dependsOn: ['Draft the copy'] })]), 15)
+    expect(out[1].dependsOn).toEqual(['Draft the copy'])
+    expect(out[0].dependsOn).toBeUndefined()
+  })
+
+  it('dedupes repeated dependency titles', () => {
+    const out = parsePlannerOutput(
+      JSON.stringify([A, B({ dependsOn: ['Draft the copy', 'Draft the copy'] })]),
+      15,
+    )
+    expect(out[1].dependsOn).toEqual(['Draft the copy'])
+  })
+
+  it('rejects a dependency on an unknown subtask', () => {
+    expect(() =>
+      parsePlannerOutput(JSON.stringify([A, B({ dependsOn: ['Nonexistent'] })]), 15),
+    ).toThrow(/unknown subtask/)
+  })
+
+  it('rejects a self-dependency', () => {
+    expect(() =>
+      parsePlannerOutput(JSON.stringify([B({ dependsOn: ['Polish the copy'] })]), 15),
+    ).toThrow(/depends on itself/)
+  })
+
+  it('rejects a circular dependency', () => {
+    const a = goodSubtask({ title: 'A', bountyUsd: 4, dependsOn: ['B'] })
+    const b = goodSubtask({ title: 'B', bountyUsd: 4, dependsOn: ['A'] })
+    expect(() => parsePlannerOutput(JSON.stringify([a, b]), 15)).toThrow(/circular/)
+  })
 })
