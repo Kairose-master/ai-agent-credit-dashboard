@@ -765,102 +765,167 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* Treasury — the agent's external-facing wallet */}
+      {/* Treasury — the agent's wallet, styled as a physical card */}
       {treasury?.configured && (
-        <div className="border border-border rounded-lg p-6">
-          <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
-            <Send className="size-5" /> {t('profile.treasury.title')}
-          </h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            {t('profile.treasury.subtitle')}
-          </p>
+        <div className="space-y-5">
+          <div>
+            <h3 className="font-bold text-lg flex items-center gap-2">
+              <Wallet className="size-5" /> {t('profile.treasury.title')}
+            </h3>
+            <p className="text-sm text-muted-foreground mt-1">{t('profile.treasury.subtitle')}</p>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-4">
-            <div>
-              <span className="text-muted-foreground">{t('profile.treasury.usdcBalance')}</span>{' '}
-              <span className="font-mono font-semibold">
-                {treasury.usdc === null ? '—' : `$${treasury.usdc.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+          {/* The card — a fixed material object, same face in light & dark */}
+          <div
+            className="relative mx-auto w-full max-w-md overflow-hidden rounded-[22px] p-6 text-white shadow-[0_18px_40px_-12px_rgba(15,40,90,0.5)]"
+            style={{
+              background:
+                'radial-gradient(130% 130% at 0% 0%, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0) 44%), linear-gradient(135deg, #12224a 0%, #1f5fd0 60%, #2f83ef 100%)',
+            }}
+          >
+            {/* diagonal gloss */}
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'linear-gradient(115deg, transparent 42%, rgba(255,255,255,0.10) 50%, transparent 58%)' }}
+            />
+
+            <div className="relative flex items-start justify-between">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/55">
+                  Agent Treasury
+                </p>
+                <p className="mt-1 text-sm font-semibold">{identity.name}</p>
+              </div>
+              <span className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm">
+                {onchain?.chainName ?? 'Sepolia'} · testnet
               </span>
             </div>
-            <div>
-              <span className="text-muted-foreground">{t('profile.treasury.spent24h')}</span>{' '}
-              <span className="font-mono font-semibold">${treasury.spent24h.toFixed(2)}</span>
+
+            {/* EMV-style chip */}
+            <div
+              className="relative mt-6 h-7 w-10 rounded-[6px]"
+              style={{ background: 'linear-gradient(135deg, #f8e6a8, #d9b25a 55%, #b58a2c)' }}
+            >
+              <div className="absolute inset-x-1.5 top-1/2 h-px -translate-y-1/2 bg-black/25" />
+              <div className="absolute inset-y-1 left-1/2 w-px -translate-x-1/2 bg-black/25" />
             </div>
-            <div>
-              <span className="text-muted-foreground">{t('profile.treasury.caps')}</span>{' '}
-              <span className="font-mono font-semibold">
+
+            {/* Balance — the hero */}
+            <div className="relative mt-5">
+              <p className="text-[11px] uppercase tracking-wider text-white/55">
+                {t('profile.treasury.usdcBalance')}
+              </p>
+              <p className="mt-1 flex items-baseline gap-1.5 font-mono">
+                <span className="text-[40px] font-bold leading-none tracking-tight tabular-nums">
+                  {treasury.usdc === null
+                    ? '—'
+                    : treasury.usdc.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                </span>
+                <span className="text-sm font-semibold text-white/65">USDC</span>
+              </p>
+            </div>
+
+            {/* Address + brand */}
+            <div className="relative mt-6 flex items-end justify-between">
+              <button
+                onClick={() => navigator.clipboard?.writeText(treasury.address ?? '')}
+                className="group flex items-center gap-1.5 font-mono text-xs text-white/80 transition-colors hover:text-white"
+                aria-label={t('profile.treasury.copyAddress')}
+              >
+                {treasury.address
+                  ? `${treasury.address.slice(0, 6)} •••• ${treasury.address.slice(-4)}`
+                  : '—'}
+                <Copy className="size-3 opacity-60 transition-opacity group-hover:opacity-100" />
+              </button>
+              <span className="text-sm font-semibold tracking-tight text-white/90">Ledgermind</span>
+            </div>
+          </div>
+
+          {/* Secondary stats — quiet, below the card */}
+          <div className="mx-auto flex max-w-md flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {t('profile.treasury.spent24h')}{' '}
+              <span className="font-mono font-medium text-foreground">${treasury.spent24h.toFixed(2)}</span>
+            </span>
+            <span className="text-border">·</span>
+            <span>
+              {t('profile.treasury.caps')}{' '}
+              <span className="font-mono font-medium text-foreground">
                 ${treasury.maxPerTx}/tx · ${treasury.dailyCap}/day
               </span>
+            </span>
+          </div>
+
+          {/* Actions — two clean panels */}
+          <div className="mx-auto grid max-w-md gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-border p-4">
+              <p className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold">
+                <Coins className="size-3.5 text-primary" />
+                {t('profile.treasury.getTestUsdc', { chain: onchain?.chainName ?? 'Sepolia' })}
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="5000"
+                  value={mintAmount}
+                  onChange={(e) => setMintAmount(e.target.value)}
+                  className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm"
+                  disabled={mintBusy}
+                />
+                <button
+                  onClick={handleMint}
+                  disabled={mintBusy || !mintAmount || parseFloat(mintAmount) <= 0}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                >
+                  {mintBusy ? <Loader2 className="size-4 animate-spin" /> : <Coins className="size-4" />}
+                  {t('profile.treasury.mint')}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border p-4">
+              <p className="mb-2.5 flex items-center gap-1.5 text-xs font-semibold">
+                <Send className="size-3.5 text-primary" />
+                {t('profile.treasury.send')}
+              </p>
+              <div className="flex flex-col gap-2">
+                <input
+                  value={sendTo}
+                  onChange={(e) => setSendTo(e.target.value)}
+                  placeholder={t('profile.treasury.recipientPlaceholder')}
+                  className="h-9 w-full rounded-md border border-border bg-background px-3 font-mono text-sm"
+                  disabled={treasuryBusy}
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={sendAmount}
+                    onChange={(e) => setSendAmount(e.target.value)}
+                    placeholder="USDC"
+                    className="h-9 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-sm"
+                    disabled={treasuryBusy}
+                  />
+                  <button
+                    onClick={handleSend}
+                    disabled={treasuryBusy || !sendTo.trim() || !sendAmount}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3.5 py-2 text-sm font-medium transition hover:bg-secondary disabled:opacity-50"
+                  >
+                    {treasuryBusy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    {t('profile.treasury.send')}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 mb-4 text-xs">
-            <span className="text-muted-foreground">{t('profile.treasury.depositAddress')}</span>
-            <code className="rounded bg-secondary px-2 py-1 font-mono">{treasury.address}</code>
-            <button
-              onClick={() => navigator.clipboard?.writeText(treasury.address ?? '')}
-              className="rounded border border-border p-1 hover:bg-secondary"
-              aria-label={t('profile.treasury.copyAddress')}
-            >
-              <Copy className="size-3.5" />
-            </button>
-          </div>
-
-          <div className="mb-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-              {t('profile.treasury.getTestUsdc', { chain: onchain?.chainName ?? 'Sepolia' })}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                max="5000"
-                value={mintAmount}
-                onChange={(e) => setMintAmount(e.target.value)}
-                className="h-9 w-32 rounded-md border border-border bg-background px-3 text-sm"
-                disabled={mintBusy}
-              />
-              <button
-                onClick={handleMint}
-                disabled={mintBusy || !mintAmount || parseFloat(mintAmount) <= 0}
-                className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-              >
-                {mintBusy ? <Loader2 className="size-4 animate-spin" /> : <Coins className="size-4" />}
-                {t('profile.treasury.mint')}
-              </button>
-            </div>
-          </div>
-
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-            {t('profile.treasury.send')}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={sendTo}
-              onChange={(e) => setSendTo(e.target.value)}
-              placeholder={t('profile.treasury.recipientPlaceholder')}
-              className="h-9 w-72 rounded-md border border-border bg-background px-3 font-mono text-sm"
-              disabled={treasuryBusy}
-            />
-            <input
-              type="number"
-              min="0"
-              value={sendAmount}
-              onChange={(e) => setSendAmount(e.target.value)}
-              placeholder="USDC"
-              className="h-9 w-28 rounded-md border border-border bg-background px-3 text-sm"
-              disabled={treasuryBusy}
-            />
-            <button
-              onClick={handleSend}
-              disabled={treasuryBusy || !sendTo.trim() || !sendAmount}
-              className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-            >
-              {treasuryBusy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-              {t('profile.treasury.send')}
-            </button>
-          </div>
-          {treasuryMsg && <p className="mt-3 text-sm text-muted-foreground">{treasuryMsg}</p>}
+          {treasuryMsg && (
+            <p className="mx-auto max-w-md text-center text-sm text-muted-foreground">{treasuryMsg}</p>
+          )}
         </div>
       )}
 
