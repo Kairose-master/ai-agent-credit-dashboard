@@ -92,6 +92,7 @@ export async function confirmDelegation(id: string) {
       Number(row.budgetUsd),
       row.subtasks as DelegationSubtask[],
       row.autoVerify,
+      row.task,
     )
     await db
       .update(delegation)

@@ -10,6 +10,7 @@ import {
   getDelegationAgents,
 } from '@/app/actions/delegate'
 import { useI18n } from '@/lib/i18n'
+import { graphToDsl } from '@/lib/collab-dsl'
 
 type Delegations = Awaited<ReturnType<typeof getMyDelegations>>
 type Delegation = Delegations[number]
@@ -186,6 +187,7 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showOutput, setShowOutput] = useState(false)
+  const [showDsl, setShowDsl] = useState(false)
 
   const confirm = async () => {
     setConfirming(true)
@@ -278,6 +280,24 @@ function DelegationCard({ d, onChanged }: { d: Delegation; onChanged: () => void
           </li>
         ))}
       </ul>
+
+      {d.subtasks.filter((s) => !s.isIntegration).length > 1 && (
+        <div className="mt-3">
+          <button
+            onClick={() => setShowDsl(!showDsl)}
+            className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            <GitBranch className="size-3.5" />
+            {showDsl ? 'Hide plan' : 'View as plan'}
+            <span className="text-muted-foreground/60">— the collaboration each worker reads</span>
+          </button>
+          {showDsl && (
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-border bg-secondary/30 p-3 text-[11px] leading-relaxed text-muted-foreground">
+              {graphToDsl({ task: d.task, budgetUsd: d.budgetUsd, subtasks: d.subtasks })}
+            </pre>
+          )}
+        </div>
+      )}
 
       {d.status === 'planned' && (
         <div className="mt-4 flex gap-2">

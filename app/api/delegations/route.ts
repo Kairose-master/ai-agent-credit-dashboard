@@ -173,7 +173,7 @@ async function opConfirm(userId: string, body: { id?: unknown }) {
   if (row.status !== 'planned') return Response.json({ error: 'Already confirmed' }, { status: 400 })
 
   try {
-    const subtasks = await postDelegationJobs(row.primeAgentId, Number(row.budgetUsd), row.subtasks as DelegationSubtask[], row.autoVerify)
+    const subtasks = await postDelegationJobs(row.primeAgentId, Number(row.budgetUsd), row.subtasks as DelegationSubtask[], row.autoVerify, row.task)
     await db
       .update(delegation)
       .set({ status: 'posted', subtasks, error: null, updatedAt: new Date() })

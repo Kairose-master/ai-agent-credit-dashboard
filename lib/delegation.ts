@@ -24,6 +24,7 @@ import { nanoid } from 'nanoid'
 import Anthropic from '@anthropic-ai/sdk'
 import { getUserByok } from '@/lib/user-keys'
 import { logPlatformEvent } from '@/lib/platform-feed'
+import { graphToDsl } from '@/lib/collab-dsl'
 
 export const MAX_SUBTASKS = 5
 export const MIN_SUBTASK_BOUNTY_USD = 1
@@ -268,16 +269,24 @@ async function postOneSubtask(
   st: DelegationSubtask,
   autoVerify: boolean,
   spaceOut: boolean,
+  planDsl?: string,
 ): Promise<void> {
   const { keccak256, toHex } = await import('viem')
   const { postJob, readJobs } = await import('@/lib/onchain/labor')
+  // Give the worker situational context: the whole collaboration as a readable
+  // program, and which line is theirs — so it delivers a piece that fits the
+  // plan, not an isolated guess. JSON is still the wire format; this DSL rides
+  // on top, in the brief the worker actually reads.
+  const description = planDsl
+    ? `## The collaboration plan — you are one worker in a larger job\nDeliver exactly your piece below ("${st.title}") so it slots into this plan. Other pieces are handled by other workers; don't redo them.\n\n\`\`\`\n${planDsl}\`\`\`\n\n---\n\n${st.description}`
+    : st.description
   const specHash = keccak256(
-    toHex(JSON.stringify({ title: st.title, description: st.description, agent: primeAgentId, nonce: nanoid() })),
+    toHex(JSON.stringify({ title: st.title, description, agent: primeAgentId, nonce: nanoid() })),
   )
   await db.insert(jobSpec).values({
     specHash,
     title: st.title,
-    description: st.description,
+    description,
     acceptanceCriteria: st.acceptanceCriteria,
     requesterAgentId: primeAgentId,
     testCode: st.testCode ?? null,
@@ -307,6 +316,7 @@ export async function postDelegationJobs(
   budgetUsd: number,
   subtasks: DelegationSubtask[],
   autoVerify = true,
+  task = '',
 ): Promise<DelegationSubtask[]> {
   const total = subtasks.reduce((s, x) => s + x.bountyUsd, 0)
   if (total > budgetUsd + 0.01) throw new Error('Subtask bounties exceed the approved budget')
@@ -334,6 +344,14 @@ export async function postDelegationJobs(
     console.error('[delegation] balance pre-check failed (continuing):', error)
   }
 
+  // The whole plan as a compact readable program, handed to every worker so
+  // it knows where its piece fits — only when there's genuinely more than one
+  // piece to coordinate.
+  const planDsl =
+    subtasks.filter((s) => !s.isIntegration).length > 1
+      ? graphToDsl({ task, budgetUsd, subtasks }, { compact: true })
+      : undefined
+
   // Initial wave: post only the roots — subtasks with no unfinished
   // dependencies. A subtask that declares dependsOn is held back and posted
   // by tickDelegation once its upstream output is actually in hand, so its
@@ -343,7 +361,7 @@ export async function postDelegationJobs(
     if (st.isIntegration) continue // platform-verified after work completes — never posted/escrowed
     if (st.onchainJobId !== undefined) continue // already posted (confirm retried)
     if (st.dependsOn?.length) continue // waits on upstream — the wave scheduler posts it later
-    await postOneSubtask(primeAgentId, prime.name, st, autoVerify, postedCount > 0)
+    await postOneSubtask(primeAgentId, prime.name, st, autoVerify, postedCount > 0, planDsl)
     postedCount++
   }
   return subtasks
@@ -635,6 +653,10 @@ export async function tickDelegation(
   )
   if (heldBack.length) {
     const [prime] = await db.select().from(agent).where(eq(agent.id, row.primeAgentId))
+    const planDsl =
+      subtasks.filter((s) => !s.isIntegration).length > 1
+        ? graphToDsl({ task: row.task, budgetUsd: Number(row.budgetUsd), subtasks }, { compact: true })
+        : undefined
     for (const st of heldBack) {
       if (st.dependsOn!.some((d) => failedDepTitles.has(d))) {
         st.failed = true
@@ -651,7 +673,7 @@ export async function tickDelegation(
         st.dependencyInjected = true
       }
       try {
-        if (prime) await postOneSubtask(row.primeAgentId, prime.name, st, row.autoVerify, false)
+        if (prime) await postOneSubtask(row.primeAgentId, prime.name, st, row.autoVerify, false, planDsl)
         changed = true
       } catch (error) {
         console.error('[delegation] failed to post dependent subtask (will retry):', error)
