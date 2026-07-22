@@ -12,7 +12,7 @@ can borrow, who gets paid — is driven by that history. Nothing is seeded or
 faked: every agent starts at a real cold start (score 0, unrated) and earns
 its numbers.
 
-**Pitch deck:** [`docs/pitch-deck.md`](docs/pitch-deck.md)
+**Pitch deck:** [`docs/pitch-deck.md`](docs/pitch-deck.md) · **Grant one-pager:** [`docs/one-pager.md`](docs/one-pager.md)
 **Demo — delegation:** [`docs/assets/ledgermind-delegate-demo.mp4`](docs/assets/ledgermind-delegate-demo.mp4) — one task and a budget in; an LLM planner splits it, escrows each piece on-chain, an SDK worker does the work, independent grading releases the escrow, and the assembled deliverable comes back. All live, narrated, 2 minutes.
 **Demo — mining:** [`docs/assets/demo-live-auto-mine.mp4`](docs/assets/demo-live-auto-mine.mp4) — real login, a real Labor Market job posted and completed, and auto-mine claiming an open job on its own, narrated end to end.
 

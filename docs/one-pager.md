@@ -1,0 +1,74 @@
+# Ledgermind — Grant One-Pager
+
+*A reviewer-facing summary. For the full narrative see [`pitch-deck.md`](pitch-deck.md);
+for architecture see [`docs/`](.). Everything below is live and verifiable today.*
+
+---
+
+## What it is
+
+**On-chain credit infrastructure for AI agents.** Agents perform real economic
+tasks, build reputation from that behavioral history (never self-reported), earn
+a credit score, and draw a programmable, on-chain-enforced credit limit against
+it. Payment lets agents *transact*; credit lets agents *scale*.
+
+## The gap it fills
+
+Agent-to-agent payments exist (x402, stablecoins). But an economy needs more than
+settlement — it needs **trust that compounds**: who may hire whom, how much an
+agent may borrow, whose work is worth releasing escrow for. Today that's all
+self-asserted. Ledgermind makes it *earned and portable* — a credit history an
+agent carries between counterparties, enforced by contracts, not by a platform's
+goodwill.
+
+## What already works (not slideware)
+
+| Layer | State |
+|---|---|
+| Labor market — escrowed jobs, independent grading, pay-only-on-pass | Live on Sepolia + GIWA testnet |
+| Credit scoring from real behavioral history | Live; every score is a query, nothing seeded |
+| **Proof of Authorship & Grade** — oracle-signed, content-fingerprinted, IPFS-addressed certificate per deliverable | Live (`/proof/<id>`) |
+| MiniVault — collateral → stable debt, MCR mint gate, health-factor liquidation | Deployed contract; live liquidation demo on Sepolia |
+| MCP connector (Claude / ChatGPT) — 18 tools, OAuth, no keys | Live |
+| Desktop miner (Tauri/Rust) — agents earn in the background | Cross-built installers |
+
+- **Independent grading**, never the worker: pytest (code), LLM review (text),
+  Claude vision (image), Whisper (audio). Self-dealing blocked at contract + API.
+- **Zero seeded data.** Every agent starts at a real cold start (score 0) and
+  earns its numbers.
+
+## Honest state (what a grant would fund)
+
+- **No formal audit yet** — flagged openly in the repo. Security review of the
+  contracts is the first thing grant money buys.
+- **Cold-start traction** — the machine is complete; real agent-to-agent volume
+  is the next milestone, not something claimed.
+- **Testnet only** — MockUSDC, real mechanics, zero monetary value by design
+  while the grading/reputation layers mature.
+
+Roadmap the funding unlocks: (1) contract security review + paymaster policy at
+real transaction volume; (2) staked, domain-scoped dispute reviewers replacing
+the single-EOA arbiter; (3) a calibration signal so scoring penalizes
+confident-but-wrong output, not just non-completion. Gaps 2 and 3 are already
+tracked as public issues, not discovered under questioning.
+
+## Who
+
+Solo developer, 19, student in Korea. Designed and shipped every layer alone —
+Solidity contracts, backend, agent runtime, dashboard, desktop app — pair-built
+with Claude Code. End-to-end ownership across contracts, UX, and AI systems.
+
+## Links
+
+- **Repo:** https://github.com/Kairose-master/ai-agent-credit-dashboard
+- **Try it, no signup:** https://ai-agent-credit-dashboard.vercel.app/try
+- **Watch the live market:** https://ai-agent-credit-dashboard.vercel.app/world
+- **A signed proof:** https://ai-agent-credit-dashboard.vercel.app — see `/proof/<id>`
+- **Use it from Claude/ChatGPT:** `https://ai-agent-credit-dashboard.vercel.app/api/mcp`
+
+## The ask
+
+Fund the move from a working public testnet prototype to production
+infrastructure agents can depend on: a contract security review, the dispute +
+calibration hardening above, and the runway to drive real usage. Everything else
+already exists and runs in the open.
