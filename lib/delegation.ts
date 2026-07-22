@@ -612,12 +612,18 @@ function resolvePlaceholderTarget(text: string, selfIdx: number, subtasks: Deleg
  * document, no Part headers at all. Exported for unit tests.
  */
 export function assembleFinalOutput(task: string, subtasks: DelegationSubtask[]): string {
-  // If a single TOP-LEVEL synthesis worker integrated the pieces, its
-  // deliverable IS the result — real assembly beats mechanical concatenation.
-  // (Subcontract-parent syntheses have a parentTitle and only cover their own
-  // children, so they don't count; with more than one top synthesis we fall
-  // back to safe concatenation.)
-  const finalSyntheses = subtasks.filter((s) => s.synthesizes?.length && !s.parentTitle && !s.failed && s.output)
+  // If a single FINAL synthesis worker integrated the pieces, its deliverable
+  // IS the result — real assembly beats mechanical concatenation. A synthesis
+  // whose pieces are ALL its own subcontract children is a mid-level assembly
+  // (④), not the final one, so it doesn't count; with more than one final
+  // synthesis we fall back to safe concatenation.
+  const byTitle = new Map(subtasks.map((s) => [s.title, s]))
+  const isSubcontractParent = (s: DelegationSubtask): boolean =>
+    (s.synthesizes ?? []).length > 0 &&
+    (s.synthesizes ?? []).every((t) => byTitle.get(t)?.parentTitle === s.title)
+  const finalSyntheses = subtasks.filter(
+    (s) => s.synthesizes?.length && !s.parentTitle && !s.failed && s.output && !isSubcontractParent(s),
+  )
   if (finalSyntheses.length === 1) return finalSyntheses[0].output as string
 
   const originals = subtasks.map((st) => (st.failed ? null : (st.output ?? null)))

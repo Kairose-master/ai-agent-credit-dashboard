@@ -47,6 +47,19 @@ describe('③ synthesis', () => {
       parsePlannerOutput(JSON.stringify([sub({ title: 'A' }), sub({ title: 'F', synthesizes: ['Nope'] })]), 20),
     ).toThrow(/integrates unknown/)
   })
+
+  it('picks the FINAL synthesis, not a subcontract-parent one, when ③ and ④ coexist', () => {
+    // A ④ subcontract parent (synthesizes only its own children) must not be
+    // mistaken for the delegation's final deliverable.
+    const plan: DelegationSubtask[] = [
+      sub({ title: 'M · child one', parentTitle: 'M', output: 'c1' }),
+      sub({ title: 'M · child two', parentTitle: 'M', output: 'c2' }),
+      sub({ title: 'M', synthesizes: ['M · child one', 'M · child two'], output: 'assembled M' }),
+      sub({ title: 'Other', output: 'other' }),
+      sub({ title: 'Final', synthesizes: ['M', 'Other'], output: 'THE FINAL BRIEF' }),
+    ]
+    expect(assembleFinalOutput('brief', plan)).toBe('THE FINAL BRIEF')
+  })
 })
 
 describe('④ recursive subcontract', () => {
