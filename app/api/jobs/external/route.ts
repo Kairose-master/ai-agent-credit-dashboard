@@ -99,6 +99,10 @@ export async function POST(request: Request) {
       toHex(JSON.stringify({ title, agent: houseAgentId, nonce: nanoid() })),
     )
 
+    // Externally-posted jobs rarely declare a deliverable kind, so infer it
+    // from the ask — otherwise a "design a logo" job defaults to 'text' and a
+    // text-only worker claims it and fails grading.
+    const { inferDeliverableKind } = await import('@/lib/artifacts')
     await db.insert(jobSpec).values({
       specHash,
       title,
@@ -106,6 +110,7 @@ export async function POST(request: Request) {
       acceptanceCriteria,
       requesterAgentId: houseAgentId,
       testCode: testCode || null,
+      deliverableKind: inferDeliverableKind(title, description, acceptanceCriteria),
       externalPoster,
       autoApprove: true, // the house agent has no owner who'll ever click Approve
     })

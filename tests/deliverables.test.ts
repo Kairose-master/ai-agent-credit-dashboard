@@ -4,6 +4,7 @@ import {
   workerCanDeliver,
   normalizeDeliverableKind,
   normalizeCapabilities,
+  inferDeliverableKind,
   MAX_ARTIFACTS_PER_SUBMISSION,
 } from '@/lib/artifacts'
 import { parsePlannerOutput } from '@/lib/delegation'
@@ -122,5 +123,28 @@ describe('parsePlannerOutput deliverableKind', () => {
     expect(out[0].deliverableKind).toBe('image')
     expect(out[1].deliverableKind).toBe('text')
     expect(out[2].deliverableKind).toBe('text')
+  })
+})
+
+describe('inferDeliverableKind (capability-tagging safety net)', () => {
+  it('tags image-deliverable jobs from clear signals', () => {
+    expect(inferDeliverableKind('Friendly mascot robot emblem for Ledgermind')).toBe('image')
+    expect(inferDeliverableKind('Minimalist geometric flat-vector logo for Ledgermind')).toBe('image')
+    expect(inferDeliverableKind('Design an icon', '', 'Deliver a 1024x1024 PNG')).toBe('image')
+    expect(inferDeliverableKind('Create an illustration of a fox')).toBe('image')
+  })
+
+  it('tags audio-deliverable jobs from clear signals', () => {
+    expect(inferDeliverableKind('Record the narration', '', 'Deliver an mp3')).toBe('audio')
+    expect(inferDeliverableKind('Voiceover for the intro')).toBe('audio')
+    expect(inferDeliverableKind('한국어 나레이션 오디오')).toBe('audio')
+  })
+
+  it('leaves genuine text jobs as text — no false upgrades', () => {
+    expect(inferDeliverableKind('Implement title_case(s)')).toBe('text')
+    expect(inferDeliverableKind('Write marketing copy for the landing page')).toBe('text')
+    // merely referencing a logo in a writing task must not upgrade to image
+    expect(inferDeliverableKind('Write the copy that goes next to the logo')).toBe('text')
+    expect(inferDeliverableKind('Summarize the coffee brand brief')).toBe('text')
   })
 })

@@ -434,6 +434,17 @@ async function postOneSubtask(
   const specHash = keccak256(
     toHex(JSON.stringify({ title: st.title, description, agent: primeAgentId, nonce: nanoid() })),
   )
+  // Trust an explicit non-text kind from the planner; otherwise infer from the
+  // ask so a mistagged image/audio subtask isn't left as 'text'. Reviews and
+  // syntheses are text by definition, so never re-infer those.
+  const { inferDeliverableKind } = await import('@/lib/artifacts')
+  const forcedText = Boolean(st.reviewOf) || Boolean(st.synthesizes?.length)
+  const deliverableKind =
+    st.deliverableKind && st.deliverableKind !== 'text'
+      ? st.deliverableKind
+      : forcedText
+        ? 'text'
+        : inferDeliverableKind(st.title, st.description, st.acceptanceCriteria)
   await db.insert(jobSpec).values({
     specHash,
     title: st.title,
@@ -441,7 +452,7 @@ async function postOneSubtask(
     acceptanceCriteria: st.acceptanceCriteria,
     requesterAgentId: primeAgentId,
     testCode: st.testCode ?? null,
-    deliverableKind: st.deliverableKind ?? 'text',
+    deliverableKind,
     autoApprove: autoVerify || Boolean(st.testCode),
   })
   // Bundler rate-limits back-to-back userops (free tier) — space them.

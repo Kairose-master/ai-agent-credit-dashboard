@@ -98,6 +98,42 @@ export function normalizeDeliverableKind(raw: unknown): DeliverableKind {
   return (DELIVERABLE_KINDS as readonly string[]).includes(v) ? (v as DeliverableKind) : 'text'
 }
 
+// Strong "the deliverable IS a picture/sound" signals — deliverable-type
+// nouns, not passing mentions. Kept deliberately narrow so a text job that
+// merely *references* a logo (e.g. "write copy for the logo page") is not
+// mis-upgraded; the whole point is only to catch jobs whose OUTPUT is a
+// non-text artifact but were left tagged 'text' at creation.
+// Korean terms are kept out of the \b-anchored groups: \b sits between a \w
+// and a non-\w char, and Hangul isn't \w, so \b never fires around it.
+const IMAGE_HINTS =
+  /\b(?:logo|emblem|mascot|icon|illustration|artwork|graphic design|poster|banner|avatar|sticker|wallpaper|flat[- ]?vector|vector art|infographic)\b|(?:로고|일러스트|이미지 파일)|\b(?:generate|create|design|draw|render|produce)\s+(?:an?\s+)?(?:image|picture|illustration|logo|graphic)\b|\.(?:png|jpe?g|svg)\b/i
+const AUDIO_HINTS =
+  /\b(?:voice[- ]?over|voiceover|narration|narrate|text[- ]?to[- ]?speech|tts|spoken audio|audio narration)\b|(?:나레이션|낭독|오디오|음성 파일)|\b(?:record|generate|produce)\s+(?:the\s+)?(?:audio|narration|speech|voice)\b|\.(?:mp3|wav|m4a)\b/i
+
+/**
+ * Best-effort inference of a job's deliverable kind from its text, used as a
+ * SAFETY NET at job creation so an image/audio job isn't left tagged 'text'
+ * (which lets a text-only worker claim it and fail grading with ASCII/code).
+ * Only ever meant to UPGRADE from the 'text' default — never to override an
+ * explicit image/audio choice, and never applied to review/synthesis
+ * subtasks (which are text by definition). Conservative: unknown → 'text'.
+ */
+export function inferDeliverableKind(
+  title: string,
+  description?: string | null,
+  acceptance?: string | null,
+): DeliverableKind {
+  // A text-producing verb in the TITLE names the deliverable — it wins over a
+  // passing mention of an image noun (e.g. "write the copy next to the logo").
+  const TEXT_LEAD =
+    /\b(write|compose|draft|summari[sz]e|rewrite|implement|code|program|debug|translate|analy[sz]e|review|proofread|explain|describe|outline|research|list)\b/i
+  if (TEXT_LEAD.test(title)) return 'text'
+  const hay = `${title}\n${description ?? ''}\n${acceptance ?? ''}`
+  if (IMAGE_HINTS.test(hay)) return 'image'
+  if (AUDIO_HINTS.test(hay)) return 'audio'
+  return 'text'
+}
+
 /** Filter arbitrary input down to known capability names, always
  *  including 'text' (the universal baseline every LLM worker has). */
 export function normalizeCapabilities(raw: unknown): string[] {
