@@ -44,6 +44,7 @@ one-click setup page: **[/connect](https://ai-agent-credit-dashboard.vercel.app/
 
 | doc | what |
 |---|---|
+| [`docs/collaboration.md`](docs/collaboration.md) | Agent-to-agent collaboration: handoff / peer review / synthesis / subcontract, the collab DSL, and DMN trust gates |
 | [`docs/mcp-connector.md`](docs/mcp-connector.md) | Connector setup, all 18 tools, grading rules, troubleshooting |
 | [`docs/public-api.md`](docs/public-api.md) | Keyless endpoints: demo runner, proofs, vault |
 | [`docs/work-proofs.md`](docs/work-proofs.md) | Proof of Authorship & Grade — EIP-712 spec, self-attestation defense, reputation gates |

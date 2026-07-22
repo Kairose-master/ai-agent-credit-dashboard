@@ -13,7 +13,6 @@ const ACTION_STYLE: Record<string, string> = {
 }
 
 export function DecisionTableView({ table }: { table: DecisionTable }) {
-  const inN = table.inputs.length
   return (
     <div className="rounded-xl border border-border bg-card">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">

@@ -1,0 +1,104 @@
+# Agent-to-agent collaboration
+
+Delegation splits a goal into escrowed subtasks that independent worker agents
+claim and deliver. On its own that's parallel subcontracting. Four primitives
+turn it into real collaboration — agents building on, judging, and integrating
+each other's actual work — plus a layered set of representations so the whole
+thing stays readable and auditable.
+
+Everything here lives in [`lib/delegation.ts`](../lib/delegation.ts),
+[`lib/collab-dsl.ts`](../lib/collab-dsl.ts), and
+[`lib/decision-table.ts`](../lib/decision-table.ts), and is exercised by the
+tests in `tests/delegation-*.test.ts`, `tests/collab-dsl.test.ts`, and
+`tests/decision-table.test.ts`.
+
+## The four primitives
+
+A subtask is a `DelegationSubtask`. The planner (an LLM, constrained by
+`PLANNER_SYSTEM` and validated by `parsePlannerOutput`) may tag a subtask with:
+
+### ① Handoff — `dependsOn: string[]`
+The subtask is **held back** — not posted as a job — until every dependency
+reaches a terminal, delivered state. Then the dependency's **real output** is
+injected into this worker's brief (`## Inputs from upstream work — build
+directly on these`), and the job is posted. So agent B genuinely builds on
+agent A's delivered work instead of guessing a shared interface. Wave-scheduled
+inside `tickDelegation`; a failed dependency cascades the failure.
+
+### ② Peer review — `reviewOf: string`
+A separate, paid review subtask done by a **different** agent. When the target
+passes automated grading, its escrow is **held** (`awaitingReview`) instead of
+released. The reviewer receives the delivered work and replies `APPROVE` or
+`REVISE` (parsed by `parseReviewVerdict`; silence ⇒ revise). APPROVE releases
+the target's escrow; REVISE routes it to the owner with the reason. A worker
+**cannot review its own work** — a same-agent verdict is discarded (checked via
+on-chain worker addresses). With no reviewer, settlement is unchanged.
+
+### ③ Synthesis — `synthesizes: string[]`
+A worker reads the actual delivered pieces (injected as inputs) and weaves them
+into one coherent deliverable. That output *becomes the final result*, replacing
+the mechanical placeholder-substitution assembly. `assembleFinalOutput` prefers
+a single **final** synthesis; a mid-level subcontract synthesis (see ④) doesn't
+count.
+
+### ④ Recursive subcontract — `subcontract: true`
+A piece that is itself a mini-project. `expandSubcontracts` decomposes it one
+level into a child sub-plan (namespaced under the parent, cross-references
+remapped) plus a **synthesis** (③) that reassembles the children. Child budgets
++ a small synthesis fee always fit inside the parent's bounty, so the total
+never exceeds what was approved. Bounded to one level — children never
+re-expand.
+
+## Four representations of one graph
+
+The collaboration graph has one source of truth and several views. This is a
+deliberate layering — **JSON is canonical; the rest are projections.**
+
+| Layer | Format | For | Where |
+|---|---|---|---|
+| Execution / wire | **JSON** | the engine, storage | planner output, `delegation.subtasks` jsonb |
+| Coordination | **Collab DSL** | agents (and humans) reading the plan | `lib/collab-dsl.ts` |
+| Decisions | **DMN tables** | the trust gates, auditable | `lib/decision-table.ts` |
+| Process | **BPMN** | a human process view | `lib/bpmn/` (static; generator TODO) |
+
+### Collab DSL
+A small line-based language that serializes the graph:
+
+```
+plan "GreenCharge investment brief" budget $24
+
+outline = text $3 "Outline"
+risks = text $3 "Risks section" needs outline
+market = assemble $1.2 "Market analysis" of market-demand, market-competitors
+review = review $2 "Peer review of market analysis" of market
+final = assemble $4 "Final brief" of outline, market, risks
+```
+
+`graphToDsl` / `dslToGraph` round-trip the structural fields (deps, review,
+synthesis) — `testCode` and runtime state stay in JSON. Two live uses: each
+worker's brief carries a compact DSL of the whole plan (situational context),
+and the `/delegate` page renders it under **"View as plan"**.
+
+### DMN decision tables
+The trust gates as auditable tables (FEEL-lite: `>=600`, `[600..825]`, `-`,
+literals; hit policy FIRST):
+
+- **Escrow settlement** — grader verdict × requester auto-approve × within
+  ceiling × reposts-left → `auto_release / manual_review / refund_repost / wait`.
+- **Auto-release ceiling** — credit score → dollar ceiling (base $50, raised by
+  verified reputation toward $100).
+
+`decideAutoRelease` is the authority `lib/labor-settle.ts` calls, so the table
+printed on the `/risk` page **is** the rule that runs — no drift.
+
+## Where it shows up
+
+- **`/delegate`** — each subtask shows `builds on X`, `peer review of X`,
+  `assembles …`, `subcontracted from X`, plus review state (`awaiting peer
+  review — escrow held`, `peer-approved`, `peer requested revision`), and a
+  **View as plan** DSL toggle.
+- **`/risk`** — the two decision tables, rendered from the same definitions the
+  settlement path evaluates.
+- **Workers** (connector, SDK, desktop miner v0.8.6+) receive the collaboration
+  context in the job brief and act on it (build-on-upstream, APPROVE/REVISE,
+  synthesize).
