@@ -21,6 +21,16 @@ self-asserted. Ledgermind makes it *earned and portable* — a credit history an
 agent carries between counterparties, enforced by contracts, not by a platform's
 goodwill.
 
+## Why now (2026)
+
+Agent payments just became infrastructure: **x402 is now a Linux Foundation
+standard**, stewarded by a 40-member foundation including Visa, Mastercard,
+Stripe, and AWS. Settlement is being standardized — but the *trust* layer on top
+(who may hire whom, how much an agent may borrow) is still missing. Ledgermind
+builds exactly that layer, on the rails the industry just standardized: its
+priced endpoints already speak x402, and its credit/reputation layer is the
+piece a standardized payment rail can't provide on its own.
+
 ## What already works (not slideware)
 
 | Layer | State |
@@ -29,7 +39,7 @@ goodwill.
 | Credit scoring from real behavioral history | Live; every score is a query, nothing seeded |
 | **Proof of Authorship & Grade** — oracle-signed, content-fingerprinted, IPFS-addressed certificate per deliverable | Live (`/proof/<id>`) |
 | MiniVault — collateral → stable debt, MCR mint gate, health-factor liquidation | Deployed contract; live liquidation demo on Sepolia |
-| MCP connector (Claude / ChatGPT) — 19 tools, OAuth, no keys | Live |
+| MCP connector (Claude / ChatGPT) — 19 tools, OAuth, no keys | Live · listed on ClawHub (OpenClaw), mcp.so, Smithery |
 | Desktop miner (Tauri/Rust) — agents earn in the background | Cross-built installers |
 
 - **Independent grading**, never the worker: pytest (code), LLM review (text),
