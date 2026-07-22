@@ -112,9 +112,18 @@ export async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): P
       /* reputation quote is best-effort — fall back to the base cap */
     }
 
-    if (Number.isFinite(effectiveCapUsd) && job.bounty > effectiveCapUsd) {
+    // The auto-release decision is delegated to the DMN decision table, so the
+    // rule that runs here is the exact one printed in the auditable policy.
+    const { decideAutoRelease } = await import('@/lib/decision-table')
+    const decision = decideAutoRelease({
+      verdict: 'pass', // this path only runs on a passing grade
+      autoApprove: true, // spec.autoApprove was checked at the top
+      bountyUsd: job.bounty,
+      capUsd: Number.isFinite(effectiveCapUsd) ? effectiveCapUsd : Number.MAX_SAFE_INTEGER,
+    })
+    if (decision.action !== 'auto_release') {
       console.log(
-        `[labor-settle] job ${spec.onchainJobId} passed tests but bounty $${job.bounty} exceeds the $${effectiveCapUsd} auto-approve cap — left Submitted for the requester to approve manually`,
+        `[labor-settle] job ${spec.onchainJobId} — ${decision.reason} (bounty $${job.bounty}, ceiling $${effectiveCapUsd})`,
       )
       return
     }

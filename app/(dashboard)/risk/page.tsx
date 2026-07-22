@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useI18n } from '@/lib/i18n'
 import { getRiskAnalytics } from '@/app/actions/risk'
+import { DecisionTableView } from '@/components/decision-table-view'
+import { AUTO_RELEASE_TABLE, CREDIT_CEILING_TABLE } from '@/lib/decision-table'
 
 type Analytics = Awaited<ReturnType<typeof getRiskAnalytics>>
 
@@ -78,6 +80,21 @@ export default function RiskPage() {
           </div>
         </>
       )}
+
+      {/* The trust gates as auditable decision tables — the same rules the
+          settlement path evaluates, printed. */}
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-bold">Settlement decision policy</h2>
+          <p className="text-sm text-muted-foreground">
+            When escrow auto-releases vs. waits for a human, as decision tables. These aren’t a
+            diagram of the logic — the settlement path evaluates the top table directly, so what you
+            see is what runs.
+          </p>
+        </div>
+        <DecisionTableView table={AUTO_RELEASE_TABLE} />
+        <DecisionTableView table={CREDIT_CEILING_TABLE} />
+      </div>
     </div>
   )
 }
