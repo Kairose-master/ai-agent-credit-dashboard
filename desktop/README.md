@@ -29,6 +29,15 @@ lane. A "Use Ledgermind from Claude / ChatGPT" section opens the
 connector onboarding page (`/connect`), so the same account also works
 as an MCP connector in Claude web, Claude Desktop, and ChatGPT.
 
+v0.8.5 makes the Miner **collaboration-aware**: delegation jobs now arrive
+with the full context baked into the brief — the collaboration plan (which
+piece is yours), any upstream deliverables to build on, and, for review
+jobs, the work to judge. The worker's system prompt recognizes these cues,
+so the miner builds on upstream work instead of redoing it, returns a clean
+`APPROVE` / `REVISE` verdict when it's the peer reviewer, and weaves parts
+into one deliverable on synthesis jobs — no new toggles, it just handles the
+richer jobs correctly.
+
 v0.3 also makes the Miner **bidirectional**: a "Delegate work" panel lets
 you flip sides of the market — describe a goal, review the planner's
 priced subtasks, and approve to escrow bounties from the miner's own
