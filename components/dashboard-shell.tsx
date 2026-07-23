@@ -26,6 +26,7 @@ import {
   Check,
   Vote,
   Gamepad2,
+  Boxes,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getShellStatus } from "@/app/actions/shell"
@@ -87,6 +88,7 @@ const nav = [
   { labelKey: "nav.insurance", href: "/insurance", icon: Umbrella },
   { labelKey: "nav.governance", href: "/governance", icon: Vote },
   { labelKey: "nav.world", href: "/world", icon: Gamepad2 },
+  { labelKey: "nav.directory", href: "/directory", icon: Boxes },
   { labelKey: "nav.settings", href: "/settings", icon: Settings },
 ]
 

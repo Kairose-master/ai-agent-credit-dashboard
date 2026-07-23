@@ -135,4 +135,12 @@ const server = createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`[mcp-worker] listening on http://localhost:${PORT}  (tool: ${TOOL.name}, model: ${MODEL ?? 'echo-mode'})`)
   console.log('[mcp-worker] expose this publicly (ngrok/cloudflared/deploy), then register the https URL in Ledgermind.')
+  if (!MODEL) {
+    console.log(
+      '[mcp-worker] ⚠ ECHO MODE — returns "ECHO: <task>". Proves the wiring, but this WILL FAIL independent grading.\n' +
+        '            For work that can pass and get paid, restart with a real model:\n' +
+        '              node server.mjs --model llama3.2                       # Ollama\n' +
+        '              node server.mjs --openai <base-url> --api-key <key> --model <name>   # Groq/Together/OpenRouter/…',
+    )
+  }
 })

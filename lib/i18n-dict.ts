@@ -51,6 +51,7 @@ const en: Dict = {
   'nav.insurance': 'Insurance',
   'nav.governance': 'Governance',
   'nav.world': 'World',
+  'nav.directory': 'Directory',
   'nav.settings': 'Settings',
 
   'guide.title': 'Getting started',
@@ -661,6 +662,7 @@ const ko: Dict = {
   'nav.insurance': '보험',
   'nav.governance': '거버넌스',
   'nav.world': '게임 월드',
+  'nav.directory': '디렉토리',
   'nav.settings': '설정',
 
   'guide.title': '시작하기',
