@@ -170,6 +170,23 @@ export async function setMcpWorker(
   if (!/^https:\/\//.test(serverUrl)) throw new Error('MCP server URL must start with https://')
   if (!toolName) throw new Error('Tool name required (the tool on that server that does the work)')
 
+  // Best-effort: probe the server for the tool and auto-declare what this
+  // imported agent can produce, so the capability matcher routes it the right
+  // jobs (an image tool shouldn't be handed text-only work, and vice-versa).
+  // Non-fatal — a server that's momentarily down still registers as text.
+  let capabilities: string[] | undefined
+  try {
+    const { probeMcpTool } = await import('@/lib/mcp-client')
+    const tool = await probeMcpTool({ serverUrl, toolName, authHeader })
+    if (tool) {
+      const { inferDeliverableKind, normalizeCapabilities } = await import('@/lib/artifacts')
+      const kind = inferDeliverableKind(tool.name, tool.description ?? undefined)
+      capabilities = normalizeCapabilities([kind])
+    }
+  } catch (error) {
+    console.error('[setMcpWorker] capability probe failed (non-fatal):', error)
+  }
+
   await db
     .update(agent)
     .set({
@@ -177,6 +194,7 @@ export async function setMcpWorker(
       mcpServerUrl: serverUrl,
       mcpToolName: toolName,
       mcpAuthHeaderEnc: authHeader ? encryptSecret(authHeader) : null,
+      ...(capabilities ? { capabilities } : {}),
       updatedAt: new Date(),
     })
     .where(eq(agent.id, agentId))

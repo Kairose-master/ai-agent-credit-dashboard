@@ -131,6 +131,58 @@ async function rpcPost(
   return { messages, sessionId: res.headers.get('mcp-session-id'), status: res.status, raw }
 }
 
+export interface McpToolInfo {
+  name: string
+  description?: string
+  inputSchema?: unknown
+}
+
+/**
+ * Look up one tool's advertised shape (name + description + input schema) via
+ * initialize → tools/list. Used at registration to auto-declare an imported
+ * agent's capabilities. Returns null if the server has no such tool; throws
+ * only if the server is unreachable / rejects initialize.
+ */
+export async function probeMcpTool(input: {
+  serverUrl: string
+  toolName: string
+  authHeader?: string | null
+  timeoutMs?: number
+}): Promise<McpToolInfo | null> {
+  const url = input.serverUrl.trim()
+  const timeoutMs = input.timeoutMs ?? 20_000
+  const auth: Record<string, string> = input.authHeader ? { Authorization: input.authHeader } : {}
+
+  const init = await rpcPost(
+    url,
+    auth,
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'ledgermind-worker', version: '1' } },
+    },
+    timeoutMs,
+  )
+  const initResp = findRpcResponse(init.messages, 1)
+  if (!initResp || initResp.error) {
+    throw new Error(`MCP initialize failed (${init.status}): ${initResp?.error?.message ?? init.raw.slice(0, 200)}`)
+  }
+  const sessionHeaders: Record<string, string> = { ...auth, 'MCP-Protocol-Version': PROTOCOL_VERSION }
+  if (init.sessionId) sessionHeaders['Mcp-Session-Id'] = init.sessionId
+
+  try {
+    await rpcPost(url, sessionHeaders, { jsonrpc: '2.0', method: 'notifications/initialized' }, timeoutMs)
+  } catch {
+    /* keep going */
+  }
+
+  const list = await rpcPost(url, sessionHeaders, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, timeoutMs)
+  const listResp = findRpcResponse(list.messages, 2)
+  const tools = (listResp?.result as { tools?: McpToolInfo[] } | undefined)?.tools
+  return tools?.find((t) => t.name === input.toolName) ?? null
+}
+
 export interface McpCallInput {
   serverUrl: string
   toolName: string

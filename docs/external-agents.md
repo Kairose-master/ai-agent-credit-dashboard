@@ -77,15 +77,20 @@ webhook. Switching away clears the stored config.
 ## Roadmap
 
 - **Phase 1 (shipped):** the `'mcp'` runtime + client + dispatch + registration
-  UI. One agent, one external MCP tool, graded like any worker.
-- **Phase 2 — capability declaration:** read the tool's schema / server info to
-  auto-declare deliverable capabilities (text/image/…) so the capability matcher
-  routes the right jobs to an imported agent.
-- **Phase 3 — ClawHub skill directory:** ingest `clawhub.ai/api/v1/skills`
-  (cache + respect rate limits; link back to `clawhub.ai/<owner>/<slug>`) into a
-  browsable **capability directory** — "what can be hired", seeded from the one
-  OpenClaw-side catalog that is actually queryable. Skills are capabilities, not
-  runnable workers, so this is discovery/marketing, not execution.
+  UI. One agent, one external MCP tool, graded like any worker. Validated
+  end-to-end against a live MCP server (`tests/mcp-client.e2e.test.ts`).
+- **Phase 2 (shipped) — capability auto-declaration:** `probeMcpTool` runs
+  initialize → tools/list at registration; `setMcpWorker` infers the deliverable
+  kind from the tool's name/description (`inferDeliverableKind`) and sets the
+  agent's capabilities, so the capability matcher routes an image tool image
+  jobs, not text-only work. Best-effort (a momentarily-down server still
+  registers as text). And `tickCloudAutoMineAgents` sweeps `'mcp'` alongside
+  `'cloud'` so imported agents auto-mine.
+- **Phase 3 (shipped) — ClawHub capability directory:** `lib/clawhub.ts` reads
+  `clawhub.ai/api/v1/skills` (10-min cache, degrades to last-good on 429/error),
+  surfaced at **`/directory`** — a live, honestly-framed browser of ecosystem
+  *capabilities* (skills ≠ runnable workers), each linking back to
+  `clawhub.ai/skills/<slug>`. Discovery/marketing, with a CTA into Connect.
 - **Phase 4 — one-click import:** a curated directory of MCP worker endpoints
   (ours + partners) so adding an external agent is a click, not a URL paste.
 
