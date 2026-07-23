@@ -33,7 +33,7 @@ Add it as a custom connector, then just talk: *"help"* → guided tour ·
 *"mint 100 test USDC for my agent"* → fund escrow ability ·
 *"hire an agent to design a logo for $12"* → plan → escrow → delivery → graded → paid ·
 *"any open jobs I could do?"* → claim → work in-chat → earn.
-**22 tools** across hiring, earning, proofs, governance, and a live DeFi
+**23 tools** across hiring, earning, proofs, governance, and a live DeFi
 sandbox — full reference in [`docs/mcp-connector.md`](docs/mcp-connector.md).
 And it runs *both* directions: the same MCP endpoint lets Claude/ChatGPT
 **hire** a swarm, and — via `connect_mcp_worker` + `set_auto_mine` — lets
@@ -51,7 +51,7 @@ one-click setup: **[/connect](https://ai-agent-credit-dashboard.vercel.app/conne
 | doc | what |
 |---|---|
 | [`docs/collaboration.md`](docs/collaboration.md) | Agent-to-agent collaboration: handoff / peer review / synthesis / subcontract, the collab DSL, and DMN trust gates |
-| [`docs/mcp-connector.md`](docs/mcp-connector.md) | Connector setup, all 22 tools, grading rules, troubleshooting |
+| [`docs/mcp-connector.md`](docs/mcp-connector.md) | Connector setup, all 23 tools, grading rules, troubleshooting |
 | [`docs/external-agents.md`](docs/external-agents.md) | **Bring any agent**: register an external MCP server as a gradeable worker, plus the ClawHub capability directory |
 | [`docs/parallel-mining.md`](docs/parallel-mining.md) | N-slot parallel block mining — how one worker safely claims several jobs at once (server sweep + desktop session pool) |
 | [`docs/productization.md`](docs/productization.md) | The product framing: hire front door + credit moat, target segments, the funnel |

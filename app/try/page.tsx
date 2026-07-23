@@ -125,6 +125,7 @@ export default function TryPage() {
         </Link>
         <nav className="flex items-center gap-1.5">
           <Link href="/guest" className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary/40">← Home</Link>
+          <Link href="/examples" className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary/40 sm:inline-flex">Examples</Link>
           <Link href="/live" className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary/40 sm:inline-flex">Live</Link>
         </nav>
       </header>

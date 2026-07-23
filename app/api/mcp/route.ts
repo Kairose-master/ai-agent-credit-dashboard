@@ -57,7 +57,8 @@ export async function POST(request: Request) {
             'Passing independent grading pays the bounty into your agent wallet; my_work shows verdicts ' +
             'and earnings. Create an agent first with create_worker_agent if the account has none. ' +
             'Hands-off: connect_mcp_worker brings ANY external MCP agent in as a worker, and set_auto_mine ' +
-            'lets a cloud/mcp/local worker claim jobs by itself, several in parallel.',
+            'lets a cloud/mcp/local worker claim jobs by itself, several in parallel. New here? The scenarios ' +
+            'tool has guided, copy-paste walkthroughs you can run for the user step by step.',
         })
       case 'ping':
         return rpcResult(msg.id, {})
@@ -290,6 +291,22 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { limit: { type: 'number', description: 'How many to list (default 15, max 40).' } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'scenarios',
+    description:
+      'Guided, copy-paste WALKTHROUGHS of the real flows (hire a swarm, bring any MCP agent in as a worker, sell a ' +
+      'local model, auto-graded code jobs, disputes). Call with no arguments to LIST the available scenarios; call with ' +
+      'scenario = <slug> to get that full walkthrough, then actually run it for the user step by step using the other ' +
+      'tools (e.g. plan_delegation → confirm_delegation for the delegation scenario). Use this when the user says ' +
+      '"walk me through / run / try the <X> scenario" or asks for an example.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scenario: { type: 'string', description: 'The scenario slug from the list (e.g. "delegation", "bring-any-mcp-agent"). Omit to list them all.' },
+      },
       additionalProperties: false,
     },
   },
@@ -725,6 +742,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           'Hire: plan_delegation → confirm_delegation → delegation_status → get_delegation_output',
           'Earn: browse_open_jobs → claim_job → submit_work → my_work',
           'Hands-off earning: connect_mcp_worker (bring any MCP agent) · set_auto_mine (N-slot auto-claim) · browse_capabilities (ClawHub directory)',
+          'Learn by doing: scenarios (guided copy-paste walkthroughs — "run the delegation scenario")',
           'Trust: get_work_proof (signed authorship+grade certificate, IPFS content id)',
           'DeFi sandbox: vault_status · quote_credit_line (GIWA-style collateral vault, live on Sepolia)',
           'Governance: governance · vote · set_auto_vote ($LEDGER, earned-not-bought)',
@@ -1043,6 +1061,31 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         return `• ${s.name}${topics}${s.summary ? ` — ${s.summary.slice(0, 120)}` : ''}${stats}\n  ${s.url}`
       })
       return toolText(id, `Hireable capabilities (ClawHub):\n${lines.join('\n')}\n\nWire one in as a worker with connect_mcp_worker.`)
+    }
+
+    case 'scenarios': {
+      const { listScenarios, getScenario } = await import('@/lib/scenarios')
+      const wanted = args.scenario ? String(args.scenario).trim() : ''
+      if (!wanted) {
+        const list = listScenarios()
+        const lines = list.map((s) => `• ${s.slug} — ${s.title} (~${s.minutes} min)\n  ${s.summary}`)
+        return toolText(
+          id,
+          `Guided walkthroughs you can run right here. Call scenarios again with scenario="<slug>" for the full ` +
+            `steps, then drive it for the user with the other tools.\n\n${lines.join('\n')}\n\n` +
+            `Full versions also live at ${origin}/examples.`,
+        )
+      }
+      const found = getScenario(wanted) ?? getScenario(wanted.replace(/\s+/g, '-').toLowerCase())
+      if (!found) {
+        const slugs = listScenarios().map((s) => s.slug).join(', ')
+        return toolText(id, `No scenario "${wanted}". Available: ${slugs}. Call scenarios with no arguments to see summaries.`, true)
+      }
+      return toolText(
+        id,
+        `${found.body}\n\n---\nNow run this for the user step by step with the relevant tools. Confirm each ` +
+          `money-moving step (confirm_delegation, etc.) before calling it. Full page: ${origin}/examples/${found.slug}`,
+      )
     }
 
     case 'governance': {

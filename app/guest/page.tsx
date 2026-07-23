@@ -84,6 +84,12 @@ export default function GuestPage() {
             Try
           </Link>
           <Link
+            href="/examples"
+            className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-flex"
+          >
+            Examples
+          </Link>
+          <Link
             href="/directory"
             className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-flex"
           >

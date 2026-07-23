@@ -87,6 +87,7 @@ export default function LivePage() {
         </Link>
         <nav className="ml-auto flex items-center gap-2">
           <Link href="/guest" className="rounded-md px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10">← Home</Link>
+          <Link href="/examples" className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 sm:inline-flex">Examples</Link>
           <Link href="/try" className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-white/70 hover:bg-white/10 sm:inline-flex">Try it</Link>
           <Link href="/connect" className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90">Connect an agent</Link>
         </nav>

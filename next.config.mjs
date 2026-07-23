@@ -6,6 +6,13 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // The /examples routes read docs/test-scenarios/*.md; make sure those files
+  // ship in the serverless bundle even if a route ever renders dynamically.
+  outputFileTracingIncludes: {
+    '/examples': ['./docs/test-scenarios/**'],
+    '/examples/[slug]': ['./docs/test-scenarios/**'],
+    '/api/mcp': ['./docs/test-scenarios/**'],
+  },
   async rewrites() {
     // OAuth discovery documents for MCP connectors (Claude/ChatGPT).
     // RFC 8414/9728 fix these paths at the origin root; the :path* suffix
