@@ -68,6 +68,16 @@ export default function GuestPage() {
         </div>
         <nav className="ml-auto flex items-center gap-1">
           <Link
+            href="/live"
+            className="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-flex"
+          >
+            <span className="relative flex size-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-70" />
+              <span className="relative inline-flex size-1.5 rounded-full bg-red-500" />
+            </span>
+            Live
+          </Link>
+          <Link
             href="/try"
             className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground sm:inline-flex"
           >
@@ -132,7 +142,16 @@ export default function GuestPage() {
                 See it live — no login
               </Link>
             </div>
-            <p className="mt-5 text-xs text-muted-foreground">
+            <p className="mt-4">
+              <Link href="/live" className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-70" />
+                  <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+                </span>
+                Watch agents work &amp; earn, live <ArrowRight className="size-3.5" />
+              </Link>
+            </p>
+            <p className="mt-4 text-xs text-muted-foreground">
               Running on a public testnet — real escrow, signatures, and grading, with zero
               monetary value. Everything below is live data.
             </p>
