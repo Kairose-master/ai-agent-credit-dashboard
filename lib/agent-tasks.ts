@@ -146,6 +146,10 @@ export async function runAgentTask(input: {
       // ourselves and call our own callback endpoint exactly like a
       // webhook agent's server would.
       after(() => dispatchToCloudApi(agent, taskId, effectiveTask, callbackUrl))
+    } else if (agent.runtimeType === 'mcp' && agent.mcpServerUrl && agent.mcpToolName) {
+      // An external MCP server does the work. Same fire-and-forget shape as
+      // cloud: we call the tool, then POST our own callback with the result.
+      after(() => dispatchToMcpWorker(agent, taskId, effectiveTask, callbackUrl))
     } else {
       const { resolveUserAnthropicKey } = await import('@/lib/user-keys')
       const apiKey = await resolveUserAnthropicKey(agent.userId)
@@ -309,5 +313,72 @@ async function dispatchToCloudApi(
     })
   } catch (callbackError) {
     console.error('[agent-tasks] cloud dispatch callback failed:', callbackError)
+  }
+}
+
+/**
+ * Runs the task by calling a tool on an EXTERNAL MCP server — "bring any
+ * MCP-speaking agent in as a worker". Same trust model as every other runtime:
+ * the tool's text output is submitted as the agent's work and our independent
+ * graders decide what it's worth, never the external server's self-report.
+ * The auth header (if any) is decrypted only here, server-side, at call time.
+ */
+async function dispatchToMcpWorker(agentRow: AgentRow, taskId: string, task: string, callbackUrl: string) {
+  const startedAt = Date.now()
+  let output = ''
+  let success = true
+  let error: string | undefined
+
+  try {
+    const { callMcpTool } = await import('@/lib/mcp-client')
+    const authHeader = agentRow.mcpAuthHeaderEnc ? decryptSecret(agentRow.mcpAuthHeaderEnc as string) : null
+    output = await callMcpTool({
+      serverUrl: agentRow.mcpServerUrl as string,
+      toolName: agentRow.mcpToolName as string,
+      task,
+      authHeader,
+      timeoutMs: CLOUD_CALL_TIMEOUT_MS,
+    })
+    if (!output.trim()) {
+      success = false
+      error = 'MCP tool returned empty output'
+    }
+  } catch (e) {
+    success = false
+    error = e instanceof Error ? e.message : String(e)
+  }
+
+  const executionTime = Math.round((Date.now() - startedAt) / 1000)
+  const events = [
+    cloudEvent(agentRow.id, taskId, 'TASK_STARTED', true, 0, { task: task.slice(0, 200) }),
+    cloudEvent(agentRow.id, taskId, success ? 'TASK_COMPLETED' : 'TASK_FAILED', success, executionTime, {
+      runtime: 'mcp-worker',
+      mcpTool: agentRow.mcpToolName,
+      ...(error ? { error: error.slice(0, 300) } : {}),
+    }),
+  ]
+
+  try {
+    const auth = await resolveCallbackAuth(agentRow.id)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (auth.required) headers['X-Runtime-Secret'] = auth.secret
+
+    await fetch(callbackUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        task_id: taskId,
+        agent_id: agentRow.id,
+        success,
+        output: success ? output : `MCP worker error: ${error}`,
+        plan: '',
+        quality_score: null,
+        execution_time: executionTime,
+        token_cost: 0,
+        events,
+      }),
+    })
+  } catch (callbackError) {
+    console.error('[agent-tasks] mcp dispatch callback failed:', callbackError)
   }
 }

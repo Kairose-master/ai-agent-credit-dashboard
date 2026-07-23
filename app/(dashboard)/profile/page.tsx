@@ -39,6 +39,8 @@ import {
   connectLocalWorker,
   setCloudApiWorker,
   disconnectCloudApiWorker,
+  setMcpWorker,
+  disconnectMcpWorker,
 } from '@/app/actions/webhook'
 import {
   getOnchainInfo,
@@ -1122,9 +1124,11 @@ function BalanceSheetCard({ sheet }: { sheet: BalanceSheet }) {
  * format our own runtime uses. See the Guide for the exact contract.
  */
 
+type RuntimeKind = 'platform' | 'webhook' | 'local' | 'cloud' | 'mcp'
+
 function RuntimeCard({ agentId }: { agentId: string }) {
   const { t } = useI18n()
-  const [runtimeType, setRuntimeType] = useState<'platform' | 'webhook' | 'local' | 'cloud'>('platform')
+  const [runtimeType, setRuntimeType] = useState<RuntimeKind>('platform')
   const [webhookUrl, setWebhookUrlState] = useState('')
   const [hasSecret, setHasSecret] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -1142,15 +1146,24 @@ function RuntimeCard({ agentId }: { agentId: string }) {
   const [cloudKeyInput, setCloudKeyInput] = useState('')
   const [cloudModelInput, setCloudModelInput] = useState('')
 
+  const [mcpServerUrl, setMcpServerUrlState] = useState('')
+  const [mcpToolName, setMcpToolNameState] = useState('')
+  const [showMcpForm, setShowMcpForm] = useState(false)
+  const [mcpUrlInput, setMcpUrlInput] = useState('')
+  const [mcpToolInput, setMcpToolInput] = useState('')
+  const [mcpAuthInput, setMcpAuthInput] = useState('')
+
   const load = useCallback(async () => {
     const cfg = await getWebhookConfig(agentId)
-    setRuntimeType((cfg.runtimeType as 'platform' | 'webhook' | 'local' | 'cloud') ?? 'platform')
+    setRuntimeType((cfg.runtimeType as RuntimeKind) ?? 'platform')
     setWebhookUrlState(cfg.webhookUrl ?? '')
     setUrlInput(cfg.webhookUrl ?? '')
     setHasSecret(cfg.hasSecret)
     setLastPollAt(cfg.lastPollAt)
     setCloudBaseUrlState(cfg.cloudBaseUrl ?? '')
     setCloudModelState(cfg.cloudModel ?? '')
+    setMcpServerUrlState(cfg.mcpServerUrl ?? '')
+    setMcpToolNameState(cfg.mcpToolName ?? '')
   }, [agentId])
 
   useEffect(() => {
@@ -1259,6 +1272,39 @@ function RuntimeCard({ agentId }: { agentId: string }) {
     }
   }
 
+  const connectMcp = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await setMcpWorker(agentId, {
+        serverUrl: mcpUrlInput,
+        toolName: mcpToolInput,
+        authHeader: mcpAuthInput || undefined,
+      })
+      setMcpAuthInput('')
+      setShowMcpForm(false)
+      await load()
+      setMsg(t('profile.runtime.saved'))
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const disconnectMcp = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      await disconnectMcpWorker(agentId)
+      await load()
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="border border-border rounded-lg p-6">
       <h3 className="font-bold text-lg mb-1 flex items-center gap-2">
@@ -1276,8 +1322,13 @@ function RuntimeCard({ agentId }: { agentId: string }) {
               ? t('profile.runtime.localWorker')
               : runtimeType === 'cloud'
                 ? t('profile.runtime.cloudApi')
-                : t('profile.runtime.platform')}
+                : runtimeType === 'mcp'
+                  ? 'External MCP agent'
+                  : t('profile.runtime.platform')}
         </span>
+        {runtimeType === 'mcp' && mcpServerUrl && (
+          <code className="text-xs text-muted-foreground truncate max-w-xs">{mcpToolName} · {mcpServerUrl}</code>
+        )}
         {runtimeType === 'webhook' && webhookUrl && (
           <code className="text-xs text-muted-foreground truncate max-w-xs">{webhookUrl}</code>
         )}
@@ -1339,12 +1390,31 @@ function RuntimeCard({ agentId }: { agentId: string }) {
           <Webhook className="size-4" />
           {runtimeType === 'webhook' ? t('profile.runtime.editUrl') : t('profile.runtime.byoWebhook')}
         </button>
+        <button
+          onClick={() => {
+            setMcpUrlInput(mcpServerUrl || '')
+            setMcpToolInput(mcpToolName || '')
+            setShowCloudForm(false)
+            setEditing(false)
+            setShowMcpForm(true)
+          }}
+          disabled={busy}
+          title="Use any external MCP server's tool as this worker"
+          className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+            runtimeType === 'mcp' ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border hover:bg-secondary'
+          }`}
+        >
+          <Bot className="size-4" />
+          {runtimeType === 'mcp' ? 'Change MCP agent' : 'Connect an MCP agent'}
+        </button>
         {runtimeType !== 'platform' && (
           <button
             onClick={() => {
               setShowCloudForm(false)
+              setShowMcpForm(false)
               setEditing(false)
               if (runtimeType === 'cloud') disconnectCloud()
+              else if (runtimeType === 'mcp') disconnectMcp()
               else switchToPlatform()
             }}
             disabled={busy}
@@ -1354,6 +1424,54 @@ function RuntimeCard({ agentId }: { agentId: string }) {
           </button>
         )}
       </div>
+
+      {showMcpForm && (
+        <div className="mt-3 space-y-2 rounded-md border border-border p-3">
+          <p className="text-xs text-muted-foreground">
+            Point this worker at any external MCP server (Streamable HTTP). When it&apos;s dispatched a
+            job, we call the named tool with the task and submit its output for independent grading —
+            so any MCP-speaking agent (OpenClaw, another platform, your own) can earn here.
+          </p>
+          <input
+            value={mcpUrlInput}
+            onChange={(e) => setMcpUrlInput(e.target.value)}
+            placeholder="https://example.com/mcp"
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <input
+            value={mcpToolInput}
+            onChange={(e) => setMcpToolInput(e.target.value)}
+            placeholder="tool name (e.g. do_task)"
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <input
+            type="password"
+            value={mcpAuthInput}
+            onChange={(e) => setMcpAuthInput(e.target.value)}
+            placeholder="Authorization header — optional (e.g. Bearer xyz)"
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={connectMcp}
+              disabled={busy || !mcpUrlInput.trim() || !mcpToolInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+              {t('profile.runtime.connect')}
+            </button>
+            <button
+              onClick={() => setShowMcpForm(false)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
+            >
+              {t('profile.runtime.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {showCloudForm && (
         <div className="mt-3 space-y-2 rounded-md border border-border p-3">

@@ -160,10 +160,12 @@ export async function tickCloudAutoMineAgents(callbackUrl: string): Promise<void
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
   if (!isLaborMarketConfigured()) return
 
+  // Both 'cloud' and 'mcp' agents are push-based — the platform dispatches TO
+  // them (they never poll), so they need this sweep to ever auto-mine.
   const candidates = await db
     .select()
     .from(agent)
-    .where(and(eq(agent.runtimeType, 'cloud'), eq(agent.autoMine, true)))
+    .where(and(inArray(agent.runtimeType, ['cloud', 'mcp']), eq(agent.autoMine, true)))
   // Fan out across agents — each is a distinct smart account, so their
   // on-chain accepts don't share a nonce and are safe to run concurrently.
   // Bounded so a big roster can't stampede a free-tier bundler/RPC.

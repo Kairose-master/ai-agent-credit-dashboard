@@ -168,13 +168,16 @@ export const agent = pgTable('agent', {
   walletAddress: text('walletAddress').notNull().unique(),
   smartAccountAddress: text('smartAccountAddress'), // ERC-4337 Kernel account (Sepolia)
   customInstructions: text('customInstructions'), // from a purchased/cloned agent template, if any
-  runtimeType: text('runtimeType').default('platform'), // 'platform' | 'webhook' (BYO endpoint we call) | 'local' (owner's worker polls us — no tunnel needed) | 'cloud' (we call the owner's own OpenAI-compatible cloud API key server-side — no terminal, no polling)
+  runtimeType: text('runtimeType').default('platform'), // 'platform' | 'webhook' (BYO endpoint we call) | 'local' (owner's worker polls us — no tunnel needed) | 'cloud' (we call the owner's own OpenAI-compatible cloud API key server-side — no terminal, no polling) | 'mcp' (we call an external MCP server's tool to do the work — any MCP-speaking agent as a worker)
   webhookUrl: text('webhookUrl'), // BYO agent HTTP endpoint, called instead of the platform runtime
   webhookSecretEnc: text('webhookSecretEnc'), // AES-256-GCM encrypted per-agent secret (webhook callbacks AND local-worker polling)
   lastPollAt: timestamp('lastPollAt', { withTimezone: true }), // local worker's last poll — powers the online/offline badge
   cloudBaseUrl: text('cloudBaseUrl'), // 'cloud' mode: OpenAI-compatible base URL (e.g. https://api.groq.com/openai/v1)
   cloudModel: text('cloudModel'), // 'cloud' mode: model name sent in the chat/completions request
   cloudApiKeyEnc: text('cloudApiKeyEnc'), // 'cloud' mode: AES-256-GCM encrypted API key, decrypted only server-side at dispatch time
+  mcpServerUrl: text('mcpServerUrl'), // 'mcp' mode: external MCP server (Streamable HTTP) we call to do the work
+  mcpToolName: text('mcpToolName'), // 'mcp' mode: which tool on that server does the work
+  mcpAuthHeaderEnc: text('mcpAuthHeaderEnc'), // 'mcp' mode: AES-256-GCM encrypted Authorization header value (optional), sent only server-side at dispatch time
   // Platform-wide moderation for agent-to-agent messaging (open by design —
   // see agentMessage below): unlike agent_blocks, which is one recipient's
   // own opt-out, this is an admin ('agent_messages' permission) muting the

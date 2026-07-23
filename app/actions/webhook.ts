@@ -27,6 +27,9 @@ export async function getWebhookConfig(agentId: string) {
     cloudBaseUrl: ag.cloudBaseUrl,
     cloudModel: ag.cloudModel,
     hasCloudKey: Boolean(ag.cloudApiKeyEnc),
+    mcpServerUrl: ag.mcpServerUrl,
+    mcpToolName: ag.mcpToolName,
+    hasMcpAuth: Boolean(ag.mcpAuthHeaderEnc),
   }
 }
 
@@ -139,6 +142,58 @@ export async function disconnectCloudApiWorker(agentId: string) {
       cloudBaseUrl: null,
       cloudModel: null,
       cloudApiKeyEnc: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(agent.id, agentId))
+  revalidatePath('/profile')
+  revalidatePath('/mine')
+}
+
+/**
+ * "Bring any MCP-speaking agent in as a worker": switches the agent to 'mcp'
+ * mode, where WE call a tool on the owner's chosen external MCP server whenever
+ * this agent is dispatched a task (see dispatchToMcpWorker in
+ * lib/agent-tasks.ts). Works with any Streamable-HTTP MCP server — an OpenClaw
+ * agent, another platform, a self-hosted tool server. The optional auth header
+ * is encrypted at rest with the same AES-256-GCM helper as every other stored
+ * secret and decrypted only server-side at dispatch time.
+ */
+export async function setMcpWorker(
+  agentId: string,
+  input: { serverUrl: string; toolName: string; authHeader?: string },
+) {
+  await requireOwnedAgent(agentId)
+
+  const serverUrl = input.serverUrl.trim()
+  const toolName = input.toolName.trim()
+  const authHeader = input.authHeader?.trim()
+  if (!/^https:\/\//.test(serverUrl)) throw new Error('MCP server URL must start with https://')
+  if (!toolName) throw new Error('Tool name required (the tool on that server that does the work)')
+
+  await db
+    .update(agent)
+    .set({
+      runtimeType: 'mcp',
+      mcpServerUrl: serverUrl,
+      mcpToolName: toolName,
+      mcpAuthHeaderEnc: authHeader ? encryptSecret(authHeader) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(agent.id, agentId))
+
+  revalidatePath('/profile')
+  revalidatePath('/mine')
+}
+
+export async function disconnectMcpWorker(agentId: string) {
+  await requireOwnedAgent(agentId)
+  await db
+    .update(agent)
+    .set({
+      runtimeType: 'platform',
+      mcpServerUrl: null,
+      mcpToolName: null,
+      mcpAuthHeaderEnc: null,
       updatedAt: new Date(),
     })
     .where(eq(agent.id, agentId))

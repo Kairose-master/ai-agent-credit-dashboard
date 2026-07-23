@@ -1,0 +1,215 @@
+/**
+ * Minimal MCP (Model Context Protocol) client over Streamable HTTP.
+ *
+ * This is the "bring any agent in as a worker" adapter: given an external MCP
+ * server URL and a tool name, we open a session, call that tool with the job
+ * task, and return its text output — which then flows through the platform's
+ * independent grading exactly like any other worker's submission. See
+ * docs/external-agents.md.
+ *
+ * We hand-roll the protocol (the app has no MCP SDK dependency — its own
+ * /api/mcp server is hand-rolled too). Only the slice a worker call needs:
+ * initialize → notifications/initialized → (optional) tools/list → tools/call.
+ * The parsing is split into pure functions so it can be unit-tested without a
+ * live server.
+ */
+
+const PROTOCOL_VERSION = '2025-06-18'
+
+/** A JSON-RPC message (request result or error). */
+export interface RpcMessage {
+  jsonrpc?: string
+  id?: number | string | null
+  result?: unknown
+  error?: { code?: number; message?: string }
+  method?: string
+}
+
+/** Extract JSON-RPC messages from a response body, whether it came back as a
+ *  single JSON object/array (`application/json`) or an SSE stream
+ *  (`text/event-stream`, one JSON per `data:` line). Non-JSON lines are
+ *  skipped so keep-alive comments don't throw. Pure. */
+export function parseRpcBody(body: string, contentType: string | null): RpcMessage[] {
+  const isSse = (contentType ?? '').includes('text/event-stream')
+  if (isSse) {
+    const out: RpcMessage[] = []
+    for (const line of body.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) continue
+      const payload = trimmed.slice(5).trim()
+      if (!payload || payload === '[DONE]') continue
+      try {
+        out.push(JSON.parse(payload))
+      } catch {
+        /* partial / non-JSON data line */
+      }
+    }
+    return out
+  }
+  const trimmed = body.trim()
+  if (!trimmed) return []
+  try {
+    const parsed = JSON.parse(trimmed)
+    return Array.isArray(parsed) ? parsed : [parsed]
+  } catch {
+    return []
+  }
+}
+
+/** Find the response matching a request id (ignoring notifications / other
+ *  ids). Pure. */
+export function findRpcResponse(messages: RpcMessage[], id: number): RpcMessage | undefined {
+  return messages.find((m) => m && m.id === id && (m.result !== undefined || m.error !== undefined))
+}
+
+/** Flatten an MCP tool result's `content` array into text. Handles the common
+ *  `{ type: 'text', text }` items; falls back to JSON for structured content
+ *  so nothing is silently dropped. Pure. */
+export function extractToolText(result: unknown): string {
+  if (result == null) return ''
+  const r = result as { content?: unknown; structuredContent?: unknown }
+  const content = r.content
+  if (Array.isArray(content)) {
+    const parts: string[] = []
+    for (const item of content) {
+      if (item && typeof item === 'object') {
+        const it = item as { type?: string; text?: string }
+        if (it.type === 'text' && typeof it.text === 'string') parts.push(it.text)
+        else parts.push(JSON.stringify(item))
+      } else if (typeof item === 'string') {
+        parts.push(item)
+      }
+    }
+    return parts.join('\n').trim()
+  }
+  if (r.structuredContent !== undefined) return JSON.stringify(r.structuredContent)
+  if (typeof result === 'string') return result
+  return ''
+}
+
+const TASK_ARG_PREFERENCE = ['task', 'prompt', 'input', 'query', 'message', 'text', 'question', 'q']
+
+/** Decide which argument key to pass the job task under, by inspecting the
+ *  tool's JSON-Schema `inputSchema`. Prefers a conventionally-named string
+ *  property (task/prompt/input/…), else the first required string, else the
+ *  first string, else falls back to `task`. Pure. */
+export function pickToolArgumentKey(inputSchema: unknown): string {
+  const schema = inputSchema as { properties?: Record<string, { type?: string }>; required?: string[] } | undefined
+  const props = schema?.properties
+  if (!props || typeof props !== 'object') return 'task'
+  const isString = (name: string) => props[name] && (props[name].type === 'string' || props[name].type === undefined)
+
+  for (const pref of TASK_ARG_PREFERENCE) {
+    if (props[pref] && isString(pref)) return pref
+  }
+  const required = Array.isArray(schema?.required) ? schema!.required : []
+  for (const name of required) {
+    if (isString(name)) return name
+  }
+  const firstString = Object.keys(props).find((name) => isString(name))
+  return firstString ?? 'task'
+}
+
+async function rpcPost(
+  url: string,
+  headers: Record<string, string>,
+  message: object,
+  timeoutMs: number,
+): Promise<{ messages: RpcMessage[]; sessionId: string | null; status: number; raw: string }> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      ...headers,
+    },
+    body: JSON.stringify(message),
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  const raw = await res.text()
+  const messages = parseRpcBody(raw, res.headers.get('content-type'))
+  return { messages, sessionId: res.headers.get('mcp-session-id'), status: res.status, raw }
+}
+
+export interface McpCallInput {
+  serverUrl: string
+  toolName: string
+  task: string
+  /** Optional Authorization header value (e.g. "Bearer xyz"). */
+  authHeader?: string | null
+  timeoutMs?: number
+}
+
+/**
+ * Run one tool call against an external MCP server and return its text output.
+ * Throws on protocol/tool error so the caller can record a failed run (which
+ * the grader then treats as a non-delivery).
+ */
+export async function callMcpTool(input: McpCallInput): Promise<string> {
+  const url = input.serverUrl.trim()
+  const timeoutMs = input.timeoutMs ?? 120_000
+  const auth: Record<string, string> = input.authHeader ? { Authorization: input.authHeader } : {}
+
+  // 1. initialize — capture the session id the server may pin the session to.
+  const init = await rpcPost(
+    url,
+    auth,
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: 'ledgermind-worker', version: '1' },
+      },
+    },
+    timeoutMs,
+  )
+  const initResp = findRpcResponse(init.messages, 1)
+  if (!initResp || initResp.error) {
+    throw new Error(`MCP initialize failed (${init.status}): ${initResp?.error?.message ?? init.raw.slice(0, 200)}`)
+  }
+  const sessionHeaders: Record<string, string> = {
+    ...auth,
+    'MCP-Protocol-Version': PROTOCOL_VERSION,
+  }
+  if (init.sessionId) sessionHeaders['Mcp-Session-Id'] = init.sessionId
+
+  // 2. initialized notification (best-effort — servers 202 with no body).
+  try {
+    await rpcPost(url, sessionHeaders, { jsonrpc: '2.0', method: 'notifications/initialized' }, timeoutMs)
+  } catch {
+    /* some servers accept tools/call without this; keep going */
+  }
+
+  // 3. tools/list to learn the tool's expected argument shape (best-effort).
+  let argKey = 'task'
+  try {
+    const list = await rpcPost(url, sessionHeaders, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, timeoutMs)
+    const listResp = findRpcResponse(list.messages, 2)
+    const tools = (listResp?.result as { tools?: Array<{ name?: string; inputSchema?: unknown }> } | undefined)?.tools
+    const tool = tools?.find((t) => t.name === input.toolName)
+    if (tool) argKey = pickToolArgumentKey(tool.inputSchema)
+  } catch {
+    /* fall back to the default arg key */
+  }
+
+  // 4. tools/call — the actual work.
+  const call = await rpcPost(
+    url,
+    sessionHeaders,
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: input.toolName, arguments: { [argKey]: input.task } } },
+    timeoutMs,
+  )
+  const callResp = findRpcResponse(call.messages, 3)
+  if (!callResp || callResp.error) {
+    throw new Error(`MCP tools/call failed (${call.status}): ${callResp?.error?.message ?? call.raw.slice(0, 200)}`)
+  }
+  const result = callResp.result as { isError?: boolean } | undefined
+  const text = extractToolText(result)
+  if (result?.isError) {
+    throw new Error(`MCP tool "${input.toolName}" returned an error: ${text.slice(0, 200)}`)
+  }
+  return text
+}
