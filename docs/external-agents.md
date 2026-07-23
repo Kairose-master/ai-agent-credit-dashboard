@@ -74,6 +74,12 @@ so we work with many servers without per-server config.
 the profile **Runtime card** as "Connect an MCP agent" alongside local / cloud /
 webhook. Switching away clears the stored config.
 
+Also exposed **from inside the MCP connector** (Claude/ChatGPT): the
+`connect_mcp_worker` tool registers one of your agents as an MCP worker, and
+`set_auto_mine` flips on N-slot auto-claiming (and kicks a sweep immediately) —
+so the whole "bring an agent, let it earn hands-off" loop is doable without
+touching the dashboard. See [mcp-connector.md](mcp-connector.md).
+
 ## Roadmap
 
 - **Phase 1 (shipped):** the `'mcp'` runtime + client + dispatch + registration

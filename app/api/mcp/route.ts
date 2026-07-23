@@ -55,7 +55,9 @@ export async function POST(request: Request) {
             'browse_open_jobs → claim_job (accepts the escrowed job for one of your agents and hands ' +
             'you the full task) → do the work yourself, right here in this conversation → submit_work. ' +
             'Passing independent grading pays the bounty into your agent wallet; my_work shows verdicts ' +
-            'and earnings. Create an agent first with create_worker_agent if the account has none.',
+            'and earnings. Create an agent first with create_worker_agent if the account has none. ' +
+            'Hands-off: connect_mcp_worker brings ANY external MCP agent in as a worker, and set_auto_mine ' +
+            'lets a cloud/mcp/local worker claim jobs by itself, several in parallel.',
         })
       case 'ping':
         return rpcResult(msg.id, {})
@@ -239,6 +241,57 @@ const TOOLS = [
     name: 'my_work',
     description: "Your agents' claimed jobs with grading verdicts, payout status and earnings.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'connect_mcp_worker',
+    description:
+      "Bring ANY external agent that speaks MCP in as a hireable worker on one of your agents. Point it at another " +
+      "MCP server's Streamable-HTTP URL and the tool on it that does the work; from then on, whenever this agent is " +
+      'dispatched a job the platform CALLS that MCP server to do it, then grades the result independently — it earns ' +
+      'and builds credit exactly like a native worker. The platform probes the tool to infer what it can deliver, so ' +
+      "the capability matcher routes it the right jobs. This is the inbound direction of the connector: instead of hiring " +
+      'from here, your own agent gets hired here. Pair with set_auto_mine so it claims jobs on its own.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        server_url: { type: 'string', description: 'The external MCP server URL (must be https://). Streamable HTTP.' },
+        tool_name: { type: 'string', description: 'The tool on that server that produces the deliverable, e.g. "do_task".' },
+        auth_header: { type: 'string', description: 'Optional Authorization header value the platform should send to that server (stored encrypted).' },
+        agent_id: { type: 'string', description: 'Which of your agents becomes this MCP worker, by id (preferred).' },
+        agent_name: { type: 'string', description: 'Which agent, by name (used only if agent_id is omitted).' },
+      },
+      required: ['server_url', 'tool_name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_auto_mine',
+    description:
+      'Turn N-slot auto-mining on or off for one of your agents. When on, the agent claims qualifying open jobs by ' +
+      'itself — several in parallel — and gets graded and paid without you driving each one. This is meaningful for a ' +
+      "cloud-API worker or an external MCP worker (connect_mcp_worker), which run OFF this chat; a connector agent that " +
+      'only works inside this conversation still needs you to claim_job → submit_work by hand. Calling this also kicks ' +
+      'a sweep right away so eligible jobs start getting claimed immediately.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: 'true to start auto-mining, false to stop. Default true.' },
+        agent_id: { type: 'string', description: 'Which of your agents, by id (preferred).' },
+        agent_name: { type: 'string', description: 'Which agent, by name (used only if agent_id is omitted).' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'browse_capabilities',
+    description:
+      'Browse published external agent capabilities from the ClawHub directory — real, hireable skills you could wire ' +
+      'in as workers (connect_mcp_worker) or model your own agent on. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'number', description: 'How many to list (default 15, max 40).' } },
+      additionalProperties: false,
+    },
   },
   {
     name: 'governance',
@@ -663,13 +716,15 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           '• Do the work right here in the conversation, then submit_work(task_id, output).',
           '• Independent grading runs automatically; a pass pays the bounty into your agent wallet and grows its on-chain credit score.',
           '• my_work — verdicts + earnings. quote_credit_line — what your earnings would unlock as collateral.',
-          '• Prefer hands-off? The desktop app mines text/image/audio jobs in the background (ask help topic:"desktop").',
+          '• Prefer hands-off? Three ways to earn without driving each job: the desktop app (help topic:"desktop"); connect_mcp_worker to bring any external MCP agent in as a graded worker; or set_auto_mine so a cloud/mcp/local worker claims qualifying jobs by itself, several in parallel.',
+          '• browse_capabilities lists real hireable skills from the ClawHub directory you could wire in as workers.',
         ].join('\n'),
         tools: [
           '🧰 TOOL CHEATSHEET',
           'Setup: list_my_agents · create_worker_agent · mint_test_usdc',
           'Hire: plan_delegation → confirm_delegation → delegation_status → get_delegation_output',
           'Earn: browse_open_jobs → claim_job → submit_work → my_work',
+          'Hands-off earning: connect_mcp_worker (bring any MCP agent) · set_auto_mine (N-slot auto-claim) · browse_capabilities (ClawHub directory)',
           'Trust: get_work_proof (signed authorship+grade certificate, IPFS content id)',
           'DeFi sandbox: vault_status · quote_credit_line (GIWA-style collateral vault, live on Sepolia)',
           'Governance: governance · vote · set_auto_vote ($LEDGER, earned-not-bought)',
@@ -886,6 +941,108 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
         return `#${s.onchainJobId ?? '?'} · ${s.title.slice(0, 50)} · ${job?.status ?? '?'} · grading: ${grade} · agent: ${mine.get(s.workerAgentId!)?.name}`
       })
       return toolText(id, lines.join('\n'))
+    }
+
+    case 'connect_mcp_worker': {
+      const serverUrl = String(args.server_url ?? '').trim()
+      const toolName = String(args.tool_name ?? '').trim()
+      const authHeader = args.auth_header ? String(args.auth_header).trim() : undefined
+      if (!/^https:\/\//.test(serverUrl)) return toolText(id, 'server_url must start with https://', true)
+      if (!toolName) return toolText(id, 'tool_name is required — the tool on that server that does the work.', true)
+
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.agent_id ? String(args.agent_id) : null
+      const wanted = args.agent_name ? String(args.agent_name) : null
+      const target = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress) ?? agents[0]
+      if (!target) {
+        return toolText(id, wantedId ? `No agent with id "${wantedId}".` : wanted ? `No agent named "${wanted}".` : 'No agents yet — create one with create_worker_agent first.', true)
+      }
+
+      // Best-effort capability probe so the matcher routes it the right jobs.
+      let capabilities: string[] | undefined
+      try {
+        const { probeMcpTool } = await import('@/lib/mcp-client')
+        const tool = await probeMcpTool({ serverUrl, toolName, authHeader })
+        if (tool) {
+          const { inferDeliverableKind, normalizeCapabilities } = await import('@/lib/artifacts')
+          capabilities = normalizeCapabilities([inferDeliverableKind(tool.name, tool.description ?? undefined)])
+        }
+      } catch (e) {
+        console.error('[mcp] connect_mcp_worker probe failed (non-fatal):', e)
+      }
+
+      const { generateWebhookSecret, encryptWebhookSecret } = await import('@/lib/webhook')
+      const { encryptSecret } = await import('@/lib/crypto')
+      await db
+        .update(agent)
+        .set({
+          runtimeType: 'mcp',
+          mcpServerUrl: serverUrl,
+          mcpToolName: toolName,
+          mcpAuthHeaderEnc: authHeader ? encryptSecret(authHeader) : null,
+          webhookSecretEnc: encryptWebhookSecret(generateWebhookSecret()),
+          ...(capabilities ? { capabilities } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(agent.id, target.id))
+
+      return toolText(
+        id,
+        `${target.name} is now an MCP worker → ${toolName} @ ${serverUrl}` +
+          (capabilities ? ` (detected capabilities: ${capabilities.join(', ')})` : ' (capability probe pending — defaults to text)') +
+          `. When it's dispatched a job the platform calls that server and grades the result. ` +
+          `Call set_auto_mine to have it claim jobs on its own.`,
+      )
+    }
+
+    case 'set_auto_mine': {
+      const enabled = args.enabled === undefined ? true : Boolean(args.enabled)
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.agent_id ? String(args.agent_id) : null
+      const wanted = args.agent_name ? String(args.agent_name) : null
+      const target = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress) ?? agents[0]
+      if (!target) {
+        return toolText(id, wantedId ? `No agent with id "${wantedId}".` : wanted ? `No agent named "${wanted}".` : 'No agents yet — create one with create_worker_agent first.', true)
+      }
+      await db.update(agent).set({ autoMine: enabled, updatedAt: new Date() }).where(eq(agent.id, target.id))
+
+      // Kick a sweep now so cloud/mcp workers start claiming immediately
+      // instead of waiting for someone to open the Jobs page.
+      if (enabled) {
+        after(async () => {
+          const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
+          await tickCloudAutoMineAgents(`${origin}/api/runtime/callback`).catch(() => {})
+        })
+      }
+
+      const runtimeNote =
+        target.runtimeType === 'cloud' || target.runtimeType === 'mcp'
+          ? ` It runs off this chat (${target.runtimeType}), so it will now claim and complete jobs on its own.`
+          : target.runtimeType === 'local'
+            ? ' Its local worker process claims jobs on its own poll loop.'
+            : ' Note: this agent only works inside this conversation, so auto-mine has no runtime to drive it — connect a cloud API key or an MCP worker (connect_mcp_worker) for hands-off mining.'
+      return toolText(id, `Auto-mine ${enabled ? 'ON' : 'off'} for ${target.name}.${enabled ? runtimeNote : ''}`)
+    }
+
+    case 'browse_capabilities': {
+      const limit = Math.max(1, Math.min(Number(args.limit ?? 15) || 15, 40))
+      const { listClawhubSkills } = await import('@/lib/clawhub')
+      const skills = await listClawhubSkills({ limit }).catch(() => [])
+      if (skills.length === 0) return toolText(id, 'No capabilities listed right now (directory unavailable or empty).')
+      const lines = skills.map((s) => {
+        const topics = s.topics?.length ? ` [${s.topics.slice(0, 4).join(', ')}]` : ''
+        const stats = s.installs || s.stars ? ` (${s.installs} installs · ${s.stars}★)` : ''
+        return `• ${s.name}${topics}${s.summary ? ` — ${s.summary.slice(0, 120)}` : ''}${stats}\n  ${s.url}`
+      })
+      return toolText(id, `Hireable capabilities (ClawHub):\n${lines.join('\n')}\n\nWire one in as a worker with connect_mcp_worker.`)
     }
 
     case 'governance': {
