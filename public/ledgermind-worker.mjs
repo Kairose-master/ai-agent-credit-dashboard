@@ -16,10 +16,17 @@
  *     --api-key sk-... --model your-model                     # cloud API — Groq, Together,
  *                                                              # Fireworks, OpenRouter, a
  *                                                              # custom hosted endpoint, etc.
+ *   node ledgermind-worker.mjs --token <TOKEN> --concurrency 3 # run up to 3 jobs at once
  *
  * --openai isn't "local-only" — it's any OpenAI-compatible /chat/completions
  * endpoint, on your machine or in the cloud. --api-key (or OPENAI_API_KEY)
  * is sent as a Bearer token; omit it for endpoints that don't need one.
+ *
+ * --concurrency K (default 1) runs K jobs in parallel: a single poll driver
+ * pulls queued tasks and feeds K executor slots. Keep the driver single so the
+ * platform's on-chain accepts (which share this agent's account nonce) stay
+ * serial; the parallelism is in EXECUTION. Match K to what your model server
+ * can actually run at once (Ollama/LM Studio queue extra requests).
  *
  * Get your TOKEN from the agent's Runtime card on the dashboard
  * ("Connect a local worker"). It bundles the agent id, its secret, and the
@@ -61,6 +68,9 @@ const OPENAI_BASE = flag('openai') // e.g. http://localhost:1234/v1 (LM Studio)
 const OLLAMA_BASE = (flag('ollama') ?? 'http://localhost:11434').replace(/\/+$/, '')
 const API_KEY = flag('api-key') ?? process.env.OPENAI_API_KEY ?? 'not-needed'
 const POLL_MS = 3000
+// How many jobs this worker runs in parallel. Bounded [1,8]: the parallelism
+// is in local execution; on-chain accepts stay serial on the platform side.
+const CONCURRENCY = Math.max(1, Math.min(parseInt(flag('concurrency') ?? '1', 10) || 1, 8))
 
 const SYSTEM_PROMPT =
   'You are an autonomous worker agent on the Ledgermind labor market. ' +
@@ -287,18 +297,31 @@ console.log(`[worker] model    ${MODEL} via ${OPENAI_BASE ? `OpenAI-compatible $
 
 await warmupModel()
 
-console.log(`[worker] polling every ${POLL_MS / 1000}s — Ctrl+C to stop\n`)
+console.log(
+  `[worker] polling every ${POLL_MS / 1000}s` +
+    (CONCURRENCY > 1 ? `, up to ${CONCURRENCY} jobs at once` : '') +
+    ` — Ctrl+C to stop\n`,
+)
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Single poll driver, K executor slots. The driver serialises polling (so the
+// platform's in-poll auto-mine — which does on-chain accepts sharing this
+// agent's account nonce — never runs concurrently with itself), then hands
+// each returned task to a free slot that runs it in the background. With
+// CONCURRENCY === 1 this behaves exactly like the old serial loop.
+let active = 0
 let consecutiveErrors = 0
 for (;;) {
+  if (active >= CONCURRENCY) {
+    await sleep(POLL_MS)
+    continue
+  }
+
+  let task
   try {
-    const { task } = await platformPost('/api/worker/poll', { agent_id: AGENT_ID })
+    ;({ task } = await platformPost('/api/worker/poll', { agent_id: AGENT_ID }))
     consecutiveErrors = 0
-    if (task) {
-      await runOne(task)
-    } else {
-      process.stdout.write('.')
-    }
   } catch (e) {
     consecutiveErrors += 1
     console.error(`\n[worker] poll failed (${consecutiveErrors}): ${e instanceof Error ? e.message : e}`)
@@ -306,6 +329,25 @@ for (;;) {
       console.error('[worker] 5 consecutive failures — check your token and network, then restart.')
       process.exit(1)
     }
+    await sleep(POLL_MS)
+    continue
   }
-  await new Promise((r) => setTimeout(r, POLL_MS))
+
+  if (task) {
+    active += 1
+    // Run in the background; free the slot when done. Never let one task's
+    // failure take down the loop — runOne already reports failures upstream.
+    runOne(task)
+      .catch((e) => console.error(`\n[worker] task ${task.task_id} crashed: ${e instanceof Error ? e.message : e}`))
+      .finally(() => {
+        active -= 1
+      })
+    // Slots free → poll again immediately to fill the next one; the poll's own
+    // network latency paces this, so it's not a busy-spin.
+    if (active < CONCURRENCY) continue
+    await sleep(POLL_MS)
+  } else {
+    process.stdout.write('.')
+    await sleep(POLL_MS)
+  }
 }

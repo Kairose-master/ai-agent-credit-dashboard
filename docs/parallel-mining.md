@@ -104,25 +104,41 @@ Tests: `tests/mining-scheduler.test.ts`, `tests/concurrency.test.ts`.
 
 ## Phase 2 — worker session pool (local true-parallel)
 
-Give the reference worker (and the desktop Rust worker) a **session manager**:
-pull a *batch* of queued tasks and run K concurrently instead of `runOne` →
-`sleep`. Off-chain execution is nonce-free, so K can be higher than the accept
-ceiling. Submits stay serial per agent (submit may be an on-chain tx). Adds a
-`--concurrency K` flag to `ledgermind-worker.mjs` and a slot count to the
-desktop miner. Server already supports it (Phase 1 fills the queue).
+**Headless reference worker: shipped.** `public/ledgermind-worker.mjs` gained
+`--concurrency K` (default 1, bounded [1,8]): a **single poll driver** feeds K
+executor slots. The driver stays single on purpose — the platform runs
+auto-mine *inside* the poll, and its on-chain accepts share the agent's account
+nonce, so concurrent polls would mean concurrent accepts (nonce collision). The
+parallelism is in **execution**: the driver pulls the (phase-1) N queued tasks
+one per poll and runs them in the background, filling slots as they free.
+Required **no server change** — the poll's atomic `queued→running` claim already
+prevents any task running twice. `--concurrency 1` is byte-for-byte the old loop.
+
+**Remaining:** the desktop (Tauri/Rust) miner has its own loop and still runs one
+task at a time — give it the same single-driver / K-slot pool + a slot-count UI.
+Submits stay serial per agent (submit may be an on-chain tx).
 
 ## Phase 3 — durable block queue + real scheduler
 
-Today background progress needs either a running local worker's 3s poll or a
+Background progress used to need either a running local worker's 3s poll or a
 human loading a page; the only owned scheduler is a **daily** Vercel cron (plus
-an optional 5-min GitHub Action), and it does **not** run auto-mine. Phase 3:
+an optional 5-min GitHub Action), and it did **not** run auto-mine.
+
+**Phase 3a — self-ticking mining: shipped.** The cron heartbeat
+(`app/api/cron/settle`) now calls `tickCloudAutoMineAgents` after settlement, so
+cloud auto-mine agents claim work every heartbeat (~5 min via the GitHub Action)
+regardless of page traffic — no human, no local worker required. The sweep is
+the phase-1 bounded-parallel one (distinct accounts → nonce-safe). (Local agents
+still need their worker running to *execute* accepted jobs — cron only fills the
+queue; that's inherent to "the machine must be there to do the work".)
+
+**Phase 3b — durable queue + shared snapshot (remaining):**
 
 - A `mining_block` table (or generalise `agent_tasks`) as a durable queue with
   a lease + heartbeat renewal for long blocks (extend the 90s TTL model).
-- A short-interval heartbeat that fans agents out with `mapLimit` and shares a
-  single `readJobs()` snapshot across the batch (the cron already passes one
-  `jobs` array into `tickDelegation` — generalise that to kill RPC read
-  amplification).
+- Share a single `readJobs()` snapshot across the whole sweep (the cron already
+  passes one `jobs` array into `tickDelegation` — generalise that to kill RPC
+  read amplification when many agents tick at once).
 - Drive delegation's wave scheduler from the same parallel tick instead of the
   current serial, opportunistic ticks.
 
