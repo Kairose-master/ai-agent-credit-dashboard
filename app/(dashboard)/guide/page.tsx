@@ -17,6 +17,9 @@ import {
   ChevronDown,
   ArrowRight,
   ShieldCheck,
+  Copy,
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react'
 import { getGuideProgress } from '@/app/actions/guide'
 import { useI18n } from '@/lib/i18n'
@@ -44,6 +47,131 @@ const STEPS: {
   { key: 's7', icon: Briefcase, href: '/jobs', doneWhen: (p) => p.hasCompletedJob },
   { key: 's8', icon: Fingerprint, href: '/profile', doneWhen: (p) => p.hasErc8004 },
 ]
+
+const MCP_URL = 'https://ai-agent-credit-dashboard.vercel.app/api/mcp'
+
+/**
+ * The interactive "connect your assistant" step — the fastest way in (the Hire
+ * front door). Inline copy of the MCP URL, one-click opens to each client's
+ * connector settings, three concrete sub-steps, and a locally-persisted
+ * "connected" toggle so returning users see it checked off.
+ */
+function ConnectAssistantCard() {
+  const { t } = useI18n()
+  const [copied, setCopied] = useState(false)
+  const [connected, setConnected] = useState(false)
+
+  useEffect(() => {
+    try {
+      setConnected(localStorage.getItem('guide-assistant-connected') === '1')
+    } catch {
+      /* private mode */
+    }
+  }, [])
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(MCP_URL).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const toggleConnected = () => {
+    const next = !connected
+    setConnected(next)
+    try {
+      localStorage.setItem('guide-assistant-connected', next ? '1' : '0')
+    } catch {
+      /* private mode */
+    }
+  }
+
+  const openClient = (tag: 'claude' | 'chatgpt') => {
+    copy()
+    window.open(
+      tag === 'claude' ? 'https://claude.ai/settings/connectors' : 'https://chatgpt.com',
+      '_blank',
+      'noopener,noreferrer',
+    )
+  }
+
+  return (
+    <div
+      className={`rounded-xl border p-5 transition-colors ${
+        connected ? 'border-success/40 bg-success/5' : 'border-primary/40 bg-primary/5'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        {connected ? (
+          <CheckCircle2 className="size-5 text-success" />
+        ) : (
+          <Sparkles className="size-5 text-primary" />
+        )}
+        <h3 className="font-bold">{t('guide.connect.title')}</h3>
+        <span className="ml-auto rounded-md bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+          {t('guide.connect.badge')}
+        </span>
+      </div>
+      <p className="mt-1.5 text-sm text-muted-foreground">{t('guide.connect.subtitle')}</p>
+
+      {/* Connector URL + copy */}
+      <p className="mt-4 text-xs font-medium text-muted-foreground">{t('guide.connect.urlLabel')}</p>
+      <div className="mt-1.5 flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-md bg-secondary/60 px-3 py-2 font-mono text-sm">{MCP_URL}</code>
+        <button
+          onClick={copy}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+        >
+          <Copy className="size-3.5" /> {copied ? t('guide.connect.copied') : t('guide.connect.copy')}
+        </button>
+      </div>
+
+      {/* One-click opens */}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={() => openClient('claude')}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-secondary"
+        >
+          {t('guide.connect.openClaude')} <ExternalLink className="size-3.5" />
+        </button>
+        <button
+          onClick={() => openClient('chatgpt')}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-secondary"
+        >
+          {t('guide.connect.openChatgpt')} <ExternalLink className="size-3.5" />
+        </button>
+      </div>
+
+      {/* Sub-steps */}
+      <ol className="mt-4 space-y-2 text-sm text-muted-foreground">
+        {['step1', 'step2', 'step3'].map((s, i) => (
+          <li key={s} className="flex gap-2.5">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold text-foreground">
+              {i + 1}
+            </span>
+            <span>{t(`guide.connect.${s}`)}</span>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-4 rounded-md border border-border bg-background/60 p-3 text-sm">
+        <span className="text-muted-foreground">{t('guide.connect.tryLabel')} </span>
+        <span className="font-medium">{t('guide.connect.tryExample')}</span>
+      </div>
+
+      <button
+        onClick={toggleConnected}
+        className={`mt-4 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${
+          connected
+            ? 'bg-success/15 text-success hover:bg-success/25'
+            : 'border border-border hover:bg-secondary'
+        }`}
+      >
+        {connected ? <CheckCircle2 className="size-4" /> : <Circle className="size-4" />}
+        {connected ? t('guide.connect.doneMsg') : t('guide.connect.mark')}
+      </button>
+    </div>
+  )
+}
 
 export default function GuidePage() {
   const { t } = useI18n()
@@ -89,6 +217,8 @@ export default function GuidePage() {
           />
         </div>
       </div>
+
+      <ConnectAssistantCard />
 
       <div className="space-y-2">
         {STEPS.map((step, i) => {
