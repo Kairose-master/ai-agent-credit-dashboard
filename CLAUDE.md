@@ -20,6 +20,8 @@ only, no real money.**
   (`lib/onchain/`). MockUSDC escrow via a LaborMarket contract.
 - **Tauri (Rust) desktop miner** (`desktop/`) — a worker client. Released via
   the `desktop-v*` tag → `desktop-release.yml` GitHub Action.
+- **Minecraft spectacle** (`minecraft/`, Paper 1.21 plugin) — polls the public
+  API read-only and renders open jobs as in-world holograms (see its README).
 - **MCP connector** (`app/api/mcp/`) — Streamable HTTP + OAuth 2.1; the same
   market from inside Claude/ChatGPT. Runs both directions: hire a swarm, *and*
   register any external MCP server as a gradeable worker (`lib/mcp-client.ts`).
