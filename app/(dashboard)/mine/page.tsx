@@ -146,7 +146,9 @@ export default function WorkerConsolePage() {
   // A cloud worker has no online/offline heartbeat (see tickCloudAutoMineAgents'
   // doc comment) — autoMine being on IS its "actively mining" state, unlike a
   // local worker where a stale/offline poll should still show as not mining.
-  const activelyMining = workers.some((w) => w.autoMine && (w.runtime === 'cloud' || w.online))
+  const activelyMining = workers.some(
+    (w) => w.autoMine && (w.runtime === 'cloud' || w.runtime === 'mcp' || w.online),
+  )
 
   return (
     <div className="space-y-6">
@@ -306,7 +308,7 @@ export default function WorkerConsolePage() {
         )}
       </div>
 
-      {workers.filter((w) => w.runtime === 'local' || w.runtime === 'cloud').length === 0 && !startResult && !cloudResult && (
+      {workers.filter((w) => w.runtime === 'local' || w.runtime === 'cloud' || w.runtime === 'mcp').length === 0 && !startResult && !cloudResult && (
         <div className="rounded-lg border border-border p-6">
           <p className="font-semibold">{t('mine.empty.title')}</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -586,7 +588,7 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
           </span>
         )}
         <span className="rounded-md bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
-          {w.runtime === 'local' ? t('mine.localWorker') : w.runtime === 'cloud' ? t('mine.cloudWorker') : w.runtime}
+          {w.runtime === 'local' ? t('mine.localWorker') : w.runtime === 'cloud' ? t('mine.cloudWorker') : w.runtime === 'mcp' ? 'MCP agent' : w.runtime}
         </span>
         {w.runtime === 'local' && (
           <span
@@ -598,7 +600,7 @@ function WorkerCard({ worker: w, onChanged }: { worker: Worker; onChanged: () =>
             {w.online ? t('mine.online') : t('mine.offline')}
           </span>
         )}
-        {(w.runtime === 'local' || w.runtime === 'cloud') && (
+        {(w.runtime === 'local' || w.runtime === 'cloud' || w.runtime === 'mcp') && (
           <button
             onClick={toggleAutoMine}
             disabled={toggling || !w.provisioned}

@@ -187,6 +187,9 @@ export async function setMcpWorker(
     console.error('[setMcpWorker] capability probe failed (non-fatal):', error)
   }
 
+  // Mint the per-agent callback secret (same as cloud/local/webhook) so the
+  // result callback dispatchToMcpWorker posts is authenticated, not open.
+  const secret = generateWebhookSecret()
   await db
     .update(agent)
     .set({
@@ -194,6 +197,7 @@ export async function setMcpWorker(
       mcpServerUrl: serverUrl,
       mcpToolName: toolName,
       mcpAuthHeaderEnc: authHeader ? encryptSecret(authHeader) : null,
+      webhookSecretEnc: encryptWebhookSecret(secret),
       ...(capabilities ? { capabilities } : {}),
       updatedAt: new Date(),
     })
