@@ -30,6 +30,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { acceptAndDispatchJob, dispatchAcceptedJob, JOB_CLAIM_TTL_MS } from '@/lib/labor-dispatch'
 import { logPlatformEvent } from '@/lib/platform-feed'
 import { mapLimit } from '@/lib/concurrency'
+import type { OnchainJob } from '@/lib/onchain/labor'
 import {
   selectMiningBlocks,
   freeMiningSlots,
@@ -43,7 +44,11 @@ type AgentRow = typeof agentTable.$inferSelect
 export async function autoMineTick(
   agent: AgentRow,
   callbackUrl: string,
-  opts?: { maxSlots?: number },
+  // opts.jobs lets a cross-agent sweep pass ONE shared on-chain snapshot so N
+  // agents don't each call readJobs() (RPC amplification). Selection tolerates
+  // a slightly stale snapshot — the atomic claim + on-chain accept re-check
+  // catch anything taken since (the loser just tries the next block).
+  opts?: { maxSlots?: number; jobs?: OnchainJob[] },
 ): Promise<boolean> {
   if (!agent.autoMine || !agent.smartAccountAddress) return false
 
@@ -58,8 +63,13 @@ export async function autoMineTick(
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
   if (!isLaborMarketConfigured()) return false
 
-  const { readJobs } = await import('@/lib/onchain/labor')
-  const jobs = await readJobs().catch(() => [])
+  let jobs: OnchainJob[]
+  if (opts?.jobs) {
+    jobs = opts.jobs // shared snapshot from the sweep — one read for all agents
+  } else {
+    const { readJobs } = await import('@/lib/onchain/labor')
+    jobs = await readJobs().catch(() => [])
+  }
   const myAddress = agent.smartAccountAddress.toLowerCase()
   let didWork = false
 
@@ -166,11 +176,20 @@ export async function tickCloudAutoMineAgents(callbackUrl: string): Promise<void
     .select()
     .from(agent)
     .where(and(inArray(agent.runtimeType, ['cloud', 'mcp']), eq(agent.autoMine, true)))
+  if (candidates.length === 0) return
+
+  // ONE on-chain read shared across the whole sweep (phase 3b) — otherwise N
+  // agents each call readJobs(), multiplying RPC load exactly when many agents
+  // mine at once. Each tick still re-reads freshly inside acceptAndDispatchJob
+  // before spending gas, so a stale snapshot can't cause a bad accept.
+  const { readJobs } = await import('@/lib/onchain/labor')
+  const jobs = await readJobs().catch(() => [])
+
   // Fan out across agents — each is a distinct smart account, so their
   // on-chain accepts don't share a nonce and are safe to run concurrently.
   // Bounded so a big roster can't stampede a free-tier bundler/RPC.
   await mapLimit(candidates, resolveSweepConcurrency(), (a) =>
-    autoMineTick(a, callbackUrl).catch((error) => {
+    autoMineTick(a, callbackUrl, { jobs }).catch((error) => {
       console.error(`[auto-mine] cloud sweep tick failed for ${a.id}:`, error)
       return false
     }),

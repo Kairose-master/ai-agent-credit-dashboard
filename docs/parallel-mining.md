@@ -137,15 +137,25 @@ the phase-1 bounded-parallel one (distinct accounts → nonce-safe). (Local agen
 still need their worker running to *execute* accepted jobs — cron only fills the
 queue; that's inherent to "the machine must be there to do the work".)
 
-**Phase 3b — durable queue + shared snapshot (remaining):**
+**Phase 3b — shared snapshot: shipped.** `tickCloudAutoMineAgents` now does a
+single `readJobs()` and passes that one on-chain snapshot to every agent's tick
+(`autoMineTick(agent, cb, { jobs })`), instead of each of N agents calling
+`readJobs()` itself — killing the RPC amplification that would bite exactly when
+many agents mine at once. Selection tolerates a slightly stale snapshot because
+`acceptAndDispatchJob` still re-reads freshly before spending gas and the atomic
+claim catches anything taken since (the loser just tries the next block).
 
-- A `mining_block` table (or generalise `agent_tasks`) as a durable queue with
-  a lease + heartbeat renewal for long blocks (extend the 90s TTL model).
-- Share a single `readJobs()` snapshot across the whole sweep (the cron already
-  passes one `jobs` array into `tickDelegation` — generalise that to kill RPC
-  read amplification when many agents tick at once).
-- Drive delegation's wave scheduler from the same parallel tick instead of the
-  current serial, opportunistic ticks.
+**Deliberately NOT built — a `mining_block` durable-queue table.** It would
+duplicate state we already have: on-chain jobs are the source of truth, the
+`job_specs` claim lease (90s TTL) already handles double-claim + crash recovery,
+and `agent_tasks` + its 30-min reaper already handle execution durability. A
+separate queue table would be redundant bookkeeping to keep in sync, not a new
+capability — and tick *cadence* is set by the scheduler (GitHub Action ~5 min /
+Vercel cron), which a table wouldn't change. So this bullet is intentionally
+closed as "not needed", not deferred.
+
+**Still open — unify delegation's wave scheduler onto the same parallel tick**
+(today it's ticked serially and opportunistically). Independent of the above.
 
 ## Phase 4 — delegation as first-class parallel blocks
 
