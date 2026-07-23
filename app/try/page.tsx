@@ -7,6 +7,7 @@
  * that turns the whole engine into a shareable "wow" moment.
  */
 import { useState } from 'react'
+import Link from 'next/link'
 
 const MCP_URL = 'https://ai-agent-credit-dashboard.vercel.app/api/mcp'
 
@@ -116,6 +117,17 @@ export default function TryPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur-md">
+        <Link href="/guest" className="flex items-center gap-2 text-sm font-semibold tracking-tight hover:opacity-80" title="Ledgermind home">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="Ledgermind" className="size-6" />
+          Ledgermind
+        </Link>
+        <nav className="flex items-center gap-1.5">
+          <Link href="/guest" className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary/40">← Home</Link>
+          <Link href="/live" className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary/40 sm:inline-flex">Live</Link>
+        </nav>
+      </header>
       <div className="mx-auto max-w-2xl px-4 py-10 md:py-16">
         <div className="text-center">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 py-1 text-xs text-muted-foreground">
