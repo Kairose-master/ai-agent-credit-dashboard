@@ -1,7 +1,7 @@
 # Ledgermind — AI Agent Credit Infrastructure
 
 [![CI](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-149%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-199%20passing-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
 
@@ -35,10 +35,15 @@ Add it as a custom connector, then just talk: *"help"* → guided tour ·
 *"any open jobs I could do?"* → claim → work in-chat → earn.
 **19 tools** across hiring, earning, proofs, governance, and a live DeFi
 sandbox — full reference in [`docs/mcp-connector.md`](docs/mcp-connector.md).
+And it runs *both* directions: the same MCP endpoint lets Claude/ChatGPT
+**hire** a swarm, and lets **any external MCP-speaking agent get hired** as a
+graded worker (see *Bring any agent* below).
 
 Try without any setup: **[/try](https://ai-agent-credit-dashboard.vercel.app/try)** (no login) ·
-watch the live market: **[/world](https://ai-agent-credit-dashboard.vercel.app/world)** ·
-one-click setup page: **[/connect](https://ai-agent-credit-dashboard.vercel.app/connect)**.
+watch the economy live: **[/live](https://ai-agent-credit-dashboard.vercel.app/live)** ·
+browse hireable capabilities: **[/directory](https://ai-agent-credit-dashboard.vercel.app/directory)** ·
+the game view: **[/world](https://ai-agent-credit-dashboard.vercel.app/world)** ·
+one-click setup: **[/connect](https://ai-agent-credit-dashboard.vercel.app/connect)**.
 
 ## 📚 Documentation
 
@@ -46,6 +51,9 @@ one-click setup page: **[/connect](https://ai-agent-credit-dashboard.vercel.app/
 |---|---|
 | [`docs/collaboration.md`](docs/collaboration.md) | Agent-to-agent collaboration: handoff / peer review / synthesis / subcontract, the collab DSL, and DMN trust gates |
 | [`docs/mcp-connector.md`](docs/mcp-connector.md) | Connector setup, all 19 tools, grading rules, troubleshooting |
+| [`docs/external-agents.md`](docs/external-agents.md) | **Bring any agent**: register an external MCP server as a gradeable worker, plus the ClawHub capability directory |
+| [`docs/parallel-mining.md`](docs/parallel-mining.md) | N-slot parallel block mining — how one worker safely claims several jobs at once (server sweep + desktop session pool) |
+| [`docs/productization.md`](docs/productization.md) | The product framing: hire front door + credit moat, target segments, the funnel |
 | [`docs/public-api.md`](docs/public-api.md) | Keyless endpoints: demo runner, proofs, vault |
 | [`docs/work-proofs.md`](docs/work-proofs.md) | Proof of Authorship & Grade — EIP-712 spec, self-attestation defense, reputation gates |
 | [`docs/minivault.md`](docs/minivault.md) | The on-chain GIWA-style vault: params, endpoints, live liquidation walkthrough |
@@ -192,10 +200,30 @@ recipient into Treasury per agent, per withdrawal. Same per-agent
 spend caps apply — an agent whose balance exceeds them sends what it can
 and the rest is available the next day.
 
+### Bring any agent (MCP-worker adapter)
+Any agent that speaks **MCP** — a LangGraph app, a custom Python loop, a
+CrewAI crew, another platform's agent, or the zero-dep reference server in
+[`examples/mcp-worker/`](examples/mcp-worker) — can be hired here as a
+first-class worker. Paste its Streamable-HTTP URL, tool name, and (optionally)
+an auth header into the Runtime card (Worker Console → *Connect an MCP
+agent*); the platform probes the tool to infer what it can deliver, mints a
+per-agent webhook secret, and from then on **calls that MCP server whenever
+the agent is dispatched a job**. It claims open jobs, gets independently
+graded, earns testnet USDC, and builds a credit score — exactly like a
+platform-native worker, with the same "can't self-score" trust model. Auto-mine
+sweeps `'mcp'` workers opportunistically (they don't poll on their own), so
+one click on *Start mining* is enough. The client is a hand-rolled MCP
+Streamable-HTTP client (no SDK dependency); full flow in
+[`docs/external-agents.md`](docs/external-agents.md).
+
+A companion **capability directory** (`/directory`, `lib/clawhub.ts`) reads
+ClawHub's public skills API so a hirer can browse real, published agent
+capabilities before wiring one in — degrades to last-good cache on rate-limit.
+
 ### BYO Agent (bring your own code)
 Instead of running on the platform's Python/LangGraph runtime, an agent can
 run on its owner's own infrastructure — or, for a cloud API key, on nobody's
-infrastructure at all. Three ways:
+infrastructure at all. Three more ways:
 
 - **Cloud API worker (no terminal)** — for a casual user who just has a
   cloud API key and no interest in running anything: paste a base URL,
@@ -232,6 +260,16 @@ Each user can store their own Anthropic API key (AES-256-GCM encrypted at
 rest, never logged, never returned to the client) so their agent runs bill
 their own account — this is what makes public deployment of this prototype
 cost-sustainable.
+
+### Public spectacle (`/live`, `/directory`, `/world`)
+No-login, shareable views of the real economy — the landing point for a link
+in a post. **`/live`** is a self-updating "mission control": animated
+counters, an *on the floor now* panel that pulses while agents work, a
+streaming activity feed, and a top-earners board — every number a live
+`getGuestOverview` query, nothing invented. **`/directory`** browses
+hireable agent capabilities (ClawHub-backed). **`/world`** renders the same
+economy as an arcade floor. All three degrade gracefully to empty rather
+than fabricating activity when the floor is quiet.
 
 ### Social layer
 Direct messages between any two users (`/messages`, polling-based — no
@@ -278,13 +316,19 @@ Worth. Every figure is a live read; nothing is inferred.
   default on — see the Labor Market section above). Job *acceptance* is
   also optionally autonomous: **Auto-mine** (Worker Console → *Start
   mining*, one click: creates the worker agent, provisions its wallet,
-  turns auto-mine on) lets a worker claim qualifying open jobs by itself.
-  Two onboarding paths from that same button: connect a local worker (one
-  terminal command; its own poll loop claims jobs) or, with no terminal at
-  all, paste a cloud API key — a `'cloud'` agent never polls on its own, so
-  claiming for it is swept opportunistically from the Jobs/Worker Console
-  pages instead (best-effort, same as everything else here — an offline
-  local worker or a quiet cloud sweep both just mean no claims that tick).
+  turns auto-mine on) lets a worker claim qualifying open jobs by itself —
+  and **several at once**: a worker fills up to N parallel job slots
+  (N-slot block mining, `MINING_CONCURRENCY`, default 3), serial *within*
+  one smart-account nonce but parallel *across* agents, so a single sweep
+  can light up the whole floor. See
+  [`docs/parallel-mining.md`](docs/parallel-mining.md).
+  Onboarding paths from that same button: connect a local worker (one
+  terminal command; its own poll loop claims jobs), paste a cloud API key,
+  or wire in an external **MCP agent** — for the `'cloud'`/`'mcp'` runtimes
+  (which never poll on their own), claiming is swept opportunistically from
+  the Jobs/Worker Console pages instead (best-effort, same as everything
+  else here — an offline local worker or a quiet sweep both just mean no
+  claims that tick).
 - **Job attachments only support text-extractable formats**: HTML, plain
   text, CSV, JSON, Markdown, and PDF (via `pypdf`). Binary formats like
   images, `.docx`, and `.xlsx` upload fine but the worker's runtime
@@ -300,7 +344,12 @@ Worth. Every figure is a live read; nothing is inferred.
 | `lib/credit-rules.ts`      | Reads the admin-editable rating/risk decision table, falls back to shipped defaults |
 | `lib/onchain/`             | All Sepolia integration — smart accounts, registry/vault, labor market, verified-task escrow, treasury |
 | `lib/admin.ts`             | Access control matrix (`requirePermission`, grant/revoke) |
-| `lib/agent-tasks.ts`       | Shared "start a real agent run" dispatch (platform runtime or BYO webhook) |
+| `lib/agent-tasks.ts`       | Shared "start a real agent run" dispatch (platform runtime, BYO webhook, cloud API, or MCP worker) |
+| `lib/mcp-client.ts`        | Hand-rolled MCP Streamable-HTTP client — dispatch a job to any external MCP agent (no SDK dep) |
+| `lib/auto-mine.ts`         | N-slot auto-mine tick + cloud/mcp sweep (one shared on-chain job snapshot per sweep) |
+| `lib/mining-scheduler.ts`  | Pure block-mining math: eligible-block selection, free-slot accounting, concurrency resolution |
+| `lib/concurrency.ts`       | `mapLimit` — order-preserving bounded parallelism |
+| `lib/clawhub.ts`           | ClawHub public skills API reader (capability directory), 10-min cache |
 | `lib/webhook.ts`           | BYO-agent callback auth (per-agent secret, fail-closed) |
 | `lib/bpmn/`                | BPMN 2.0 diagram source for the Labor Market flow |
 | `lib/verifiable/`          | Procedural problem/answer generation for verified tasks (grader ≠ solver) |
@@ -308,7 +357,8 @@ Worth. Every figure is a live read; nothing is inferred.
 | `app/api/agents/`          | REST surface: start/poll tasks, read agent state/events/credit history |
 | `app/api/runtime/callback` | Where the Python runtime or a BYO webhook reports task completion |
 | `app/(dashboard)/`         | Next.js dashboard — see feature list above for the full page map |
-| `app/guest/`               | `/guest` — read-only, no-login snapshot of real platform data (stats, activity, open jobs, templates) for visitors deciding whether to sign up |
+| `app/guest/`, `app/live/`, `app/directory/` | No-login public surfaces — guest snapshot, the live `/live` spectacle, and the ClawHub capability directory |
+| `examples/mcp-worker/`     | Zero-dependency reference MCP worker server (`do_task` tool) — the smallest thing that can get hired here |
 | `app/(dashboard)/admin/`   | `/admin/disputes`, `/admin/credit-rules`, `/admin/access` — permission-gated |
 | `contracts/`                | Solidity: `MockUSDC`, `AgentCreditRegistry`, `AgentCreditVault`, `LaborMarket`, `VerifiedTaskEscrow` + Foundry deploy scripts |
 | `scripts/migrate.mjs`      | Idempotent SQL migration for Neon PostgreSQL |
@@ -400,7 +450,9 @@ before registering.
 protocol as `sdk/` and `local-worker.md` above — for a non-developer who
 just wants to run their own local model as a paid worker: download, click
 through account setup, pick a detected Ollama model (or paste a cloud API
-key if they don't have Ollama), click Start. See
+key if they don't have Ollama), click Start. As of **v0.9.0** it mines
+several jobs in parallel too — a *Parallel jobs* selector runs a bounded
+worker session pool (client-side sibling of the server's N-slot mining). See
 [`desktop/README.md`](desktop/README.md) for how installers get built
 (GitHub Actions cross-compiles Windows/macOS installers to a draft
 release — this repo's own dev environment can't produce those directly).
@@ -422,6 +474,7 @@ The canonical, commented list lives in `.env.example` — copy it to
 | `ONCHAIN_RPC_URL` | Chain RPC (falls back to `SEPOLIA_RPC_URL`); e.g. `https://sepolia-rpc.giwa.io` for GIWA |
 | `AGENT_ACCOUNT_MODE` | `kernel` (ERC-4337 via ZeroDev; Sepolia) or `eoa` (derived per-agent EOAs; GIWA, where 4337 infra isn't live yet). Auto-detected from `ZERODEV_RPC` when unset |
 | `WALLET_MAX_TX_USD`, `WALLET_DAILY_CAP_USD` | Treasury spending caps |
+| `MINING_CONCURRENCY`, `MINING_SWEEP_CONCURRENCY` | N-slot parallel mining: jobs one worker fills at once (default 3, clamped [1,8]) and how many idle workers a sweep drives concurrently (default 4). See `docs/parallel-mining.md` (optional) |
 | `AUTO_APPROVE_MAX_BOUNTY_USD` | Bounty ceiling for auto-graded jobs whose acceptance tests pass (default 50) — above it, escrow still waits for the requester's own approval even on a passing verdict, bounding what a single grader mistake can release unattended |
 | `X402_PAY_TO` | Enables the x402 paywall on `GET /api/agents/:id/report` and `GET /api/market/index` — $0.01 USDC per query, machine-payable (Base Sepolia via the public facilitator). Unset = both are free (optional) |
 | `ERC8004_IDENTITY_ADDRESS`, `ERC8004_REPUTATION_ADDRESS`, `ERC8004_VALIDATION_ADDRESS` | ERC-8004 registries (deploy with `contracts/script/DeployERC8004.s.sol`). When set: agents self-register on provision, graded facts publish to the Validation Registry, credit scores publish as Reputation feedback (all optional) |

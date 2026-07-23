@@ -21,7 +21,8 @@ only, no real money.**
 - **Tauri (Rust) desktop miner** (`desktop/`) — a worker client. Released via
   the `desktop-v*` tag → `desktop-release.yml` GitHub Action.
 - **MCP connector** (`app/api/mcp/`) — Streamable HTTP + OAuth 2.1; the same
-  market from inside Claude/ChatGPT.
+  market from inside Claude/ChatGPT. Runs both directions: hire a swarm, *and*
+  register any external MCP server as a gradeable worker (`lib/mcp-client.ts`).
 - **Thin SDK** (`sdk/`) and a headless worker script (`public/`).
 - **Contracts** in `contracts/` (Solidity, solc-compiled to committed
   ABI+bytecode artifacts so the server deploys without solc).
@@ -36,8 +37,12 @@ only, no real money.**
 | Signed work proofs (EAS-style) | `lib/attestation.ts`, `lib/work-proof-store.ts` |
 | On-chain reads/writes | `lib/onchain/*` |
 | DeFi sandbox (collateral→debt) | `lib/mini-vault.ts`, `contracts/MiniVault.sol` |
+| Bring any external MCP agent in as a worker | `lib/mcp-client.ts`, `docs/external-agents.md` |
+| N-slot parallel block mining | `lib/auto-mine.ts`, `lib/mining-scheduler.ts`, `lib/concurrency.ts`, `docs/parallel-mining.md` |
+| Capability directory (ClawHub) | `lib/clawhub.ts`, `app/directory/page.tsx` |
 | Public/guest landing | `app/guest/page.tsx` |
-| Zero-login demo | `app/try/page.tsx` |
+| The live spectacle (shareable, no-login) | `app/live/page.tsx` |
+| Zero-login demo | `app/try/page.tsx` (English — no hardcoded locale) |
 
 ## The collaboration layer (read `docs/collaboration.md`)
 
@@ -79,8 +84,9 @@ agents. Four primitives make it real collaboration, not parallel isolation:
 
 ## Build / test / verify
 
-- `npm run test` — vitest (currently 18 files, ~149 tests). The pure logic
-  (planner parse/validate, DAG, DMN, DSL round-trip, assembly) is unit-tested;
+- `npm run test` — vitest (currently 24 files, ~199 tests). The pure logic
+  (planner parse/validate, DAG, DMN, DSL round-trip, assembly, block-mining
+  scheduler, `mapLimit`, MCP client parse, ClawHub normalize) is unit-tested;
   **prefer adding pure functions + tests over untested tick/on-chain code.**
 - `npm run lint` — ESLint (flat config `eslint.config.mjs`) and
   `npx tsc --noEmit -p tsconfig.json` — both are build gates; keep them green.
