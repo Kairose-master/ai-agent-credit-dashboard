@@ -6,13 +6,14 @@ mod protocol;
 use protocol::{ModelBackend, RegisterRequest, RegisterResponse};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 const DEFAULT_PLATFORM_URL: &str = "https://ai-agent-credit-dashboard.vercel.app";
 const POLL_INTERVAL_SECS: u64 = 4;
+const MINING_CONCURRENCY: u64 = 1;
 
 /// Whether the system tray was successfully created — decides if closing
 /// the window hides to tray (true) or actually quits (false).
@@ -80,6 +81,10 @@ struct AppState {
     // it faster (down to a floor) as 💎 accrue from real completed jobs, so
     // buying reflexes genuinely makes the worker grab real jobs sooner.
     poll_interval: Arc<AtomicU64>,
+    // How many jobs to run at once. A single poll driver feeds this many
+    // executor slots (see run_mining_loop); polling stays serial so the
+    // platform's in-poll on-chain accepts don't collide on this agent's nonce.
+    concurrency: Arc<AtomicU64>,
 }
 
 impl Default for AppState {
@@ -88,6 +93,7 @@ impl Default for AppState {
             mining_flag: Arc::new(AtomicBool::new(false)),
             is_mining: Mutex::new(false),
             poll_interval: Arc::new(AtomicU64::new(POLL_INTERVAL_SECS)),
+            concurrency: Arc::new(AtomicU64::new(MINING_CONCURRENCY)),
         }
     }
 }
@@ -308,6 +314,22 @@ fn set_poll_interval(secs: u64, state: State<'_, AppState>) -> u64 {
     clamped
 }
 
+/// How many jobs the miner runs at once. Bounded [1,4] — the parallelism is in
+/// local execution; the platform still accepts jobs serially per agent. Takes
+/// effect on the next poll, no restart needed.
+#[tauri::command]
+fn set_concurrency(slots: u64, state: State<'_, AppState>) -> u64 {
+    let clamped = slots.clamp(1, 4);
+    state.concurrency.store(clamped, Ordering::Relaxed);
+    clamped
+}
+
+/// Current concurrency, so the UI can render the right initial value.
+#[tauri::command]
+fn get_concurrency(state: State<'_, AppState>) -> u64 {
+    state.concurrency.load(Ordering::Relaxed)
+}
+
 async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: ModelBackend, flag: Arc<AtomicBool>) {
     emit_event(&app, MiningEvent::Log { line: format!("Warming up {}…", backend.label()) });
     emit_event(&app, MiningEvent::Status { state: "warming".into(), tasks_completed: 0, tasks_failed: 0 });
@@ -329,114 +351,57 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
 
     emit_event(&app, MiningEvent::Log { line: "Model is warm. Polling for work…".into() });
 
-    let mut completed: u32 = 0;
-    let mut failed: u32 = 0;
+    let completed = Arc::new(AtomicU32::new(0));
+    let failed = Arc::new(AtomicU32::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    // Cheaply cloneable handles for the spawned executors (they outlive this
+    // stack frame, so they can't borrow `agent`/`backend`).
+    let agent = Arc::new(agent);
+    let backend = Arc::new(backend);
     let mut consecutive_errors: u32 = 0;
 
+    // Single poll driver, N executor slots. Polling stays serial so the
+    // platform's in-poll on-chain accept (which shares this agent's account
+    // nonce) never runs concurrently with itself — the parallelism is in
+    // EXECUTING claimed tasks. concurrency == 1 reproduces the old loop.
     while flag.load(Ordering::SeqCst) {
-        emit_event(&app, MiningEvent::Status { state: "polling".into(), tasks_completed: completed, tasks_failed: failed });
+        let slots = app.state::<AppState>().concurrency.load(Ordering::Relaxed).max(1) as usize;
+        emit_event(&app, MiningEvent::Status {
+            state: if active.load(Ordering::SeqCst) > 0 { "running".into() } else { "polling".into() },
+            tasks_completed: completed.load(Ordering::Relaxed),
+            tasks_failed: failed.load(Ordering::Relaxed),
+        });
 
+        if active.load(Ordering::SeqCst) >= slots {
+            sleep_cancellable(&flag, 1).await; // all slots busy — wait a beat
+            continue;
+        }
+
+        let wait = app.state::<AppState>().poll_interval.load(Ordering::Relaxed).max(1);
         match protocol::poll(&agent.platform_url, &agent.agent_id, &agent.secret).await {
             Ok(Some(task)) => {
                 consecutive_errors = 0;
-                emit_event(
-                    &app,
-                    MiningEvent::Log {
-                        line: format!("Task {}: {}…", task.task_id, task.task.lines().next().unwrap_or("").chars().take(100).collect::<String>()),
-                    },
-                );
-                emit_event(&app, MiningEvent::Status { state: "running".into(), tasks_completed: completed, tasks_failed: failed });
-
-                let started = std::time::Instant::now();
-                // Image-deliverable tasks (only routed here when image
-                // mining declared the capability) go to the generation
-                // API; everything else goes to the chat model.
-                // Read the current lane-model choices each poll so changing
-                // the image model / audio voice takes effect without a restart.
-                let lane_cfg = load_stored_config(&app);
-                let img_model = lane_cfg.image_model.clone();
-                let aud_voice = lane_cfg.audio_voice.clone();
-                let (success, output, artifacts) = if task.deliverable_kind == "image" {
-                    match protocol::generate_image(&task.task, img_model.as_deref()).await {
-                        Ok((mime, data_base64)) => (
-                            true,
-                            "Generated image attached (desktop miner, prompt derived from the task spec).".to_string(),
-                            vec![protocol::Artifact {
-                                name: if mime.ends_with("png") { "deliverable.png".into() } else { "deliverable.jpg".into() },
-                                mime,
-                                data_base64,
-                            }],
-                        ),
-                        Err(e) => (false, format!("Image generation failed: {e}"), vec![]),
-                    }
-                } else if task.deliverable_kind == "audio" {
-                    match protocol::generate_audio(&task.task, aud_voice.as_deref()).await {
-                        Ok((mime, data_base64)) => (
-                            true,
-                            "Narration audio attached (desktop miner, text-to-speech of the task script).".to_string(),
-                            vec![protocol::Artifact { name: "deliverable.mp3".into(), mime, data_base64 }],
-                        ),
-                        Err(e) => (false, format!("Audio generation failed: {e}"), vec![]),
-                    }
-                } else {
-                    match protocol::ask_model(&backend, &task.task).await {
-                        Ok(text) if !text.trim().is_empty() => (true, text, vec![]),
-                        Ok(_) => (false, "Local model returned empty output".to_string(), vec![]),
-                        Err(e) => (false, format!("Local worker error: {e}"), vec![]),
-                    }
-                };
-                let elapsed = started.elapsed().as_secs();
-
-                match protocol::submit_result(&agent.platform_url, &agent.agent_id, &agent.secret, &task.task_id, success, &output, elapsed, &artifacts).await {
-                    Ok(resp) => {
-                        if success {
-                            completed += 1;
-                            emit_event(&app, MiningEvent::Log { line: format!("Done in {elapsed}s — result submitted.") });
-                            // The callback grades synchronously and returns the verdict, so the
-                            // log can show what actually happened to the money instead of stopping
-                            // at "submitted". grading is null for jobs that need manual requester
-                            // review (no automatic grader) or non-labor-market tasks.
-                            let grading = resp.get("grading");
-                            match grading.and_then(|g| g.get("settled")).and_then(|s| s.as_str()) {
-                                Some("paid") => {
-                                    emit_event(&app, MiningEvent::Log { line: "✅ 채점 통과 — 정산 완료(지급됨).".into() });
-                                    notify(&app, "Ledgermind Miner", "채점 통과 — 대금이 지급됐어요.");
-                                }
-                                Some("refunded") => {
-                                    let reason = grading
-                                        .and_then(|g| g.get("reason"))
-                                        .and_then(|r| r.as_str())
-                                        .map(|r| r.chars().take(200).collect::<String>())
-                                        .unwrap_or_default();
-                                    let line = if reason.is_empty() {
-                                        "❌ 채점 실패 — 요청자에게 환불(지급 없음).".to_string()
-                                    } else {
-                                        format!("❌ 채점 실패 — 요청자에게 환불(지급 없음). 사유: {reason}")
-                                    };
-                                    emit_event(&app, MiningEvent::Log { line });
-                                    notify(&app, "Ledgermind Miner", "채점 실패로 환불됐어요 — 지급 없음. 로그에서 사유를 확인하세요.");
-                                }
-                                Some("manual") => {
-                                    emit_event(&app, MiningEvent::Log { line: "⏳ 자동 채점 없음 — 요청자 수동 검토 대기 중.".into() });
-                                }
-                                _ => {
-                                    // No grading verdict (non-labor-market task, or grader unavailable).
-                                    notify(&app, "Ledgermind Miner", &format!("Task completed and submitted ({completed} this session) — independent grading decides the payout."));
-                                }
-                            }
-                        } else {
-                            failed += 1;
-                            emit_event(&app, MiningEvent::Log { line: format!("FAILED: {output}") });
-                            notify(&app, "Ledgermind Miner", "A task failed — see the log for details.");
-                        }
-                    }
-                    Err(e) => {
-                        failed += 1;
-                        emit_event(&app, MiningEvent::Log { line: format!("Could not submit result: {e}") });
-                    }
+                active.fetch_add(1, Ordering::SeqCst);
+                let app_c = app.clone();
+                let agent_c = agent.clone();
+                let backend_c = backend.clone();
+                let completed_c = completed.clone();
+                let failed_c = failed.clone();
+                let active_c = active.clone();
+                tokio::spawn(async move {
+                    run_one_task(&app_c, &agent_c, &backend_c, task, &completed_c, &failed_c).await;
+                    active_c.fetch_sub(1, Ordering::SeqCst);
+                });
+                // Slots free → poll again immediately to fill the next one (the
+                // poll's own latency paces it). Otherwise pace by poll_interval.
+                if active.load(Ordering::SeqCst) < slots {
+                    continue;
                 }
+                sleep_cancellable(&flag, wait).await;
             }
-            Ok(None) => { /* nothing queued — quiet, next tick */ }
+            Ok(None) => {
+                sleep_cancellable(&flag, wait).await; // nothing queued — quiet, next tick
+            }
             Err(e) => {
                 consecutive_errors += 1;
                 emit_event(&app, MiningEvent::Log { line: format!("Poll failed ({consecutive_errors}): {e}") });
@@ -448,21 +413,137 @@ async fn run_mining_loop(app: tauri::AppHandle, agent: AgentConfig, backend: Mod
                     notify(&app, "Ledgermind Miner", "Mining stopped after repeated connection failures — open the app to restart.");
                     break;
                 }
+                sleep_cancellable(&flag, wait).await;
             }
-        }
-
-        let wait = app.state::<AppState>().poll_interval.load(Ordering::Relaxed).max(1);
-        for _ in 0..wait {
-            if !flag.load(Ordering::SeqCst) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     }
 
-    emit_event(&app, MiningEvent::Status { state: "stopped".into(), tasks_completed: completed, tasks_failed: failed });
+    // A claimed task always submits: let any in-flight executors finish.
+    while active.load(Ordering::SeqCst) > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+
+    emit_event(&app, MiningEvent::Status {
+        state: "stopped".into(),
+        tasks_completed: completed.load(Ordering::Relaxed),
+        tasks_failed: failed.load(Ordering::Relaxed),
+    });
     emit_event(&app, MiningEvent::Log { line: "Mining stopped.".into() });
     *app.state::<AppState>().is_mining.lock().await = false;
+}
+
+/// Sleep `secs` seconds, bailing early if mining was cancelled.
+async fn sleep_cancellable(flag: &Arc<AtomicBool>, secs: u64) {
+    for _ in 0..secs.max(1) {
+        if !flag.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+/// Run one claimed task to completion: do the work (image / audio / text),
+/// submit the result, and surface the grading verdict. Updates the shared
+/// session counters. Spawned per task, so several run concurrently.
+async fn run_one_task(
+    app: &tauri::AppHandle,
+    agent: &AgentConfig,
+    backend: &ModelBackend,
+    task: protocol::PolledTask,
+    completed: &Arc<AtomicU32>,
+    failed: &Arc<AtomicU32>,
+) {
+    emit_event(
+        app,
+        MiningEvent::Log {
+            line: format!("Task {}: {}…", task.task_id, task.task.lines().next().unwrap_or("").chars().take(100).collect::<String>()),
+        },
+    );
+
+    let started = std::time::Instant::now();
+    // Image-deliverable tasks (routed here only when image mining declared the
+    // capability) go to the generation API; everything else to the chat model.
+    // Read the lane-model choices per task so changing the image model / audio
+    // voice takes effect without a restart.
+    let lane_cfg = load_stored_config(app);
+    let img_model = lane_cfg.image_model.clone();
+    let aud_voice = lane_cfg.audio_voice.clone();
+    let (success, output, artifacts) = if task.deliverable_kind == "image" {
+        match protocol::generate_image(&task.task, img_model.as_deref()).await {
+            Ok((mime, data_base64)) => (
+                true,
+                "Generated image attached (desktop miner, prompt derived from the task spec).".to_string(),
+                vec![protocol::Artifact {
+                    name: if mime.ends_with("png") { "deliverable.png".into() } else { "deliverable.jpg".into() },
+                    mime,
+                    data_base64,
+                }],
+            ),
+            Err(e) => (false, format!("Image generation failed: {e}"), vec![]),
+        }
+    } else if task.deliverable_kind == "audio" {
+        match protocol::generate_audio(&task.task, aud_voice.as_deref()).await {
+            Ok((mime, data_base64)) => (
+                true,
+                "Narration audio attached (desktop miner, text-to-speech of the task script).".to_string(),
+                vec![protocol::Artifact { name: "deliverable.mp3".into(), mime, data_base64 }],
+            ),
+            Err(e) => (false, format!("Audio generation failed: {e}"), vec![]),
+        }
+    } else {
+        match protocol::ask_model(backend, &task.task).await {
+            Ok(text) if !text.trim().is_empty() => (true, text, vec![]),
+            Ok(_) => (false, "Local model returned empty output".to_string(), vec![]),
+            Err(e) => (false, format!("Local worker error: {e}"), vec![]),
+        }
+    };
+    let elapsed = started.elapsed().as_secs();
+
+    match protocol::submit_result(&agent.platform_url, &agent.agent_id, &agent.secret, &task.task_id, success, &output, elapsed, &artifacts).await {
+        Ok(resp) => {
+            if success {
+                let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                emit_event(app, MiningEvent::Log { line: format!("Done in {elapsed}s — result submitted.") });
+                // The callback grades synchronously and returns the verdict, so
+                // the log shows what happened to the money, not just "submitted".
+                let grading = resp.get("grading");
+                match grading.and_then(|g| g.get("settled")).and_then(|s| s.as_str()) {
+                    Some("paid") => {
+                        emit_event(app, MiningEvent::Log { line: "✅ 채점 통과 — 정산 완료(지급됨).".into() });
+                        notify(app, "Ledgermind Miner", "채점 통과 — 대금이 지급됐어요.");
+                    }
+                    Some("refunded") => {
+                        let reason = grading
+                            .and_then(|g| g.get("reason"))
+                            .and_then(|r| r.as_str())
+                            .map(|r| r.chars().take(200).collect::<String>())
+                            .unwrap_or_default();
+                        let line = if reason.is_empty() {
+                            "❌ 채점 실패 — 요청자에게 환불(지급 없음).".to_string()
+                        } else {
+                            format!("❌ 채점 실패 — 요청자에게 환불(지급 없음). 사유: {reason}")
+                        };
+                        emit_event(app, MiningEvent::Log { line });
+                        notify(app, "Ledgermind Miner", "채점 실패로 환불됐어요 — 지급 없음. 로그에서 사유를 확인하세요.");
+                    }
+                    Some("manual") => {
+                        emit_event(app, MiningEvent::Log { line: "⏳ 자동 채점 없음 — 요청자 수동 검토 대기 중.".into() });
+                    }
+                    _ => {
+                        notify(app, "Ledgermind Miner", &format!("Task completed and submitted ({done} this session) — independent grading decides the payout."));
+                    }
+                }
+            } else {
+                failed.fetch_add(1, Ordering::Relaxed);
+                emit_event(app, MiningEvent::Log { line: format!("FAILED: {output}") });
+                notify(app, "Ledgermind Miner", "A task failed — see the log for details.");
+            }
+        }
+        Err(e) => {
+            failed.fetch_add(1, Ordering::Relaxed);
+            emit_event(app, MiningEvent::Log { line: format!("Could not submit result: {e}") });
+        }
+    }
 }
 
 /** Public credit stats for the configured agent — score/rating for the
@@ -548,6 +629,8 @@ fn main() {
             start_mining,
             stop_mining,
             set_poll_interval,
+            set_concurrency,
+            get_concurrency,
             get_wallet,
             withdraw_earnings,
             get_agent_card,

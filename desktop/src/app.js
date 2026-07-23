@@ -60,6 +60,7 @@ const KO = {
   'mine.imageToggle': '🖼️ 이미지 일감도 채굴 (무료 생성 API — 경쟁 적고 보수 좋은 레인)',
   'mine.audioToggle': '🔊 오디오 일감도 채굴 (무료 TTS — 스크립트를 읽어 음성 생성, 음성인식으로 채점)',
   'mine.imageModel': '이미지 모델',
+  'mine.concurrency': '동시 작업 수',
   'mine.audioVoice': '음성 / 언어',
   'mine.default': '기본',
   'connect.title': '🔗 Claude / ChatGPT에서 Ledgermind 쓰기',
@@ -1738,6 +1739,19 @@ function initMiningView() {
 
   document.getElementById('image-model-select').addEventListener('change', saveLaneModels)
   document.getElementById('audio-voice-select').addEventListener('change', saveLaneModels)
+
+  // Parallel jobs — how many tasks the miner runs at once (single poll driver,
+  // N executor slots on the Rust side). Reflect the stored value, then persist
+  // changes; takes effect on the next poll, no restart needed.
+  const concSel = document.getElementById('concurrency-select')
+  if (concSel) {
+    invoke('get_concurrency').then((n) => { concSel.value = String(n) }).catch(() => {})
+    concSel.addEventListener('change', () => {
+      invoke('set_concurrency', { slots: Number(concSel.value) })
+        .then((applied) => { concSel.value = String(applied) })
+        .catch((e) => appendLog(`Setting parallel jobs failed: ${e}`))
+    })
+  }
 
   document.getElementById('connect-open-btn').addEventListener('click', async () => {
     try {

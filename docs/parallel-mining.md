@@ -114,9 +114,14 @@ one per poll and runs them in the background, filling slots as they free.
 Required **no server change** — the poll's atomic `queued→running` claim already
 prevents any task running twice. `--concurrency 1` is byte-for-byte the old loop.
 
-**Remaining:** the desktop (Tauri/Rust) miner has its own loop and still runs one
-task at a time — give it the same single-driver / K-slot pool + a slot-count UI.
-Submits stay serial per agent (submit may be an on-chain tx).
+**Desktop miner (Tauri/Rust): shipped (v0.9.0).** `run_mining_loop` was split
+into a single poll driver + a spawned `run_one_task` executor, bounded by a
+`concurrency` slot count (AppState + `set_concurrency`/`get_concurrency`
+commands, clamped [1,4]) with a "Parallel jobs" selector in the miner UI. Same
+rule as the headless worker: the driver polls serially (in-poll accepts share
+the account nonce), the parallelism is in execution; a claimed task always
+submits (the shutdown path drains in-flight executors). concurrency == 1 is the
+old serial loop.
 
 ## Phase 3 — durable block queue + real scheduler
 

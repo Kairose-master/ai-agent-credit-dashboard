@@ -124,6 +124,17 @@
           <button id="stop-btn" data-i18n="mine.stop" hidden>Stop mining</button>
         </div>
 
+        <div class="lane-model" id="concurrency-row">
+          <label><span data-i18n="mine.concurrency">Parallel jobs</span>
+            <select id="concurrency-select">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </label>
+        </div>
+
         <label class="toggle-row">
           <input type="checkbox" id="image-mining-toggle" />
           <span data-i18n="mine.imageToggle">🖼️ Also mine image jobs (free generation API — scarcer, better-paying lane)</span>
