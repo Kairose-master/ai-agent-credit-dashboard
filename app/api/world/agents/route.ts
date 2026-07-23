@@ -33,6 +33,8 @@ export async function GET(request: Request): Promise<Response> {
       name: agent.name,
       creditScore: agent.creditScore,
       creditRating: agent.creditRating,
+      totalCreditLine: agent.totalCreditLine,
+      availableCredit: agent.availableCredit,
     })
     .from(agent)
     .orderBy(desc(agent.creditScore))
@@ -71,6 +73,9 @@ export async function GET(request: Request): Promise<Response> {
       creditRating: r.creditRating ?? 'unrated',
       jobsDone: byAgent.get(r.id)?.jobs ?? 0,
       earnedUsd: Number(byAgent.get(r.id)?.earned ?? 0),
+      // Outstanding credit drawn = line issued − still available. Same figures
+      // /world already shows; lets a visualizer picture an agent's debt.
+      drawnUsd: Math.max(0, Number(r.totalCreditLine ?? 0) - Number(r.availableCredit ?? 0)),
     })),
   })
 }
