@@ -46,7 +46,14 @@ function parse(slug: string, raw: string): Omit<Scenario, 'minutes'> {
     if (l.startsWith('#')) break
     summaryLines.push(l)
   }
-  return { slug, title, summary: summaryLines.join(' '), body: raw }
+  // Strip inline markdown so the card summary reads as plain prose.
+  const summary = summaryLines
+    .join(' ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → text
+    .replace(/`([^`]+)`/g, '$1') // inline code
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+    .replace(/\*([^*]+)\*/g, '$1') // italic
+  return { slug, title, summary, body: raw }
 }
 
 export function listScenarios(): Scenario[] {
