@@ -84,6 +84,21 @@ export async function GET(request: Request) {
     report.faucet = String(e)
   }
 
+  // Drive cloud auto-mine agents from the heartbeat too. A cloud agent never
+  // polls (the platform dispatches TO it), so without this it only mined when
+  // a human happened to load a page. Now it self-ticks every heartbeat — the
+  // sweep fans out across agents in bounded parallel (phase 1); each is a
+  // distinct smart account, so their on-chain accepts are nonce-safe.
+  try {
+    const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
+    const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
+    const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host
+    await tickCloudAutoMineAgents(`${proto}://${host}/api/runtime/callback`)
+    report.cloudMining = 'ok'
+  } catch (e) {
+    report.cloudMining = String(e)
+  }
+
   // Let trusted agents cast their owners' governance votes on open
   // proposals. Best-effort (LLM-backed); never fails the heartbeat.
   try {
