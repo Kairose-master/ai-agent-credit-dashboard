@@ -1292,153 +1292,149 @@ function RuntimeCard({ agentId }: { agentId: string }) {
         )}
       </div>
 
-      {runtimeType === 'webhook' && !editing ? (
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => setEditing(true)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
-            {t('profile.runtime.editUrl')}
-          </button>
-          <button onClick={switchToPlatform} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
-            {t('profile.runtime.switchBack')}
-          </button>
-        </div>
-      ) : runtimeType === 'local' ? (
-        <div className="flex flex-wrap gap-2">
-          <button onClick={connectLocal} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
-            {t('profile.runtime.regenerateCommand')}
-          </button>
-          <button onClick={switchToPlatform} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
-            {t('profile.runtime.switchBack')}
-          </button>
-        </div>
-      ) : runtimeType === 'cloud' && !showCloudForm ? (
-        <div className="flex flex-wrap gap-2">
+      {/* Runtime switcher — every option is reachable from every state, so you
+          can't get stuck. Before, a 'local' agent only offered "regenerate" and
+          "switch back to platform"; there was no direct path to a cloud key, so
+          disconnecting a local worker stranded you off the cloud runtime. Now all
+          three targets are always one click away, with the active one highlighted. */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={connectLocal}
+          disabled={busy}
+          title={t('profile.runtime.localModelsHint')}
+          className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+            runtimeType === 'local' ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border hover:bg-secondary'
+          }`}
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
+          {runtimeType === 'local' ? t('profile.runtime.regenerateCommand') : t('profile.runtime.connectLocal')}
+        </button>
+        <button
+          onClick={() => {
+            setCloudUrlInput(cloudBaseUrl || '')
+            setCloudModelInput(cloudModel || '')
+            setEditing(false)
+            setShowCloudForm(true)
+          }}
+          disabled={busy}
+          title={t('profile.runtime.cloudApiHint')}
+          className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+            runtimeType === 'cloud' ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border hover:bg-secondary'
+          }`}
+        >
+          <Cloud className="size-4" />
+          {runtimeType === 'cloud' ? t('profile.runtime.changeCloud') : t('profile.runtime.connectCloud')}
+        </button>
+        <button
+          onClick={() => {
+            setUrlInput(webhookUrl || '')
+            setShowCloudForm(false)
+            setEditing(true)
+          }}
+          disabled={busy}
+          className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+            runtimeType === 'webhook' ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border hover:bg-secondary'
+          }`}
+        >
+          <Webhook className="size-4" />
+          {runtimeType === 'webhook' ? t('profile.runtime.editUrl') : t('profile.runtime.byoWebhook')}
+        </button>
+        {runtimeType !== 'platform' && (
           <button
             onClick={() => {
-              setCloudUrlInput(cloudBaseUrl)
-              setCloudModelInput(cloudModel)
-              setShowCloudForm(true)
+              setShowCloudForm(false)
+              setEditing(false)
+              if (runtimeType === 'cloud') disconnectCloud()
+              else switchToPlatform()
             }}
-            className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-secondary disabled:opacity-50"
           >
-            {t('profile.runtime.changeCloud')}
-          </button>
-          <button onClick={disconnectCloud} disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary disabled:opacity-50">
             {t('profile.runtime.switchBack')}
           </button>
-        </div>
-      ) : (
-        (editing || runtimeType === 'platform' || showCloudForm) && (
-          <div className="space-y-3">
-            {!editing && !showCloudForm && (
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={connectLocal}
-                  disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                >
-                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Bot className="size-4" />}
-                  {t('profile.runtime.connectLocal')}
-                </button>
-                <span className="text-xs text-muted-foreground">{t('profile.runtime.localModelsHint')}</span>
-              </div>
-            )}
-            {!editing && !showCloudForm && (
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setShowCloudForm(true)}
-                  disabled={busy}
-                  className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-                >
-                  <Cloud className="size-4" />
-                  {t('profile.runtime.connectCloud')}
-                </button>
-                <span className="text-xs text-muted-foreground">{t('profile.runtime.cloudApiHint')}</span>
-              </div>
-            )}
+        )}
+      </div>
 
-            {showCloudForm ? (
-              <div className="space-y-2 rounded-md border border-border p-3">
-                <div className="flex flex-wrap gap-1.5">
-                  {CLOUD_PRESETS.map((p) => (
-                    <button
-                      key={p.label}
-                      type="button"
-                      onClick={() => {
-                        setCloudUrlInput(p.baseUrl)
-                        setCloudModelInput(p.model)
-                      }}
-                      className="rounded-md border border-border px-2 py-1 text-xs hover:bg-secondary"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  value={cloudUrlInput}
-                  onChange={(e) => setCloudUrlInput(e.target.value)}
-                  placeholder="https://api.groq.com/openai/v1"
-                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                  disabled={busy}
-                />
-                <input
-                  value={cloudModelInput}
-                  onChange={(e) => setCloudModelInput(e.target.value)}
-                  placeholder={t('profile.runtime.cloudModelPlaceholder')}
-                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                  disabled={busy}
-                />
-                <input
-                  type="password"
-                  value={cloudKeyInput}
-                  onChange={(e) => setCloudKeyInput(e.target.value)}
-                  placeholder={t('profile.runtime.cloudApiKeyPlaceholder')}
-                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                  disabled={busy}
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={connectCloud}
-                    disabled={busy || !cloudUrlInput.trim() || !cloudModelInput.trim() || !cloudKeyInput.trim()}
-                    className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-                  >
-                    {busy ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />}
-                    {t('profile.runtime.connect')}
-                  </button>
-                  <button
-                    onClick={() => setShowCloudForm(false)}
-                    className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
-                  >
-                    {t('profile.runtime.cancel')}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">{t('profile.runtime.cloudApiKeyNote')}</p>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="https://your-server.example.com/agent"
-                  className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
-                  disabled={busy}
-                />
-                <button
-                  onClick={saveUrl}
-                  disabled={busy || !urlInput.trim()}
-                  className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-                >
-                  {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
-                  {t('profile.runtime.useWebhook')}
-                </button>
-                {editing && (
-                  <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
-                    {t('profile.runtime.cancel')}
-                  </button>
-                )}
-              </div>
-            )}
+      {showCloudForm && (
+        <div className="mt-3 space-y-2 rounded-md border border-border p-3">
+          <div className="flex flex-wrap gap-1.5">
+            {CLOUD_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => {
+                  setCloudUrlInput(p.baseUrl)
+                  setCloudModelInput(p.model)
+                }}
+                className="rounded-md border border-border px-2 py-1 text-xs hover:bg-secondary"
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-        )
+          <input
+            value={cloudUrlInput}
+            onChange={(e) => setCloudUrlInput(e.target.value)}
+            placeholder="https://api.groq.com/openai/v1"
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <input
+            value={cloudModelInput}
+            onChange={(e) => setCloudModelInput(e.target.value)}
+            placeholder={t('profile.runtime.cloudModelPlaceholder')}
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <input
+            type="password"
+            value={cloudKeyInput}
+            onChange={(e) => setCloudKeyInput(e.target.value)}
+            placeholder={t('profile.runtime.cloudApiKeyPlaceholder')}
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={connectCloud}
+              disabled={busy || !cloudUrlInput.trim() || !cloudModelInput.trim() || !cloudKeyInput.trim()}
+              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />}
+              {t('profile.runtime.connect')}
+            </button>
+            <button
+              onClick={() => setShowCloudForm(false)}
+              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary"
+            >
+              {t('profile.runtime.cancel')}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">{t('profile.runtime.cloudApiKeyNote')}</p>
+        </div>
+      )}
+
+      {editing && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            placeholder="https://your-server.example.com/agent"
+            className="h-9 w-80 rounded-md border border-border bg-background px-3 text-sm"
+            disabled={busy}
+          />
+          <button
+            onClick={saveUrl}
+            disabled={busy || !urlInput.trim()}
+            className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Webhook className="size-4" />}
+            {t('profile.runtime.useWebhook')}
+          </button>
+          <button onClick={() => setEditing(false)} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-secondary">
+            {t('profile.runtime.cancel')}
+          </button>
+        </div>
       )}
 
       {localCommand && (

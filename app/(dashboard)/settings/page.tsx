@@ -9,6 +9,7 @@ import {
   removeOpenAiKey,
 } from '@/app/actions/settings'
 import { updateDisplayName, changePassword } from '@/app/actions/account'
+import { CLOUD_PRESETS } from '@/lib/cloud-providers'
 import { useI18n } from '@/lib/i18n'
 
 export default function SettingsPage() {
@@ -198,6 +199,21 @@ function OpenAiKeyCard() {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap gap-1.5">
+            {CLOUD_PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => {
+                  setBaseUrl(p.baseUrl)
+                  setModel(p.model)
+                }}
+                className="rounded-md border border-border px-2 py-1 text-xs hover:bg-secondary"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <input
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}

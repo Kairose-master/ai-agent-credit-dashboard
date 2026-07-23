@@ -148,9 +148,15 @@ export async function resolveLlm(userId: string): Promise<CompleteFn> {
   if (openai) {
     return async (system, userMsg, maxTokens) => {
       const res = await withRetry(async () => {
-        const r = await fetch(`${openai.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        const oaBase = openai.baseUrl.replace(/\/+$/, '')
+        const oaHeaders: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${openai.apiKey}` }
+        if (/openrouter\.ai/i.test(oaBase)) {
+          oaHeaders['HTTP-Referer'] = 'https://ai-agent-credit-dashboard.vercel.app'
+          oaHeaders['X-Title'] = 'Ledgermind'
+        }
+        const r = await fetch(`${oaBase}/chat/completions`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openai.apiKey}` },
+          headers: oaHeaders,
           body: JSON.stringify({
             model: openai.model,
             max_tokens: maxTokens,

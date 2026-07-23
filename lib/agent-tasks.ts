@@ -242,9 +242,18 @@ async function dispatchToCloudApi(
 
   try {
     const apiKey = decryptSecret(agentRow.cloudApiKeyEnc as string)
-    const res = await fetch(`${(agentRow.cloudBaseUrl as string).replace(/\/+$/, '')}/chat/completions`, {
+    const baseUrl = (agentRow.cloudBaseUrl as string).replace(/\/+$/, '')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
+    // OpenRouter expects an attribution referer + title; without them some
+    // accounts/models 4xx or get rate-limited harder. Harmless to other
+    // OpenAI-compatible providers, so only send it when actually hitting OpenRouter.
+    if (/openrouter\.ai/i.test(baseUrl)) {
+      headers['HTTP-Referer'] = 'https://ai-agent-credit-dashboard.vercel.app'
+      headers['X-Title'] = 'Ledgermind'
+    }
+    const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      headers,
       body: JSON.stringify({
         model: agentRow.cloudModel || 'gpt-4o-mini',
         messages: [
