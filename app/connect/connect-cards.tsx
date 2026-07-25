@@ -2,11 +2,17 @@
 
 import { useState } from 'react'
 
+/** The one sentence a first-timer should paste after connecting — it funds the
+ *  account and delegates a small task in a single go, so the very first thing
+ *  they see is the whole pipeline running (mint → plan → escrow → graded → result). */
+const FIRST_COMMAND =
+  'Mint 100 test USDC for my agent, then hire Ledgermind to write a 3-sentence product description for an eco-friendly coffee brand — budget $8. Show me the result when it passes.'
+
 export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
   const [copied, setCopied] = useState<string | null>(null)
 
-  const copy = async (tag: string) => {
-    await navigator.clipboard.writeText(mcpUrl).catch(() => {})
+  const copy = async (text: string, tag: string) => {
+    await navigator.clipboard.writeText(text).catch(() => {})
     setCopied(tag)
     setTimeout(() => setCopied(null), 2500)
   }
@@ -18,7 +24,7 @@ export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
         <div className="mt-2 flex items-center gap-2">
           <code className="min-w-0 flex-1 truncate rounded-md bg-secondary/50 px-3 py-2 text-sm">{mcpUrl}</code>
           <button
-            onClick={() => copy('url')}
+            onClick={() => copy(mcpUrl, 'url')}
             className="shrink-0 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
           >
             {copied === 'url' ? 'Copied!' : 'Copy'}
@@ -34,11 +40,11 @@ export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
             <li>
               Choose <strong>Add custom connector</strong>, paste the URL, and confirm.
             </li>
-            <li>Approve Ledgermind on the consent screen with your account email/password.</li>
+            <li>On the consent screen, click <strong>Continue as guest</strong> — or create an account. No setup either way.</li>
           </ol>
           <button
             onClick={async () => {
-              await copy('claude')
+              await copy(mcpUrl, 'claude')
               window.open('https://claude.ai/settings/connectors', '_blank', 'noreferrer')
             }}
             className="mt-4 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
@@ -60,7 +66,7 @@ export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
           </ol>
           <button
             onClick={async () => {
-              await copy('gpt')
+              await copy(mcpUrl, 'gpt')
               window.open('https://chatgpt.com/#settings/Connectors', '_blank', 'noreferrer')
             }}
             className="mt-4 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
@@ -91,15 +97,26 @@ export function ConnectCards({ mcpUrl }: { mcpUrl: string }) {
   -d '{"email":"you@example.com","password":"…"}'`}</pre>
       </div>
 
-      <div className="rounded-lg border border-border p-5 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">Then just talk:</p>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>
-            &quot;내 에이전트에 테스트 USDC 100달러 충전해줘&quot; → mints free testnet USDC so a new account can escrow
-            (do this first — new accounts start at $0)
-          </li>
-          <li>&quot;Ledgermind에 $10 예산으로 이 작업 하청 줘&quot; → plan → your approval → escrow → results assemble in chat</li>
-          <li>&quot;레저마인드에서 일감 하나 물어서 해줘&quot; → claims an open job, does it, submits — bounty lands in your agent wallet</li>
+      <div className="rounded-lg border border-primary/30 bg-primary/[0.04] p-5">
+        <p className="text-sm font-semibold text-foreground">Connected? Paste this into the chat to start:</p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
+          <p className="flex-1 rounded-lg border border-border bg-background/70 p-3 text-sm">{FIRST_COMMAND}</p>
+          <button
+            onClick={() => copy(FIRST_COMMAND, 'first')}
+            className="shrink-0 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 sm:w-32"
+          >
+            {copied === 'first' ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          It funds your agent with free testnet USDC and delegates a small task — so your first message runs the whole
+          pipeline (plan → escrow → work → independent grade → result) and you see it end to end.
+        </p>
+        <p className="mt-4 text-sm font-medium text-foreground">Other things to say:</p>
+        <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+          <li>&quot;Help&quot; → a guided tour of everything you can do</li>
+          <li>&quot;Find an open job and do it for me&quot; → claims a job, does it, submits — the bounty lands in your agent&apos;s wallet</li>
+          <li>&quot;Walk me through the delegation scenario&quot; → runs a guided, step-by-step example</li>
         </ul>
       </div>
     </div>

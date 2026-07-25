@@ -27,6 +27,7 @@ import {
   Vote,
   Gamepad2,
   Boxes,
+  ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getShellStatus } from "@/app/actions/shell"
@@ -73,23 +74,29 @@ function SupportCard() {
   )
 }
 
-const nav = [
+// The essentials a first-timer needs — the rest is folded into "Advanced"
+// (collapsed by default) so a new/guest user isn't hit with 16 items. Nothing
+// is removed; the door is just narrower.
+const coreNav = [
   { labelKey: "nav.dashboard", href: "/", icon: LayoutDashboard },
   { labelKey: "nav.guide", href: "/guide", icon: BookOpen },
   { labelKey: "nav.agents", href: "/agents", icon: Bot },
-  { labelKey: "nav.creditScores", href: "/credit-scores", icon: Gauge },
-  { labelKey: "nav.transactions", href: "/transactions", icon: ArrowLeftRight },
-  { labelKey: "nav.messages", href: "/messages", icon: MessageSquare },
   { labelKey: "nav.laborMarket", href: "/jobs", icon: Briefcase },
   { labelKey: "nav.delegate", href: "/delegate", icon: GitBranch },
   { labelKey: "nav.workerConsole", href: "/mine", icon: Pickaxe },
+  { labelKey: "nav.settings", href: "/settings", icon: Settings },
+]
+
+const advancedNav = [
+  { labelKey: "nav.creditScores", href: "/credit-scores", icon: Gauge },
+  { labelKey: "nav.transactions", href: "/transactions", icon: ArrowLeftRight },
+  { labelKey: "nav.messages", href: "/messages", icon: MessageSquare },
   { labelKey: "nav.provingGround", href: "/verify", icon: FlaskConical },
   { labelKey: "nav.riskAnalytics", href: "/risk", icon: ShieldAlert },
   { labelKey: "nav.insurance", href: "/insurance", icon: Umbrella },
   { labelKey: "nav.governance", href: "/governance", icon: Vote },
   { labelKey: "nav.world", href: "/world", icon: Gamepad2 },
   { labelKey: "nav.directory", href: "/directory", icon: Boxes },
-  { labelKey: "nav.settings", href: "/settings", icon: Settings },
 ]
 
 function Sidebar({
@@ -109,6 +116,32 @@ function Sidebar({
     .slice(0, 2)
     .toUpperCase()
 
+  // Advanced starts collapsed, but opens itself if the current page lives in it
+  // (so the active item is never hidden).
+  const [advOpen, setAdvOpen] = useState(() => advancedNav.some((i) => pathname.startsWith(i.href)))
+
+  const renderItem = (item: { labelKey: string; href: string; icon: typeof LayoutDashboard }) => {
+    const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
+    const Icon = item.icon
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        onClick={onNavigate}
+        className={cn(
+          "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+          active
+            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+            : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+        )}
+      >
+        <Icon className="size-4 shrink-0" />
+        {t(item.labelKey)}
+        {active && <span className="ml-auto size-1.5 rounded-full bg-primary" />}
+      </Link>
+    )
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-5">
@@ -124,27 +157,19 @@ function Sidebar({
         <p className="px-3 pb-1.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {t('shell.platform')}
         </p>
-        {nav.map((item) => {
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)
-          const Icon = item.icon
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onNavigate}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                active
-                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
-              )}
-            >
-              <Icon className="size-4 shrink-0" />
-              {t(item.labelKey)}
-              {active && <span className="ml-auto size-1.5 rounded-full bg-primary" />}
-            </Link>
-          )
-        })}
+        {coreNav.map(renderItem)}
+
+        <button
+          type="button"
+          onClick={() => setAdvOpen((o) => !o)}
+          className="mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          aria-expanded={advOpen}
+        >
+          <ChevronDown className={cn("size-4 shrink-0 transition-transform", advOpen ? "" : "-rotate-90")} />
+          Advanced
+          <span className="ml-auto text-[10px] text-muted-foreground">{advancedNav.length}</span>
+        </button>
+        {advOpen && advancedNav.map(renderItem)}
       </nav>
 
       <div className="border-t border-sidebar-border p-3">

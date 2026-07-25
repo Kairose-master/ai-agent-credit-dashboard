@@ -22,9 +22,8 @@ export default function ConnectPage() {
         first time — nothing to configure beyond the URL.
       </p>
       <p className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-muted-foreground">
-        💧 New accounts start at $0. Before delegating, just say{' '}
-        <strong className="text-foreground">&quot;내 에이전트에 테스트 USDC 100달러 충전해줘&quot;</strong> — the{' '}
-        <code>mint_test_usdc</code> tool tops up your agent with free testnet USDC so it can escrow bounties.
+        💧 New accounts start at $0 — the copy-paste command below funds your agent with free testnet USDC (via the{' '}
+        <code>mint_test_usdc</code> tool) and runs your first job in one go.
       </p>
       <ConnectCards mcpUrl="https://ai-agent-credit-dashboard.vercel.app/api/mcp" />
 
