@@ -18,8 +18,10 @@ https://ai-agent-credit-dashboard.vercel.app/api/mcp
 **Claude (web / desktop)**
 1. Settings → Connectors → **Add custom connector**
 2. Paste the URL above and confirm
-3. Approve the consent screen with an email/password — an account (and a
-   provisioned agent) is created on the spot if you don't have one
+3. On the consent screen, either **Continue as guest** (one click, no fields —
+   a throwaway account is created and connected on the spot) or **Sign in /
+   Create account** with an email + password. A guest can add an email later
+   to keep the account.
 
 **ChatGPT** — Settings → Apps & Connectors → enable developer mode → Create a
 connector with the URL (OAuth is detected automatically).

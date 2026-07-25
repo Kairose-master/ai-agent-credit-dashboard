@@ -16,6 +16,7 @@ export function AuthorizeForm({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [authMode, setAuthMode] = useState<'signin' | 'create'>('signin')
 
   const deny = () => {
     const target = new URL(fields.redirect_uri)
@@ -55,11 +56,43 @@ export function AuthorizeForm({
       </ul>
 
       {sessionEmail ? (
-        <p className="text-sm">
-          Approving as <strong>{sessionEmail}</strong>
-        </p>
+        <>
+          <p className="text-sm">
+            Approving as <strong>{sessionEmail}</strong>
+          </p>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? 'Connecting…' : 'Approve'}
+            </button>
+            <button type="button" onClick={deny} className="rounded-md border border-border px-4 py-2 text-sm">
+              Deny
+            </button>
+          </div>
+        </>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
+          {/* Sign in vs. create — a tab pair; the clicked submit button carries
+              the mode, so no hidden field is needed. */}
+          <div className="flex rounded-md border border-border p-0.5 text-sm">
+            {(['signin', 'create'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setAuthMode(m)}
+                className={`flex-1 rounded px-3 py-1.5 font-medium transition ${
+                  authMode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary'
+                }`}
+              >
+                {m === 'signin' ? 'Sign in' : 'Create account'}
+              </button>
+            ))}
+          </div>
+
           <input
             name="email"
             type="email"
@@ -71,26 +104,48 @@ export function AuthorizeForm({
             name="password"
             type="password"
             required
-            placeholder="Password"
+            minLength={authMode === 'create' ? 8 : undefined}
+            placeholder={authMode === 'create' ? 'Choose a password (8+ chars)' : 'Password'}
             className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
           />
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <button
+            type="submit"
+            name="mode"
+            value={authMode}
+            disabled={busy}
+            className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+          >
+            {busy ? 'Connecting…' : authMode === 'create' ? 'Create account & approve' : 'Sign in & approve'}
+          </button>
+
+          <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+            <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
+          </div>
+
+          {/* Guest: no fields — formNoValidate skips the required email/password. */}
+          <button
+            type="submit"
+            name="mode"
+            value="guest"
+            formNoValidate
+            disabled={busy}
+            className="w-full rounded-md border border-border px-4 py-2.5 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+          >
+            Continue as guest — no signup
+          </button>
+          <p className="text-[11px] text-muted-foreground">
+            Guest gives you a throwaway account so you can start using the connector immediately. You can add an email
+            and password later to keep it.
+          </p>
+
+          <button type="button" onClick={deny} className="w-full rounded-md px-4 py-2 text-sm text-muted-foreground hover:bg-secondary">
+            Deny
+          </button>
         </div>
       )}
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
-
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-        >
-          {busy ? 'Connecting…' : 'Approve'}
-        </button>
-        <button type="button" onClick={deny} className="rounded-md border border-border px-4 py-2 text-sm">
-          Deny
-        </button>
-      </div>
     </form>
   )
 }
