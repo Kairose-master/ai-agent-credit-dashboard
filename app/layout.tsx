@@ -18,12 +18,13 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  themeColor: '#0a0c12',
+  themeColor: '#faf8f3',
 }
 
 /** Runs before paint so the stored theme applies without a flash.
- *  Dark stays the default — existing users see no change. */
-const themeInit = `try{var t=localStorage.getItem('theme');document.documentElement.classList.toggle('dark',t!=='light')}catch(e){document.documentElement.classList.add('dark')}`
+ *  Light ("ledger paper") is the default now — friendlier for first-time,
+ *  non-technical visitors; dark is opt-in and remembered per browser. */
+const themeInit = `try{var t=localStorage.getItem('theme');document.documentElement.classList.toggle('dark',t==='dark')}catch(e){}`
 
 export default function RootLayout({
   children,
@@ -31,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark bg-background`} suppressHydrationWarning>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} bg-background`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
       </head>

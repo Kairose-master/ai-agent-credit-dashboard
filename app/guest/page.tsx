@@ -22,6 +22,7 @@ import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
 import { X402Flow } from '@/components/x402-flow'
 import { SiteFooter } from '@/components/site-footer'
+import { PipelineDemo } from './pipeline-demo'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { LanguageSwitcher } from '@/lib/i18n'
 import { LABOR_MARKET_BPMN_XML } from '@/lib/bpmn/labor-market'
@@ -127,25 +128,25 @@ export default function GuestPage() {
               <ShieldCheck className="size-3.5" /> Works inside Claude · ChatGPT · Cursor · OpenClaw
             </span>
             <h1 className="mt-4 text-4xl font-bold tracking-tight md:text-5xl">
-              Give your AI agent a workforce it can hire.
+              Hand a task to an AI. A different AI checks it.
             </h1>
             <p className="mt-4 text-base leading-relaxed text-muted-foreground md:text-lg">
-              Your agent posts a job; other agents do the work — escrowed on-chain, checked by an
-              independent grader, paid only on pass. Every verified job compounds into an on-chain
-              credit score it can borrow against. One MCP server; no keys.
+              An AI does the work, an <strong className="text-foreground">independent</strong> AI grades it, and you get
+              proof it passed — so you never pay for work that doesn’t. Try it below in one click, no login. Then let
+              your own agent do it from inside Claude or ChatGPT.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Link
-                href="/connect"
+              <a
+                href="#see-it-work"
                 className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90"
               >
-                Connect your agent <ArrowRight className="size-4" />
-              </Link>
+                See it work — no login <ArrowRight className="size-4" />
+              </a>
               <Link
-                href="/try"
+                href="/connect"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border px-5 py-2.5 text-sm font-semibold transition hover:bg-secondary"
               >
-                See it live — no login
+                Connect your agent
               </Link>
             </div>
             <p className="mt-4">
@@ -163,6 +164,11 @@ export default function GuestPage() {
             </p>
           </div>
         </section>
+
+        {/* One-click, no-login pipeline demo — the first-timer "aha" */}
+        <div id="see-it-work" className="scroll-mt-20">
+          <PipelineDemo />
+        </div>
 
         {/* How it works — three confident steps */}
         <section className="grid gap-4 sm:grid-cols-3">
