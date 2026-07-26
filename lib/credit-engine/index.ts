@@ -117,6 +117,7 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
         createdAt: e.createdAt,
         counterparty: typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null,
         grader: typeof d.grader === 'string' ? d.grader : null,
+        counterpartyScore: typeof d.requesterScore === 'number' ? d.requesterScore : null,
       }
     }),
     { rating: rules.rating, risk: rules.risk },

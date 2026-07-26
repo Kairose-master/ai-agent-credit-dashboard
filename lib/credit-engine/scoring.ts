@@ -33,6 +33,12 @@ export type AgentEventInput = {
    *  grader-strength weight: verdicts a colluding pair can author their own
    *  criteria for count less than verdicts they cannot reach. */
   grader?: string | null
+  /** The counterparty's own credit score AT THE TIME of the event (stamped
+   *  by the writer, so history can't be rewritten by later score changes).
+   *  Null = legacy/unknown. Drives credibility weighting: reputation earned
+   *  from an established counterparty counts more than reputation earned
+   *  from a freshly minted score-300 account. */
+  counterpartyScore?: number | null
 }
 
 export type CreditAssessment = {
@@ -74,6 +80,7 @@ function dampen(raw: number, sampleSize: number): number {
 export function assessCredit(
   events: AgentEventInput[],
   rules?: { rating?: ScoreRule<Rating>[]; risk?: ScoreRule<RiskLevel>[] },
+  now: Date = new Date(),
 ): CreditAssessment {
   // Terminal task events are the unit of behavioral history. Two grades of
   // signal: self-evaluated (TASK_*, the runtime grading its own output) and
@@ -164,12 +171,11 @@ export function assessCredit(
   // Credit-repayment behavior — the other half of "scale": an agent that
   // draws credit and repays on time proves creditworthiness directly.
   const repayments = events.filter((e) => e.eventType === 'REPAYMENT_COMPLETED').length
-  const defaults = events.filter((e) => e.eventType === 'REPAYMENT_DEFAULTED').length
 
   // Completed paid jobs on the labor market — real economic activity, the
   // strongest reputation signal an agent can accumulate. Weighted, not
   // counted: see collusionWeight/graderWeight below.
-  const jobsCompleted = weightedMarketSignal(events, 'JOB_COMPLETED')
+  const jobsCompleted = weightedMarketSignal(events, 'JOB_COMPLETED', now)
 
   // ── Reputation (20%) ─────────────────────────────────────────────
   // Verified achievements are explicit third-party attestations; the rest
@@ -180,8 +186,13 @@ export function assessCredit(
   // Acceptance tests on code jobs, run by the platform runtime (grader ≠
   // solver) — a fact, same trust class as VERIFIED_TASK_*. Supplementary to
   // the run's own terminal event, so they don't join TERMINAL above.
-  const testsPassed = weightedMarketSignal(events, 'JOB_TESTS_PASSED')
-  const testsFailed = events.filter((e) => e.eventType === 'JOB_TESTS_FAILED').length
+  const testsPassed = weightedMarketSignal(events, 'JOB_TESTS_PASSED', now)
+  // Negative facts decay too — on the slower half-life. A failed grading
+  // from two years ago should not weigh like yesterday's, but it should
+  // outlast the equivalent success.
+  const testsFailed = events
+    .filter((e) => e.eventType === 'JOB_TESTS_FAILED')
+    .reduce((sum, e) => sum + recencyWeight(e.createdAt, now, NEGATIVE_HALF_LIFE_DAYS), 0)
   const reputation = dampen(
     clamp(
       Math.log10(completed.length + 1) * 35 +
@@ -199,9 +210,12 @@ export function assessCredit(
   // failures. A deliverable that failed the requester's acceptance tests is
   // a confident-but-wrong fact — riskier than an honest task failure.
   const anomalies = events.filter((e) => e.eventType.includes('ANOMALY')).length
+  const decayedDefaults = events
+    .filter((e) => e.eventType === 'REPAYMENT_DEFAULTED')
+    .reduce((sum, e) => sum + recencyWeight(e.createdAt, now, NEGATIVE_HALF_LIFE_DAYS), 0)
   const risk = dampen(
-    clamp(100 - failed.length * 8 - anomalies * 15 - defaults * 25 - testsFailed * 10),
-    n + defaults + testsFailed,
+    clamp(100 - failed.length * 8 - anomalies * 15 - decayedDefaults * 25 - testsFailed * 10),
+    n + Math.round(decayedDefaults) + Math.round(testsFailed),
   )
 
   // ── Composite → score ────────────────────────────────────────────
@@ -229,22 +243,40 @@ export function assessCredit(
 
 // ── Collusion resistance ──────────────────────────────────────────────
 //
-// Two empirical findings drive these weights (docs/market-design-notes.md):
-// "Agent Bazaar" (arXiv:2605.17698) shows Sybil/collusion rings are the C2C
-// failure mode, and "When Agent Markets Arrive" (arXiv:2604.06688) shows
-// naive reputation counting is exploitable. Neither tested wash trading —
-// two accounts trading easy jobs to farm each other's scores — which is the
-// obvious attack HERE. Counting can be farmed; weighting makes farming pay
-// sub-linearly on both axes that matter.
+// Three multiplicative weights, each answering one attack from the market-
+// design literature (Agent Bazaar arXiv:2605.17698, Diagon arXiv:2604.06688)
+// plus the wash-trading attack neither paper tested:
+//
+//   diversity × credibility × grader × recency
+//
+// The design borrows Bitcoin's halving insight twice over: make the emission
+// schedule a CONVERGENT series, and total extractable value is capped by
+// construction rather than by vigilance.
 
-/** k-th graded fact with the SAME counterparty is worth 1/√k: the first
- *  trade with a stranger carries full weight, the tenth with the same
- *  partner ~0.32. Diversity is what a collusion ring cannot fake cheaply —
- *  every additional identity it mints starts at score 300 with no history.
- *  Null counterparty (legacy events) keeps full weight: no retroactive
- *  penalty for events recorded before enrichment existed. */
+/** k-th graded fact with the SAME counterparty is worth 1/2^k — a geometric
+ *  series, so the TOTAL reputation extractable from any single counterparty
+ *  converges to two full-weight trades' worth, forever. The earlier 1/√k
+ *  discount only slowed a patient ring down (Σ1/√k diverges); halving caps
+ *  it. Legitimate repeat business loses some signal by design: in a world
+ *  where identities are free, "50 trades with one partner" is
+ *  indistinguishable from self-dealing — the repeat client still pays in
+ *  MONEY; reputation is reserved for breadth, which generalizes to
+ *  strangers. Null counterparty (legacy events) keeps full weight. */
 export function collusionWeight(priorWithSameCounterparty: number): number {
-  return 1 / Math.sqrt(priorWithSameCounterparty + 1)
+  return Math.pow(0.5, priorWithSameCounterparty)
+}
+
+/** Reputation earned FROM a nobody is worth little: a ring that mints fresh
+ *  requester accounts to fake diversity earns the floor, because each new
+ *  accomplice starts at score 300 with no history of its own. Scales
+ *  linearly from the floor at score<=300 to full weight at score>=700.
+ *  Null (legacy events, pre-stamping) keeps full weight — no retroactive
+ *  penalty. */
+export const CREDIBILITY_FLOOR = 0.25
+export function credibilityWeight(counterpartyScore: number | null | undefined): number {
+  if (counterpartyScore === null || counterpartyScore === undefined) return 1
+  const t = (counterpartyScore - 300) / 400 // 300 → 0, 700+ → 1
+  return CREDIBILITY_FLOOR + (1 - CREDIBILITY_FLOOR) * Math.min(1, Math.max(0, t))
 }
 
 /** Verdicts differ in how hard they are for a colluding requester+worker
@@ -268,10 +300,32 @@ export function graderWeight(grader: string | null | undefined): number {
   return GRADER_WEIGHTS[grader] ?? 0.8
 }
 
+/** Reputation is a flow, not a stock: a graded fact loses half its weight
+ *  every REPUTATION_HALF_LIFE_DAYS. Kills farm-once-coast-forever, and
+ *  makes a bought aged account decay to nothing unless maintained with
+ *  fresh verified work. Negative facts (failed gradings, defaults) use the
+ *  slower NEGATIVE_HALF_LIFE_DAYS — bad news lingers longer than good, the
+ *  same asymmetry real credit reporting uses. */
+export const REPUTATION_HALF_LIFE_DAYS = 180
+export const NEGATIVE_HALF_LIFE_DAYS = 365
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export function recencyWeight(eventAt: Date, now: Date, halfLifeDays: number = REPUTATION_HALF_LIFE_DAYS): number {
+  const ageDays = Math.max(0, (now.getTime() - eventAt.getTime()) / DAY_MS)
+  return Math.pow(0.5, ageDays / halfLifeDays)
+}
+
 /** Weighted count of a market signal: each event discounted by counterparty
- *  repetition and grader strength. Chronological order matters — the FIRST
- *  trades with a counterparty keep the most weight. */
-export function weightedMarketSignal(events: AgentEventInput[], eventType: string): number {
+ *  repetition (halving), counterparty credibility, grader strength, and age.
+ *  Chronological order matters — the FIRST trades with a counterparty keep
+ *  the most weight — and the result is order-independent w.r.t. input array
+ *  order because events are sorted first. */
+export function weightedMarketSignal(
+  events: AgentEventInput[],
+  eventType: string,
+  now: Date = new Date(),
+  halfLifeDays: number = REPUTATION_HALF_LIFE_DAYS,
+): number {
   const seen = new Map<string, number>()
   let total = 0
   const chronological = events
@@ -284,7 +338,7 @@ export function weightedMarketSignal(events: AgentEventInput[], eventType: strin
       diversity = collusionWeight(prior)
       seen.set(e.counterparty, prior + 1)
     }
-    total += diversity * graderWeight(e.grader)
+    total += diversity * credibilityWeight(e.counterpartyScore) * graderWeight(e.grader) * recencyWeight(e.createdAt, now, halfLifeDays)
   }
   return total
 }

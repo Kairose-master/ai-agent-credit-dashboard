@@ -263,6 +263,20 @@ async function settleVerifiedTask(
  *  instead of stopping at "submitted". */
 type GradeReport = { passed: boolean | null; settled: 'paid' | 'refunded' | 'manual'; reason: string }
 
+/** The requester's credit score right now, stamped onto graded events so the
+ *  scoring engine can weight reputation by counterparty credibility without
+ *  a join at score time. */
+async function requesterScoreOf(requesterAgentId: string | null): Promise<number | null> {
+  if (!requesterAgentId) return null
+  try {
+    const { agent } = await import('@/lib/db/schema')
+    const [row] = await db.select({ creditScore: agent.creditScore }).from(agent).where(eq(agent.id, requesterAgentId))
+    return row ? Number(row.creditScore) : null
+  } catch {
+    return null
+  }
+}
+
 async function settleLaborMarketJob(agentTaskId: string, output: string): Promise<GradeReport | null> {
   const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.agentTaskId, agentTaskId))
   if (!spec || !spec.workerAgentId || spec.onchainJobId === null) return null
@@ -370,6 +384,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
           // graded suite, and repeat counterparties earn diminishing weight.
           grader: testSuiteSpec ? 'tests' : isImageJob ? 'vision' : isAudioJob ? 'audio' : isLlmGradableText ? 'llm-review' : 'code',
           requesterAgentId: spec.requesterAgentId ?? null,
+          requesterScore: await requesterScoreOf(spec.requesterAgentId),
         },
       })
       await logPlatformEvent(

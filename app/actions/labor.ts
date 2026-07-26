@@ -400,6 +400,9 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
   // apply the collusion discount (repeat requester → diminishing weight)
   // without a join at score time.
   const [specRow] = await db.select({ requesterAgentId: jobSpec.requesterAgentId }).from(jobSpec).where(eq(jobSpec.onchainJobId, jobId))
+  const [requesterRow] = specRow?.requesterAgentId
+    ? await db.select({ creditScore: agent.creditScore }).from(agent).where(eq(agent.id, specRow.requesterAgentId))
+    : []
   await db.insert(agentEvent).values({
     id: nanoid(),
     agentId: workerAgent.id,
@@ -409,7 +412,17 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
     executionTime: 0,
     tokenCost: 0,
     qualityScore: '1.000',
-    detail: { jobId, bounty, txHash, onchain: true, requesterAgentId: specRow?.requesterAgentId ?? null },
+    detail: {
+      jobId,
+      bounty,
+      txHash,
+      onchain: true,
+      requesterAgentId: specRow?.requesterAgentId ?? null,
+      // Stamped at event time so later score changes can't rewrite history:
+      // reputation earned from a fresh score-300 account keeps its floor
+      // weight even if that account later climbs.
+      requesterScore: requesterRow ? Number(requesterRow.creditScore) : null,
+    },
   })
   await recalculateCredit(workerAgent.id)
   await logPlatformEvent('JOB_COMPLETED', `${workerAgent.name} completed job #${jobId} — $${bounty.toLocaleString()}`)

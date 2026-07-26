@@ -94,6 +94,12 @@ async function recordCiCreditEvent(
 ): Promise<void> {
   if (!spec.workerAgentId || spec.onchainJobId === null) return
   try {
+    // Stamp the requester's current score for credibility weighting.
+    if (spec.requesterAgentId && detail.requesterScore === undefined) {
+      const { agent } = await import('@/lib/db/schema')
+      const [req] = await db.select({ creditScore: agent.creditScore }).from(agent).where(eq(agent.id, spec.requesterAgentId))
+      detail.requesterScore = req ? Number(req.creditScore) : null
+    }
     const { agentEvent } = await import('@/lib/db/schema')
     const taskId = `job-${spec.onchainJobId}-ci`
     const existing = await db.select({ id: agentEvent.id }).from(agentEvent).where(eq(agentEvent.taskId, taskId))
