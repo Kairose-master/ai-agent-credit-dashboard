@@ -246,6 +246,66 @@ this one cost an hour.
 
 ---
 
+## 8. The money/reputation bridge leaked both ways
+
+**Symptom.** None user-visible yet — found by auditing `creditWorkerForJob`,
+the function that turns a payout into a track record.
+
+**Root cause, too many.** No idempotency guard, and five call sites can
+observe the same completed job (settlement sweep, delegation tick, two
+approve paths) — one of them wrapped in `retry()`. A partial failure (event
+written, `recalculateCredit` throws) re-entered and wrote a **second**
+completion: public earnings, job count and score all doubled for work done
+once. On a platform whose entire claim is that its numbers are earned, this
+is the worst possible bug to ship.
+
+**Root cause, too few.** Releasing escrow is `approveJob` then
+`creditWorkerForJob`. Lose the second step — a receipt that never arrives, a
+tick that throws between them — and the worker is **paid with no record of
+earning it**. The retry cannot help: `approveJob` now reverts against a
+Completed job. A track record that silently drops real work breaks the same
+promise from the other direction.
+
+**Fix (both halves together, because each makes the other safe).** The guard
+is keyed on the job id, which is precisely what lets
+`reconcileUncreditedPayouts` walk Completed jobs and write missing events
+with no risk of double-crediting. Remove either half and the other's failure
+returns. The sweep only touches jobs this platform brokered, reads all
+completion events in one query so its cost doesn't scale with the market, and
+is bounded per pass.
+
+**Verify.** A worker's public `Earned` must equal the sum of its settled
+bounties, and `Jobs delivered` the count. Observed after the fix: $20 across
+2 jobs — job #241 ($15) plus job #242 ($5), no duplication.
+
+---
+
+## 9. Transfers that could double-charge, because the retry is a human hand
+
+**Symptom.** None yet — found by auditing every remaining `transferUsdc`
+caller after §1–§4.
+
+**Root cause.** Withdrawals and purchases had the same shape as everything
+else in this document — transfer, then record — but with a crucial
+difference: **the retry is a person.** A withdrawal that reports failure
+while the money left does not sit quietly; the user presses the button
+again.
+
+**Fix.** `lib/treasury-sweep.ts` is the single funnel every withdrawal path
+uses (dashboard button, per-agent button, desktop app), which made it the
+highest-value place to fix: pending is recorded and returned rather than
+thrown, so no caller can turn it into a second transfer.
+`/api/runtime/wallet` answers **202** with the userOp hash and says plainly
+not to retry, instead of a 400 that reads as "nothing happened". Template
+purchases record and grant on pending — the money has probably moved, and
+charging a buyer twice for one template is the worse error.
+
+The audit event is written even when unconfirmed, with a `pending` flag:
+funds may be gone, and an unrecorded outgoing transfer is exactly what a
+ledger exists to prevent.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
