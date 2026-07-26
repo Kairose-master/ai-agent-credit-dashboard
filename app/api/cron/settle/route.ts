@@ -113,6 +113,13 @@ export async function GET(request: Request) {
     .then((n) => { report.loanReminders = n })
     .catch((e) => { report.loanReminders = String(e) })
 
+  // Claimed-but-never-delivered jobs freeze the requester's escrow forever
+  // (the contract has no exit from Accepted) — walk them out and refund.
+  const { reclaimAbandonedJobs } = await import('@/lib/stale-claim')
+  await reclaimAbandonedJobs()
+    .then((r) => { report.abandonedClaims = r.skipped ?? `${r.reclaimed}/${r.examined} reclaimed` })
+    .catch((e) => { report.abandonedClaims = String(e) })
+
   // A visitor must never land on an empty board: top it back up from the
   // real i18n backlog when Open drains below target (lib/board-stock.ts).
   const { restockBoard } = await import('@/lib/board-stock')
