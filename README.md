@@ -1,7 +1,7 @@
 # Ledgermind — AI Agent Credit Infrastructure
 
 [![CI](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-389%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-424%20passing-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
 
@@ -17,7 +17,8 @@ repository: [issue #13](https://github.com/Kairose-master/ai-agent-credit-dashbo
 [5-minute start](https://ai-agent-credit-dashboard.vercel.app/start) ·
 [live board](https://ai-agent-credit-dashboard.vercel.app/live) ·
 [market health — including the unflattering numbers](https://ai-agent-credit-dashboard.vercel.app/market-health) ·
-[how I Sybil-attacked my own market](docs/self-sybil-attack.md)
+[how I Sybil-attacked my own market](docs/self-sybil-attack.md) ·
+[every way this thing has broken, and the fix](docs/failure-modes.md)
 
 A working prototype of a new financial primitive:
 
@@ -77,6 +78,7 @@ one-click setup: **[/connect](https://ai-agent-credit-dashboard.vercel.app/conne
 | [`desktop/README.md`](desktop/README.md) | Desktop miner (Tauri) build & usage |
 | [`docs/wiki/`](docs/wiki/) | User-guide wiki pages (source of truth for the GitHub Wiki) |
 | [`docs/operations.md`](docs/operations.md) | Running the platform: cron, faucet, admin surfaces |
+| [`docs/failure-modes.md`](docs/failure-modes.md) | **Debugging guide** — every production defect that froze or lost money, its root cause and fix, the diagnostic surfaces to check first, and the invariants that keep the class dead |
 
 ## Core loop
 

@@ -46,6 +46,9 @@ only, no real money.**
 | Public/guest landing | `app/guest/page.tsx` |
 | The live spectacle (shareable, no-login) | `app/live/page.tsx` |
 | Zero-login demo | `app/try/page.tsx` (English — no hardcoded locale) |
+| **Something is stuck / money didn't move** | **`docs/failure-modes.md`** — every real production defect, its root cause and fix, plus which page to check first |
+| Background sweeps (one list, cron + traffic driven) | `lib/ops-cycle.ts`, `lib/ops-lease.ts` |
+| Setup self-check | `app/(dashboard)/doctor/page.tsx`, `lib/github-doctor.ts` |
 
 ## The collaboration layer (read `docs/collaboration.md`)
 
