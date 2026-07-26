@@ -51,11 +51,13 @@ export async function raiseJobPrice(
     toHex(JSON.stringify({ title: spec.title, agent: spec.requesterAgentId, price: nextUsd, nonce: nanoid() })),
   )
 
-  // 1. Refund the old escrow. Irreversible once it lands, so the repost below
-  //    is retried hard rather than allowed to fail.
-  await retryRpc(() => cancelJob(spec.requesterAgentId!, spec.onchainJobId!))
-
-  // 2. The same work, at the higher price, carrying the lineage forward.
+  // 1. Write the INTENT down before any money moves. The cancel below can
+  //    land while its receipt never arrives, and if the replacement row
+  //    were inserted afterwards there would be no trace at all: escrow
+  //    refunded, job gone from the market, nobody able to tell it was ever
+  //    supposed to come back. With the row first, an unfinished raise is a
+  //    visible orphan (pricing set, no onchainJobId) that resumeOrphanedRaises
+  //    finishes on a later pass.
   await db.insert(jobSpec).values({
     specHash: newSpecHash,
     title: spec.title,
@@ -73,9 +75,13 @@ export async function raiseJobPrice(
     failedWorkerIds: spec.failedWorkerIds,
     repostCount: spec.repostCount, // a price raise is not a failed attempt
     parentSpecHash: spec.specHash,
-    pricing: { ...spec.pricing, raises: (spec.pricing.raises ?? 0) + 1 },
+    pricing: { ...spec.pricing, raises: (spec.pricing.raises ?? 0) + 1, pendingUsd: nextUsd, pendingMinScore: job.minScore },
   })
 
+  // 2. Refund the old escrow, then 3. post the replacement. Cancel first so
+  //    the requester never needs headroom for both at once; the orphan row
+  //    above is what makes that ordering safe.
+  await retryRpc(() => cancelJob(spec.requesterAgentId!, spec.onchainJobId!))
   await retry(() => postJob(spec.requesterAgentId!, nextUsd, job.minScore, newSpecHash))
 
   let newJobId: number | null = null
@@ -95,6 +101,69 @@ export async function raiseJobPrice(
     `"${spec.title}" went unclaimed — bounty raised to $${nextUsd}${newJobId ? ` (now job #${newJobId})` : ''}`,
   )
   return newJobId
+}
+
+/** A raise that wrote its intent but never got its replacement on-chain.
+ *  Pure so the recovery rule is testable: a replacement row (it has a
+ *  parent) with a price plan and no on-chain id, left alone long enough
+ *  that an in-flight post would have finished. */
+export function isOrphanedRaise(
+  now: Date,
+  spec: { parentSpecHash: string | null; pricing: unknown; onchainJobId: number | null; createdAt: Date },
+  minAgeMs = 5 * 60_000,
+): boolean {
+  if (!spec.parentSpecHash || !spec.pricing) return false
+  if (spec.onchainJobId !== null) return false
+  return now.getTime() - new Date(spec.createdAt).getTime() > minAgeMs
+}
+
+/**
+ * Finish raises that died between the refund and the repost.
+ *
+ * The old escrow is already returned by that point, so the only thing
+ * missing is the replacement listing — post it and the work rejoins the
+ * market instead of vanishing. Idempotent: the on-chain post is keyed by
+ * specHash, so a row that actually did get posted is detected and merely
+ * backfilled rather than posted twice.
+ */
+export async function resumeOrphanedRaises(now = new Date()): Promise<number> {
+  let resumed = 0
+  try {
+    const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
+    if (!isLaborMarketConfigured()) return 0
+
+    const orphans = (await db.select().from(jobSpec)).filter((s) => isOrphanedRaise(now, s))
+    if (orphans.length === 0) return 0
+
+    const { readJobs, postJob } = await import('@/lib/onchain/labor')
+    const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
+    const byHash = new Map(jobs.map((j) => [j.specHash.toLowerCase(), j]))
+
+    for (const orphan of orphans.slice(0, 3)) {
+      try {
+        // It may already be on-chain and simply unlinked — never post twice.
+        const existing = byHash.get(orphan.specHash.toLowerCase())
+        if (existing) {
+          await db.update(jobSpec).set({ onchainJobId: existing.id }).where(eq(jobSpec.specHash, orphan.specHash))
+          continue
+        }
+        const plan = orphan.pricing as { raises?: number; pendingUsd?: number; pendingMinScore?: number } | null
+        const bountyUsd = plan?.pendingUsd
+        if (!orphan.requesterAgentId || typeof bountyUsd !== 'number' || bountyUsd <= 0) continue
+        await retry(() => postJob(orphan.requesterAgentId!, bountyUsd, Math.round(plan?.pendingMinScore ?? 0), orphan.specHash as `0x${string}`))
+        await logPlatformEvent(
+          'JOB_PRICE_RAISED',
+          `"${orphan.title}" — an interrupted price raise was completed; the job is back on the market at $${bountyUsd}${plan?.raises ? ` (raise ${plan.raises})` : ''}`,
+        ).catch(() => {})
+        resumed++
+      } catch (error) {
+        console.error(`[price-raise] resuming orphaned raise ${orphan.specHash} failed:`, error)
+      }
+    }
+  } catch (error) {
+    console.error('[price-raise] orphan resume failed:', error)
+  }
+  return resumed
 }
 
 /**

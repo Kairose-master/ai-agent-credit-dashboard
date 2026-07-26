@@ -81,6 +81,14 @@ export const OPS_STEPS: OpsStep[] = [
     },
   },
   {
+    name: 'raisesResumed',
+    fast: true,
+    run: async () => {
+      const { resumeOrphanedRaises } = await import('@/lib/price-raise')
+      return resumeOrphanedRaises()
+    },
+  },
+  {
     name: 'keysIssued',
     run: async () => {
       const { ensureFleetKeys } = await import('@/lib/agent-keys')

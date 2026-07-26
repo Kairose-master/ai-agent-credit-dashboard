@@ -428,7 +428,17 @@ export const jobSpec = pgTable('job_specs', {
   // price is never stored here — it is always the live on-chain bounty, since
   // a cached price that drifts from the escrow promises money the contract
   // cannot pay.
-  pricing: jsonb('pricing').$type<{ ceilingUsd: number; stepUsd: number; stepMinutes: number; raises?: number }>(),
+  // pendingUsd/pendingMinScore record a raise's intent BEFORE the old escrow
+  // is cancelled, so a raise interrupted between refund and repost is a
+  // resumable orphan instead of vanished work (lib/price-raise.ts).
+  pricing: jsonb('pricing').$type<{
+    ceilingUsd: number
+    stepUsd: number
+    stepMinutes: number
+    raises?: number
+    pendingUsd?: number
+    pendingMinScore?: number
+  }>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

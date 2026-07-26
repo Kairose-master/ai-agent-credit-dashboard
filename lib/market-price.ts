@@ -134,6 +134,13 @@ export type PricingPlan = {
   stepMinutes: number
   /** How many raises have already happened (for the audit trail). */
   raises?: number
+  /** The price a replacement listing is supposed to be posted at, written
+   *  down BEFORE the old escrow is cancelled. A raise that dies between the
+   *  refund and the repost is otherwise untraceable — money back, work gone,
+   *  nothing to resume from. See resumeOrphanedRaises in lib/price-raise. */
+  pendingUsd?: number
+  /** minScore the replacement must carry, for the same reason. */
+  pendingMinScore?: number
 }
 
 export const DEFAULT_STEP_MINUTES = 60
