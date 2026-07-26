@@ -373,7 +373,7 @@ const TOOLS = [
       properties: {
         topic: {
           type: 'string',
-          enum: ['start', 'hire', 'earn', 'tools', 'site', 'desktop', 'vault'],
+          enum: ['start', 'hire', 'earn', 'github', 'tools', 'site', 'desktop', 'vault'],
           description: 'Optional — pick one area to explain in depth. Omit for the full overview.',
         },
       },
@@ -423,6 +423,26 @@ const TOOLS = [
         agent_name: { type: 'string', description: 'Which agent escrows it, by name (used only if agent_id is omitted)' },
       },
       required: ['repo', 'title', 'brief', 'bounty_usd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'github_status',
+    description:
+      'Your GitHub connection on Ledgermind: whether this account is linked, and exactly which repositories you can ' +
+      'post a job on right now (the ones you can see AND the Ledgermind App is installed on). Call this FIRST when ' +
+      'the user talks about their repos — it returns the sign-in link when unlinked and the install link when the ' +
+      'App is missing, so you never have to guess a repo name. Read-only, no money moves.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'repo_job_status',
+    description:
+      'Your GitHub repo jobs and where each one actually stands: the pull request the platform opened, what CI said ' +
+      'about it, and whether merging has released the escrow yet. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: { job_id: { type: 'number', description: 'Only this job number (default: all your repo jobs)' } },
       additionalProperties: false,
     },
   },
@@ -772,6 +792,15 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           '• Prefer hands-off? Three ways to earn without driving each job: the desktop app (help topic:"desktop"); connect_mcp_worker to bring any external MCP agent in as a graded worker; or set_auto_mine so a cloud/mcp/local worker claims qualifying jobs by itself, several in parallel.',
           '• browse_capabilities lists real hireable skills from the ClawHub directory you could wire in as workers.',
         ].join('\n'),
+        github: [
+          '🐙 GITHUB REPO JOBS — pay only when it merges',
+          '• github_status — links your GitHub account and lists the repositories that are actually ready (you can see them AND the Ledgermind App is installed). Start here; it hands back the sign-in or install link when something is missing.',
+          '• check_repo_access(repo) — the same check for one specific repo, before escrowing anything.',
+          '• post_repo_job(repo, title, brief, bounty_usd) — MOVES MONEY: escrows the bounty against a real repository task.',
+          '• repo_job_status — the pull request the platform opened, what CI said, and whether the escrow has been released.',
+          'How it works: a worker submits a unified DIFF (never credentials, never push access). The platform opens the PR from it. YOUR repo\'s own CI is the independent grader. Merging pays the worker; closing it unmerged refunds you.',
+          'Working these jobs yourself: claim_job hands you the brief, you clone the PUBLIC repo, make the change, and submit_work with the diff in a ```diff block. Or run `npx @kairose-master/foreman work` to have it claimed, done and submitted for you under a hard budget.',
+        ].join('\n'),
         tools: [
           '🧰 TOOL CHEATSHEET',
           'Setup: list_my_agents · create_worker_agent · mint_test_usdc',
@@ -782,6 +811,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           'Trust: get_work_proof (signed authorship+grade certificate, IPFS content id)',
           'DeFi sandbox: vault_status · quote_credit_line (GIWA-style collateral vault, live on Sepolia)',
           'Governance: governance · vote · set_auto_vote ($LEDGER, earned-not-bought)',
+          'GitHub: github_status → post_repo_job → repo_job_status (help topic:"github")',
         ].join('\n'),
         site: [
           `🌐 WEBSITE — ${origin}`,
@@ -891,6 +921,84 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       )
     }
 
+    case 'github_status': {
+      const { githubConnectionFor } = await import('@/lib/github-identity')
+      const conn = await githubConnectionFor(auth.userId)
+      if (!conn.loginEnabled) {
+        return toolText(id, 'This deployment has no GitHub App configured, so repo jobs are unavailable here.', true)
+      }
+      const connectUrl = `${origin}/api/github/oauth/start?next=/jobs`
+      if (!conn.connected) {
+        return toolText(
+          id,
+          'Your Ledgermind account is not linked to GitHub yet.\n\n' +
+            `Link it here (opens in a browser, one click): ${connectUrl}\n\n` +
+            'Once linked I can list your repositories and post jobs against them without you typing owner/name.',
+        )
+      }
+      if (conn.error) {
+        return toolText(id, `Connected as ${conn.login}, but: ${conn.error}\nReconnect: ${connectUrl}`, true)
+      }
+      if (conn.repos.length === 0) {
+        return toolText(
+          id,
+          `Connected as ${conn.login}, but the Ledgermind GitHub App is not installed on any of your repositories.\n\n` +
+            `Install it on the repo you want worked: ${conn.installUrl}\n` +
+            'The App is what opens the pull request from a worker\'s diff — without it a job cannot be delivered.',
+        )
+      }
+      const list = conn.repos
+        .slice(0, 50)
+        .map((r) => `  ${r.fullName}${r.private ? ' (private)' : ''} — default branch ${r.defaultBranch}`)
+        .join('\n')
+      return toolText(
+        id,
+        `Connected as ${conn.login}. ${conn.repos.length} repositor${conn.repos.length === 1 ? 'y is' : 'ies are'} ready for repo jobs:\n\n${list}\n\n` +
+          `Post one with post_repo_job. Install on more: ${conn.installUrl}`,
+      )
+    }
+
+    case 'repo_job_status': {
+      const { jobSpec } = await import('@/lib/db/schema')
+      const mine = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const myIds = new Set(mine.map((a) => a.id))
+      if (myIds.size === 0) return toolText(id, 'No agents on this account yet.')
+
+      const specs = (await db.select().from(jobSpec))
+        .filter((sp) => sp.repoFullName && sp.requesterAgentId && myIds.has(sp.requesterAgentId))
+        .filter((sp) => (args.job_id === undefined ? true : sp.onchainJobId === Number(args.job_id)))
+      if (specs.length === 0) {
+        return toolText(id, args.job_id === undefined ? 'You have no GitHub repo jobs yet — post one with post_repo_job.' : `No repo job #${args.job_id} on this account.`)
+      }
+
+      const { readJobs } = await import('@/lib/onchain/labor')
+      const chain = await readJobs().catch(() => [])
+      const statusById = new Map(chain.map((j) => [j.id, j.status]))
+
+      const lines = specs.map((sp) => {
+        const onchain = sp.onchainJobId === null ? 'not posted' : (statusById.get(sp.onchainJobId) ?? 'unknown')
+        const pr = sp.prNumber ? `https://github.com/${sp.repoFullName}/pull/${sp.prNumber}` : null
+        const ci =
+          sp.ciStatus === 'success'
+            ? 'CI passed'
+            : sp.ciStatus === 'failure'
+              ? 'CI FAILED'
+              : sp.ciStatus === 'pending'
+                ? 'CI running'
+                : 'no CI result yet'
+        return [
+          `#${sp.onchainJobId ?? '?'} ${sp.title}`,
+          `   repo    ${sp.repoFullName} @ ${sp.baseBranch ?? 'default'}`,
+          `   escrow  ${onchain}`,
+          pr ? `   PR      ${pr} — ${ci}` : '   PR      not opened yet (no diff submitted, or the diff did not apply)',
+        ].join('\n')
+      })
+      return toolText(
+        id,
+        `${lines.join('\n\n')}\n\nMerging a pull request is what releases its escrow — CI passing alone never moves money.`,
+      )
+    }
+
     case 'check_repo_access': {
       const repo = String(args.repo ?? '').trim()
       const { checkRepoAccess } = await import('@/app/actions/repo-jobs')
@@ -919,8 +1027,12 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
       if (!requester) return toolText(id, 'No provisioned agent to escrow the bounty — create_worker_agent adds one.', true)
 
       try {
-        const { postRepoJobAction } = await import('@/app/actions/repo-jobs')
-        const res = await postRepoJobAction({
+        // The agent was just proven to belong to auth.userId above, so the
+        // authorization this call requires is already established. Calling the
+        // server ACTION here would fail every time: it re-checks getSession(),
+        // and an MCP request carries a bearer token, never a browser session.
+        const { postRepoJob } = await import('@/lib/repo-job-post')
+        const res = await postRepoJob({
           requesterAgentId: requester.id,
           repoFullName: repo,
           baseBranch: args.base_branch ? String(args.base_branch) : undefined,

@@ -177,3 +177,53 @@ export async function githubUserToken(userId: string): Promise<string | null> {
     return null
   }
 }
+
+export type GithubConnection = {
+  loginEnabled: boolean
+  connected: boolean
+  login: string | null
+  repos: { fullName: string; private: boolean; defaultBranch: string }[]
+  installUrl: string
+  error: string | null
+}
+
+/**
+ * A user's GitHub connection and the repositories they could post a job on —
+ * the intersection of "you can see it" and "our App is installed on it".
+ *
+ * Takes the user id explicitly (rather than reading a session) so the MCP
+ * connector, which authenticates with a bearer token and has no browser
+ * session, gets exactly the same answer the web UI does.
+ */
+export async function githubConnectionFor(userId: string | null): Promise<GithubConnection> {
+  const { isGithubLoginEnabled } = await import('@/lib/github-oauth')
+  const { appInstallUrl } = await import('@/lib/github-app')
+  const base: GithubConnection = {
+    loginEnabled: await isGithubLoginEnabled(),
+    connected: false,
+    login: null,
+    repos: [],
+    installUrl: appInstallUrl(),
+    error: null,
+  }
+  if (!userId) return { ...base, error: 'Sign in first.' }
+
+  const identity = await getGithubIdentity(userId)
+  if (!identity) return base
+
+  const token = await githubUserToken(userId)
+  if (!token) {
+    return { ...base, connected: true, login: identity.login, error: 'Your GitHub authorization expired — reconnect.' }
+  }
+  try {
+    const { listUserInstallationRepos } = await import('@/lib/github-app')
+    return { ...base, connected: true, login: identity.login, repos: await listUserInstallationRepos(token) }
+  } catch (error) {
+    return {
+      ...base,
+      connected: true,
+      login: identity.login,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}

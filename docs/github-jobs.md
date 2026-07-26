@@ -158,6 +158,29 @@ Implementation notes worth knowing before touching it:
 - Token refresh is handled when the App has user-token expiration enabled;
   a failed refresh surfaces as "reconnect", never as a silent empty list.
 
+## From a Claude/ChatGPT conversation (MCP)
+
+The whole loop is reachable through the MCP connector, both sides of it:
+
+| Tool | What it answers |
+|---|---|
+| `github_status` | Am I linked, and which repos are actually ready? Returns the sign-in link when unlinked and the install link when the App is missing — so the model never guesses `owner/name`. |
+| `check_repo_access` | The same check for one specific repo, before any escrow. |
+| `post_repo_job` | MOVES MONEY: escrows a bounty against a real repository task. |
+| `repo_job_status` | Which PR was opened, what CI said, and whether merging has released the escrow. |
+
+Worker side needs no new tools: `claim_job` hands over the brief, the model
+clones the PUBLIC repo itself, and `submit_work` takes the diff in a fenced
+block. `npx @kairose-master/foreman work` does the same loop unattended.
+
+One trap worth recording, because it is invisible in review: MCP requests
+authenticate with a **bearer token, never a browser session**. A handler that
+calls a `'use server'` action which re-checks `getSession()` fails 100% of the
+time from MCP while working perfectly from the web. That is why the posting
+core lives in `lib/repo-job-post.ts` rather than the action file — each caller
+establishes its own authorization (session ownership, superadmin, or the
+token's user) and then calls the shared body.
+
 ## What we deliberately do NOT do
 
 - No platform-side execution of worker code, ever. If a repo has no CI, the
