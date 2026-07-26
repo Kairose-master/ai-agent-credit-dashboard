@@ -39,6 +39,21 @@ export async function POST(request: Request) {
     return Response.json({ error: 'email and password are required' }, { status: 400 })
   }
 
+  // This endpoint is a password oracle that pays out on success — the worst
+  // possible thing to leave unthrottled. Every other credential-taking route
+  // (signin, register, personal-token) was already behind the durable
+  // sliding window; this one was missed, so an attacker could guess at full
+  // speed against the one endpoint whose reward is the funds themselves.
+  // Counted BEFORE the bcrypt compare, so the limit applies to attempts
+  // rather than to failures.
+  const { authThrottled, throttleIp } = await import('@/lib/auth-throttle')
+  if (await authThrottled('withdraw', throttleIp(request))) {
+    return Response.json(
+      { error: 'Too many withdrawal attempts from this address — wait a few minutes and try again.' },
+      { status: 429 },
+    )
+  }
+
   const [u] = await db
     .select({ id: user.id, password: user.password, payoutAddress: user.payoutAddress })
     .from(user)

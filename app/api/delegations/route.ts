@@ -43,6 +43,16 @@ export async function POST(request: Request) {
   try {
     if (op === 'status') return await opStatus(request, body)
     if (op === 'plan' || op === 'confirm' || op === 'discard') {
+      // Password-taking op that spends: 'plan' burns planner-LLM tokens and
+      // 'confirm' escrows real money, so guessing here pays an attacker
+      // twice. Throttled on attempts, before the bcrypt compare.
+      const { authThrottled, throttleIp } = await import('@/lib/auth-throttle')
+      if (await authThrottled('withdraw', throttleIp(request))) {
+        return Response.json(
+          { error: 'Too many credential attempts from this address — wait a few minutes and try again.' },
+          { status: 429 },
+        )
+      }
       const u = await authOwner(body)
       if (!u) return Response.json({ error: 'Invalid credentials' }, { status: 401 })
       if (op === 'plan') return await opPlan(u.id, body)

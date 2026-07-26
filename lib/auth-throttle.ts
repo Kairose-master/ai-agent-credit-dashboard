@@ -15,7 +15,7 @@ import { authAttempt } from '@/lib/db/schema'
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 
-export type AuthScope = 'signin' | 'register' | 'personal-token'
+export type AuthScope = 'signin' | 'register' | 'personal-token' | 'withdraw'
 
 export interface ThrottleConfig {
   windowMs: number
@@ -26,6 +26,9 @@ const DEFAULTS: Record<AuthScope, ThrottleConfig> = {
   signin: { windowMs: 10 * 60 * 1000, max: 20 },
   register: { windowMs: 10 * 60 * 1000, max: 5 },
   'personal-token': { windowMs: 10 * 60 * 1000, max: 10 },
+  // Tightest of the four: this scope takes a password AND moves funds on
+  // success, so a guess here is worth more to an attacker than a sign-in.
+  withdraw: { windowMs: 10 * 60 * 1000, max: 8 },
 }
 
 /** Best-effort client IP from proxy headers. */
