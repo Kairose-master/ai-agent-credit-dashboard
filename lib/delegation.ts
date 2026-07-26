@@ -542,9 +542,13 @@ async function verifySubmission(
   st: DelegationSubtask,
   output: string,
 ): Promise<{ pass: boolean; reason: string }> {
+  // Same fencing as the standalone text grader: the worker authored this
+  // output, so it is data, and an attempt to steer the verdict fails.
+  const { fenceUntrusted, graderInjectionClause, untrustedNonce } = await import('@/lib/untrusted-input')
+  const nonce = untrustedNonce()
   const raw = await complete(
-    VERIFIER_SYSTEM,
-    `Subtask: ${st.title}\n\nDescription:\n${st.description}\n\nAcceptance criteria:\n${st.acceptanceCriteria}\n\nSubmitted output:\n${output.slice(0, 20_000)}`,
+    `${VERIFIER_SYSTEM} ${graderInjectionClause(nonce)}`,
+    `Subtask: ${st.title}\n\nDescription:\n${st.description}\n\nAcceptance criteria:\n${st.acceptanceCriteria}\n\nSubmitted output:\n${fenceUntrusted('submission', output.slice(0, 20_000), nonce)}`,
     2000,
   )
   const text = raw.replace(/^```(?:json)?\s*|\s*```$/g, '')

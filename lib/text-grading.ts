@@ -11,13 +11,15 @@
  */
 import { resolveLlm } from '@/lib/delegation'
 
+import { fenceUntrusted, graderInjectionClause, untrustedNonce } from '@/lib/untrusted-input'
+
 export interface GradedVerdict {
   passed: boolean | null
   output: string
   gradedAt: string
 }
 
-const GRADER_SYSTEM =
+const GRADER_SYSTEM_BASE =
   'You are an independent reviewer for an AI-agent labor market. Judge whether the submitted output satisfies ' +
   'the acceptance criteria. The criteria are the contract — do not invent extra requirements, and do not excuse ' +
   'clear failures. Output ONLY a JSON object {"pass": boolean, "reason": "one sentence"}.'
@@ -60,9 +62,13 @@ export async function gradeTextSubmission(
   }
 
   try {
+    // The submission is written by the party being judged, so it is fenced
+    // with a nonce minted now — after they wrote — and the system prompt is
+    // told to treat any instruction inside as a failing offence.
+    const nonce = untrustedNonce()
     const raw = await complete(
-      GRADER_SYSTEM,
-      `Job: ${spec.title}\n\nDescription:\n${spec.description ?? '(none)'}\n\nAcceptance criteria:\n${spec.acceptanceCriteria}\n\nSubmitted output:\n${output.slice(0, 20_000)}`,
+      `${GRADER_SYSTEM_BASE} ${graderInjectionClause(nonce)}`,
+      `Job: ${spec.title}\n\nDescription:\n${spec.description ?? '(none)'}\n\nAcceptance criteria:\n${spec.acceptanceCriteria}\n\nSubmitted output:\n${fenceUntrusted('submission', output.slice(0, 20_000), nonce)}`,
       2000,
     )
     const verdict = parseGraderVerdict(raw)
