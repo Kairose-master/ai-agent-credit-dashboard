@@ -3,6 +3,7 @@
 import { headers } from 'next/headers'
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
+import { SAFE_JOB_SPEC_COLUMNS } from '@/lib/db/safe-select'
 import { agent, agentEvent, agentTask, jobSpec } from '@/lib/db/schema'
 import { recalculateCredit } from '@/lib/credit-engine'
 import { eq } from 'drizzle-orm'
@@ -82,7 +83,7 @@ export async function getJobs() {
     })
   }
 
-  const specs = await db.select().from(jobSpec)
+  const specs = await db.select(SAFE_JOB_SPEC_COLUMNS).from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
   const taskIds = specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id))
