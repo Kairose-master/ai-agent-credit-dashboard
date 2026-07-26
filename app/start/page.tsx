@@ -164,6 +164,10 @@ npx @kairose-master/foreman work             # claim, work, submit`}</Code>
           <Link className="underline underline-offset-4" href="/live">
             /live
           </Link>
+          . Something not working — a label doing nothing, a worker getting 401s? Run the{' '}
+          <Link className="underline underline-offset-4" href="/doctor">
+            setup doctor
+          </Link>
           .
         </p>
       </div>
