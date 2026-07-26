@@ -420,6 +420,9 @@ export const jobSpec = pgTable('job_specs', {
   baseBranch: text('base_branch'),
   prNumber: integer('pr_number'),
   ciStatus: text('ci_status'), // 'pending' | 'success' | 'failure' — mirrors the check-suite webhook
+  // Label-to-bounty bot: the GitHub issue this job was minted from. One job
+  // per (repoFullName, issueNumber) — the idempotency and cancel key.
+  issueNumber: integer('issue_number'),
   // Rising-price (Dutch auction) plan for an unclaimed job: PricingPlan from
   // lib/market-price.ts, or null for an ordinary fixed-price job. The CURRENT
   // price is never stored here — it is always the live on-chain bounty, since

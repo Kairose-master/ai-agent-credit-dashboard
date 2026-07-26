@@ -48,6 +48,7 @@ export async function POST(request: Request) {
   try {
     if (event === 'pull_request') return await handlePullRequest(payload)
     if (event === 'check_suite' || event === 'check_run') return await handleCheck(event, payload)
+    if (event === 'issues') return await handleIssue(payload)
     return Response.json({ status: 'ignored', event })
   } catch (error) {
     console.error(`[github/webhook] ${event} handling failed:`, error)
@@ -70,6 +71,139 @@ async function writeVerdict(specHash: string, verdict: Verdict, ciStatus: string
     .update(jobSpec)
     .set(ciStatus === null ? { testResult: verdict } : { testResult: verdict, ciStatus })
     .where(eq(jobSpec.specHash, specHash))
+}
+
+
+/**
+ * The label-to-bounty bot: `bounty:$15` on a GitHub issue IS the job posting.
+ *
+ * labeled   → resolve the labeler through github_identities to a platform
+ *             account (the GitHub sign-in is the identity bridge), escrow
+ *             from their funded agent, post the repo job, comment back.
+ *             Not linked → the comment carries the link instructions, so a
+ *             failed label is an onboarding surface, not a silent no-op.
+ * unlabeled / closed → cancel-and-refund, but ONLY while the job is still
+ *             Open on-chain — a claimed job is a worker's committed work and
+ *             a label cannot destroy it.
+ *
+ * Requires the App to hold Issues: Read & write and subscribe to Issue
+ * events (docs/github-jobs.md). Idempotent per (repo, issue): re-delivered
+ * webhooks find the existing open job and stop.
+ */
+async function handleIssue(payload: any): Promise<Response> {
+  const action = String(payload?.action ?? '')
+  const repoFullName = String(payload?.repository?.full_name ?? '')
+  const { issueNumberOf, parseBountyLabel, bountyLabelOn } = await import('@/lib/bounty-label')
+  const issueNumber = issueNumberOf(payload)
+  if (!repoFullName || issueNumber === null) return Response.json({ status: 'ignored' })
+
+  const origin = 'https://ai-agent-credit-dashboard.vercel.app'
+  const { commentOnPr } = await import('@/lib/github-app') // issues share the comments API with PRs
+
+  if (action === 'labeled') {
+    const bountyUsd = parseBountyLabel(String(payload?.label?.name ?? ''))
+    if (bountyUsd === null) return Response.json({ status: 'ignored', reason: 'not a bounty label' })
+
+    const { validateLabelBounty, briefFromIssue, bountyPostedComment, notLinkedComment } = await import('@/lib/bounty-label')
+    const check = validateLabelBounty(bountyUsd)
+    if (!check.ok) {
+      await commentOnPr(repoFullName, issueNumber, `⚠️ ${check.reason}`)
+      return Response.json({ status: 'rejected', reason: check.reason })
+    }
+
+    // Idempotency: one open job per (repo, issue).
+    await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
+    const existing = (await db.select().from(jobSpec)).find(
+      (sp) => sp.repoFullName === repoFullName && sp.issueNumber === issueNumber && sp.onchainJobId !== null,
+    )
+    if (existing) {
+      const { readJobs } = await import('@/lib/onchain/labor')
+      const jobs = await readJobs().catch(() => [])
+      const live = jobs.find((j) => j.id === existing.onchainJobId)
+      if (live && (live.status === 'Open' || live.status === 'Accepted' || live.status === 'Submitted')) {
+        return Response.json({ status: 'ignored', reason: 'job already live for this issue' })
+      }
+    }
+
+    // Identity bridge: the LABELER pays, resolved via their linked GitHub.
+    const senderGithubId = String(payload?.sender?.id ?? '')
+    const { userIdForGithubUser } = await import('@/lib/github-identity')
+    const userId = senderGithubId ? await userIdForGithubUser(senderGithubId) : null
+    if (!userId) {
+      await commentOnPr(repoFullName, issueNumber, notLinkedComment(origin))
+      return Response.json({ status: 'rejected', reason: 'labeler not linked' })
+    }
+    const { agent } = await import('@/lib/db/schema')
+    const agents = await db.select().from(agent).where(eq(agent.userId, userId))
+    const requester = agents.find((a) => a.smartAccountAddress)
+    if (!requester) {
+      await commentOnPr(repoFullName, issueNumber, `Your Ledgermind account has no provisioned agent to escrow from — create one at ${origin}/agents and re-add the label.`)
+      return Response.json({ status: 'rejected', reason: 'no funded agent' })
+    }
+
+    try {
+      const { postRepoJob } = await import('@/lib/repo-job-post')
+      const issueTitle = String(payload?.issue?.title ?? `Issue #${issueNumber}`)
+      const res = await postRepoJob({
+        requesterAgentId: requester.id,
+        repoFullName,
+        title: issueTitle,
+        brief: briefFromIssue({
+          title: issueTitle,
+          body: payload?.issue?.body ?? null,
+          url: String(payload?.issue?.html_url ?? `https://github.com/${repoFullName}/issues/${issueNumber}`),
+        }),
+        issueUrl: String(payload?.issue?.html_url ?? ''),
+        bountyUsd,
+        issueNumber,
+      })
+      const [posted] = (await db.select().from(jobSpec).where(eq(jobSpec.specHash, res.specHash)))
+      await commentOnPr(repoFullName, issueNumber, bountyPostedComment({ bountyUsd, jobId: posted?.onchainJobId ?? null, origin }))
+      const { logPlatformEvent } = await import('@/lib/platform-feed')
+      await logPlatformEvent('BOUNTY_LABELED', `A bounty label minted a $${bountyUsd} job from ${repoFullName}#${issueNumber}`).catch(() => {})
+      return Response.json({ status: 'ok', posted: res.specHash })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      await commentOnPr(repoFullName, issueNumber, `⚠️ Could not escrow the bounty: ${reason.slice(0, 300)}`)
+      return Response.json({ status: 'error', reason }, { status: 200 }) // 200: GitHub should not retry a semantic failure
+    }
+  }
+
+  if (action === 'unlabeled' || action === 'closed') {
+    // Only act when the bounty label is genuinely gone (unlabeled fires per
+    // label; closed ends the intent regardless).
+    if (action === 'unlabeled') {
+      const removed = parseBountyLabel(String(payload?.label?.name ?? ''))
+      if (removed === null) return Response.json({ status: 'ignored' })
+      if (bountyLabelOn(payload?.issue?.labels) !== null) {
+        return Response.json({ status: 'ignored', reason: 'another bounty label remains' })
+      }
+    }
+    const spec = (await db.select().from(jobSpec)).find(
+      (sp) => sp.repoFullName === repoFullName && sp.issueNumber === issueNumber && sp.onchainJobId !== null,
+    )
+    if (!spec?.requesterAgentId || spec.onchainJobId === null) return Response.json({ status: 'ignored' })
+
+    const { readJobs, cancelJob } = await import('@/lib/onchain/labor')
+    const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
+    const live = jobs.find((j) => j.id === spec.onchainJobId)
+    // A claimed job is a worker's committed work — a label cannot destroy it.
+    if (!live || live.status !== 'Open') {
+      return Response.json({ status: 'ignored', reason: 'job not Open — a claimed job outlives its label' })
+    }
+    try {
+      await cancelJob(spec.requesterAgentId, spec.onchainJobId)
+      await commentOnPr(repoFullName, issueNumber, `↩️ Bounty cancelled and the escrow refunded (job was still unclaimed).`)
+      const { logPlatformEvent } = await import('@/lib/platform-feed')
+      await logPlatformEvent('BOUNTY_UNLABELED', `Bounty on ${repoFullName}#${issueNumber} cancelled while unclaimed — escrow refunded`).catch(() => {})
+      return Response.json({ status: 'ok', cancelled: spec.onchainJobId })
+    } catch (error) {
+      console.error('[github/webhook] bounty cancel failed:', error)
+      return Response.json({ status: 'error' }, { status: 200 })
+    }
+  }
+
+  return Response.json({ status: 'ignored' })
 }
 
 /**

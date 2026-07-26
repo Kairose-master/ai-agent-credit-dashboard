@@ -307,6 +307,7 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS base_branch text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pr_number integer;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS ci_status text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pricing jsonb;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS issue_number integer;
 ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "dueAt" timestamptz;
 ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "termDays" integer;
 ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "defaultedAt" timestamptz;

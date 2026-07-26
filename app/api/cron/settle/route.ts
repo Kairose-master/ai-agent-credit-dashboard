@@ -57,6 +57,26 @@ export async function GET(request: Request) {
     .then((n) => { report.pricesRaised = n })
     .catch((e) => { report.pricesRaised = String(e) })
 
+  // House wallet stays solvent without a human: below the floor, mint free
+  // testnet USDC back to the ceiling. The posting paths already top up on
+  // demand; this keeps headroom so a label-to-bounty webhook never has to
+  // wait on a mint inside the request.
+  const houseAgentId = process.env.X402_JOB_REQUESTER_AGENT_ID
+  if (houseAgentId) {
+    try {
+      const { houseBalanceUsd, ensureHouseFunds } = await import('@/lib/house-funding')
+      const { balanceUsd } = await houseBalanceUsd(houseAgentId)
+      if (balanceUsd !== null && balanceUsd < 50) {
+        const funding = await ensureHouseFunds(houseAgentId, 100)
+        report.houseTopUp = funding.note
+      } else {
+        report.houseTopUp = balanceUsd === null ? 'balance unreadable' : `ok ($${balanceUsd.toFixed(2)})`
+      }
+    } catch (e) {
+      report.houseTopUp = String(e)
+    }
+  }
+
   // Loans past due + grace become real defaults: status flip, the
   // REPAYMENT_DEFAULTED event, and the score hit it was designed to cause.
   const { sweepDefaultedLoans } = await import('@/lib/loan-sweep')

@@ -37,6 +37,8 @@ export type RepoJobInput = {
   minScore?: number
   /** Optional rising price: leave null for an ordinary fixed bounty. */
   pricing?: { ceilingUsd: number; stepUsd?: number; stepMinutes?: number } | null
+  /** Set by the label-to-bounty bot: the GitHub issue this job mirrors. */
+  issueNumber?: number | null
 }
 
 /** Strip the shapes people actually paste (full URL, trailing .git) down to
@@ -121,6 +123,7 @@ export async function postRepoJob(input: RepoJobInput) {
       deliverableKind: 'text', // the diff IS text — no special worker capability needed
       requiredCapabilities: ['code'],
       pricing: pricingCheck.plan,
+      issueNumber: input.issueNumber ?? null,
     })
 
     const { postJob } = await import('@/lib/onchain/labor')

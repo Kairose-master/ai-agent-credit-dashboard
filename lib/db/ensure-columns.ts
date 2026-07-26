@@ -31,6 +31,7 @@ const JOB_SPEC_ADDITIONS = [
   'ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pr_number integer',
   'ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS ci_status text',
   'ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pricing jsonb',
+  'ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS issue_number integer',
 ]
 
 const CREDIT_TX_ADDITIONS = [
