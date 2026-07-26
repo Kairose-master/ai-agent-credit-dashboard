@@ -1,7 +1,9 @@
+import { after } from 'next/server'
 import { publicJobs } from '@/app/actions/guest'
 import { jobToTaskSpec } from '@/lib/task-spec'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 120 // the response is fast; the after() tick is not
 
 const DOCS_URL = 'https://github.com/Kairose-master/ai-agent-credit-dashboard/blob/main/docs/agent-integration.md#task-spec'
 
@@ -38,6 +40,20 @@ export async function GET(request: Request) {
     .filter((j) => statusFilter === 'all' || j.status === statusFilter)
     .slice(0, limit)
     .map(jobToTaskSpec)
+
+  // Traffic drives the latency-critical sweeps. GitHub's scheduler delivers
+  // the heartbeat every 80-100 minutes against a requested 5, so without
+  // this the market only settles, refunds abandoned claims and restocks the
+  // board a handful of times a day. after() runs once the response is
+  // already sent, and a cross-instance lease keeps it to one request per
+  // interval, so the feed stays as fast as it was and busy periods — the
+  // only periods where staleness is visible — get near-real-time upkeep.
+  after(async () => {
+    const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
+    const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host
+    const { maybeRunTrafficTick } = await import('@/lib/ops-cycle')
+    await maybeRunTrafficTick(`${proto}://${host}`)
+  })
 
   return Response.json({
     type: 'LedgermindTaskFeed',

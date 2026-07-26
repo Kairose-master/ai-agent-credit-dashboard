@@ -1,26 +1,24 @@
-import { db } from '@/lib/db'
-import { delegation } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
-import { tickDelegation } from '@/lib/delegation'
+import { runOpsCycle } from '@/lib/ops-cycle'
 
 export const maxDuration = 300 // settlement = several on-chain txs, LLM verify calls
 
 /**
  * GET /api/cron/settle — the platform's background settlement heartbeat.
  *
- * Historically every verification/finalization tick piggybacked on a
- * human polling a page ("no-cron" design). That works until the human
- * closes the tab: Submitted jobs then sit ungraded and the UI falls back
- * to manual approve/dispute buttons. This endpoint IS that missing
- * heartbeat, callable by any scheduler:
+ * Historically every verification/finalization tick piggybacked on a human
+ * polling a page ("no-cron" design). That works until the human closes the
+ * tab: Submitted jobs then sit ungraded and the UI falls back to manual
+ * approve/dispute buttons. This endpoint is the scheduler-callable version:
  *
- *  - GitHub Actions (.github/workflows/settle-heartbeat.yml) every ~5 min — free
+ *  - GitHub Actions (.github/workflows/settle-heartbeat.yml) — free, but
+ *    measured at 80–100 min against a requested 5, so it is a floor on
+ *    freshness, not a guarantee
  *  - Vercel Cron (vercel.json) — daily on Hobby, per-minute on Pro
  *
- * It runs the exact same two sweeps the pages run, for ALL users:
- *  1. sweepStuckGradedJobs — re-drives settlements that died mid-flight
- *  2. tickDelegation for every active delegation — verifies submissions,
- *     pays passes, reposts failures, assembles finished delegations
+ * The sweeps themselves live in lib/ops-cycle.ts, because ordinary traffic
+ * drives the latency-critical subset of the same list (see
+ * maybeRunTrafficTick) — one definition, no drift between "what the cron
+ * runs" and "what a page load runs".
  *
  * Auth: `Authorization: Bearer <CRON_SECRET>` (or ?secret= for schedulers
  * that can't set headers). With CRON_SECRET unset the endpoint refuses to
@@ -37,162 +35,9 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const report: Record<string, unknown> = {}
-
-  const { sweepStuckGradedJobs, sweepDisputedJobs } = await import('@/lib/labor-settle')
-  await sweepStuckGradedJobs()
-    .then(() => { report.sweep = 'ok' })
-    .catch((e) => { report.sweep = String(e) })
-
-  // Return jobs stuck in dispute to the market so a different worker can take
-  // them instead of the delegation waiting on them forever.
-  await sweepDisputedJobs()
-    .then((n) => { report.disputedReposted = n })
-    .catch((e) => { report.disputedReposted = String(e) })
-
-  // Walk unclaimed rising-price jobs toward their ceiling. Only ever touches
-  // jobs still Open, so it can never cancel work somebody has started.
-  const { sweepPriceRaises } = await import('@/lib/price-raise')
-  await sweepPriceRaises()
-    .then((n) => { report.pricesRaised = n })
-    .catch((e) => { report.pricesRaised = String(e) })
-
-  // The fleet controller's identity pass: every agent gets its own key
-  // (docker/k8s framing: no pod runs on the shared service account).
-  try {
-    const { ensureFleetKeys } = await import('@/lib/agent-keys')
-    report.keysIssued = await ensureFleetKeys()
-  } catch (e) {
-    report.keysIssued = String(e)
-  }
-
-  // Cloud/MCP auto-miners previously only ticked when a USER loaded a page —
-  // luck, not a control loop. The heartbeat now reconciles unconditionally,
-  // scaled by queue depth (the HPA analog in worker-fleet.ts).
-  try {
-    const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
-    const { reapStuckTasks } = await import('@/lib/agent-tasks')
-    await reapStuckTasks()
-    const url = new URL(request.url)
-    await tickCloudAutoMineAgents(`${url.origin}/api/runtime/callback`)
-    report.fleetTick = 'ok'
-  } catch (e) {
-    report.fleetTick = String(e)
-  }
-
-  // House wallet stays solvent without a human: below the floor, mint free
-  // testnet USDC back to the ceiling. The posting paths already top up on
-  // demand; this keeps headroom so a label-to-bounty webhook never has to
-  // wait on a mint inside the request.
-  const houseAgentId = process.env.X402_JOB_REQUESTER_AGENT_ID
-  if (houseAgentId) {
-    try {
-      const { houseBalanceUsd, ensureHouseFunds } = await import('@/lib/house-funding')
-      const { balanceUsd } = await houseBalanceUsd(houseAgentId)
-      if (balanceUsd !== null && balanceUsd < 50) {
-        const funding = await ensureHouseFunds(houseAgentId, 100)
-        report.houseTopUp = funding.note
-      } else {
-        report.houseTopUp = balanceUsd === null ? 'balance unreadable' : `ok ($${balanceUsd.toFixed(2)})`
-      }
-    } catch (e) {
-      report.houseTopUp = String(e)
-    }
-  }
-
-  // Loans past due + grace become real defaults: status flip, the
-  // REPAYMENT_DEFAULTED event, and the score hit it was designed to cause.
-  const { sweepDefaultedLoans, sweepLoanReminders } = await import('@/lib/loan-sweep')
-  await sweepDefaultedLoans()
-    .then((n) => { report.loansDefaulted = n })
-    .catch((e) => { report.loansDefaulted = String(e) })
-
-  // Loan lifecycle emails (due-soon / overdue / defaulted) — one per phase
-  // transition per loan; no-op while email is unconfigured.
-  await sweepLoanReminders()
-    .then((n) => { report.loanReminders = n })
-    .catch((e) => { report.loanReminders = String(e) })
-
-  // Claimed-but-never-delivered jobs freeze the requester's escrow forever
-  // (the contract has no exit from Accepted) — walk them out and refund.
-  const { reclaimAbandonedJobs } = await import('@/lib/stale-claim')
-  await reclaimAbandonedJobs()
-    .then((r) => { report.abandonedClaims = r.skipped ?? `${r.reclaimed}/${r.examined} reclaimed` })
-    .catch((e) => { report.abandonedClaims = String(e) })
-
-  // A visitor must never land on an empty board: top it back up from the
-  // real i18n backlog when Open drains below target (lib/board-stock.ts).
-  const { restockBoard } = await import('@/lib/board-stock')
-  await restockBoard()
-    .then((r) => { report.boardRestock = r.skipped ?? `open ${r.openBefore} → +${r.posted}` })
-    .catch((e) => { report.boardRestock = String(e) })
-
-  let active: (typeof delegation.$inferSelect)[] = []
-  try {
-    active = await db.select().from(delegation).where(eq(delegation.status, 'posted'))
-  } catch {
-    report.delegations = 'table missing (migration pending)'
-  }
-
-  if (active.length > 0) {
-    const { readJobs } = await import('@/lib/onchain/labor')
-    const jobs = await readJobs().catch(() => [])
-    let ticked = 0
-    let failed = 0
-    for (const row of active) {
-      await tickDelegation(row, jobs)
-        .then(() => { ticked++ })
-        .catch((e) => {
-          failed++
-          console.error(`[cron/settle] tick failed for ${row.id}:`, e)
-        })
-    }
-    report.delegations = { active: active.length, ticked, failed }
-  } else if (!report.delegations) {
-    report.delegations = { active: 0 }
-  }
-
-  // Keep the starter-job supply topped up — the heartbeat is exactly the
-  // "nobody is around" moment the faucet exists for.
-  try {
-    const { tickJobFaucet } = await import('@/lib/job-faucet')
-    report.faucet = await tickJobFaucet({ force: true })
-  } catch (e) {
-    report.faucet = String(e)
-  }
-
-  // Drive cloud auto-mine agents from the heartbeat too. A cloud agent never
-  // polls (the platform dispatches TO it), so without this it only mined when
-  // a human happened to load a page. Now it self-ticks every heartbeat — the
-  // sweep fans out across agents in bounded parallel (phase 1); each is a
-  // distinct smart account, so their on-chain accepts are nonce-safe.
-  try {
-    const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
-    const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
-    const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host
-    await tickCloudAutoMineAgents(`${proto}://${host}/api/runtime/callback`)
-    report.cloudMining = 'ok'
-  } catch (e) {
-    report.cloudMining = String(e)
-  }
-
-  // Let trusted agents cast their owners' governance votes on open
-  // proposals. Best-effort (LLM-backed); never fails the heartbeat.
-  try {
-    const { runAutoVotes } = await import('@/lib/governance')
-    report.autoVotes = await runAutoVotes()
-  } catch (e) {
-    report.autoVotes = String(e)
-  }
-
-  // Reveal any on-chain commit-reveal votes whose reveal window has opened
-  // (no-op unless VEILPOLL_FACTORY_ADDRESS is configured).
-  try {
-    const { revealOnchainVotes } = await import('@/lib/governance')
-    report.onchainReveals = await revealOnchainVotes()
-  } catch (e) {
-    report.onchainReveals = String(e)
-  }
+  const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
+  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host
+  const report = await runOpsCycle(`${proto}://${host}`)
 
   return Response.json({ ok: true, ...report })
 }
