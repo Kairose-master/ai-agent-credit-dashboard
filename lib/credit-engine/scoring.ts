@@ -315,6 +315,56 @@ export function recencyWeight(eventAt: Date, now: Date, halfLifeDays: number = R
   return Math.pow(0.5, ageDays / halfLifeDays)
 }
 
+/**
+ * Collateralized settled volume — the un-farmable dollars behind a loan.
+ *
+ * A credit LIMIT derived from score alone means anything that inflates the
+ * score inflates borrowing power, and borrowing is the only place the
+ * platform can actually lose money — the terminal move of every reputation
+ * farm is: pump score → draw → default. So the lending ceiling is tied to
+ * something the halving math makes expensive to fake: settlement volume,
+ * discounted per repeat counterparty (0.5^k, converges to ~2 full trades
+ * per partner) and by counterparty credibility (a freshly minted
+ * accomplice's dollars count at the 0.25 floor).
+ *
+ * Trades with NO recorded counterparty (legacy events) are pooled into one
+ * shared bucket and floored like strangers: unlike the score path, lending
+ * cannot afford to give unknown history the benefit of the doubt.
+ */
+export type SettledTrade = {
+  amountUsd: number
+  counterparty: string | null
+  counterpartyScore: number | null
+  createdAt: Date
+}
+
+export function collateralizedVolume(trades: SettledTrade[]): number {
+  const ordered = [...trades]
+    .filter((t) => Number.isFinite(t.amountUsd) && t.amountUsd > 0)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  const seen = new Map<string, number>()
+  let total = 0
+  for (const t of ordered) {
+    const key = t.counterparty ?? '__unknown__'
+    const k = seen.get(key) ?? 0
+    seen.set(key, k + 1)
+    const credibility = t.counterparty === null ? CREDIBILITY_FLOOR : credibilityWeight(t.counterpartyScore)
+    total += t.amountUsd * collusionWeight(k) * credibility
+  }
+  return Math.round(total * 100) / 100
+}
+
+/** Borrow up to this multiple of collateralized settled volume. */
+export const COLLATERAL_MULTIPLE = 2
+
+/** The lending ceiling: the score curve sets ambition, the collateralized
+ *  volume sets reality, and the lower one wins. An agent with a great score
+ *  and no diverse settled history can borrow ~nothing — by design. */
+export function collateralizedCreditLimit(scoreLimit: number, trades: SettledTrade[]): number {
+  const cap = COLLATERAL_MULTIPLE * collateralizedVolume(trades)
+  return Math.min(scoreLimit, Math.round(cap * 100) / 100)
+}
+
 /** Weighted count of a market signal: each event discounted by counterparty
  *  repetition (halving), counterparty credibility, grader strength, and age.
  *  Chronological order matters — the FIRST trades with a counterparty keep

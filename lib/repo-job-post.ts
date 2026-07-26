@@ -126,6 +126,11 @@ export async function postRepoJob(input: RepoJobInput) {
       issueNumber: input.issueNumber ?? null,
     })
 
+    // Posting fee before escrow: wash trading must cost, and a requester
+    // who cannot afford bounty + fee should find out before money locks.
+    const { collectPostingFee } = await import('@/lib/platform-fee')
+    const fee = await collectPostingFee(input.requesterAgentId, input.bountyUsd, `${repoFullName} "${input.title}"`)
+
     const { postJob } = await import('@/lib/onchain/labor')
     const txHash = await postJob(
       input.requesterAgentId,
@@ -148,7 +153,7 @@ export async function postRepoJob(input: RepoJobInput) {
       'REPO_JOB_POSTED',
       `${ag.name} posted a GitHub job on ${repoFullName} — "${input.title}" ($${input.bountyUsd})`,
     )
-    return { txHash, specHash, repoFullName, baseBranch, pricing: pricingCheck.plan }
+    return { txHash, specHash, repoFullName, baseBranch, pricing: pricingCheck.plan, feeUsd: 'feeUsd' in fee ? fee.feeUsd : 0 }
   } catch (error) {
     throw asActionError(error, 'postRepoJob')
   }

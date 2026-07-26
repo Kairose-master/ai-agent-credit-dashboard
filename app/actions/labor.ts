@@ -218,6 +218,11 @@ export async function postJobAction(input: {
         : [],
     })
 
+    // Posting fee before escrow (lib/platform-fee.ts): wash trading must
+    // cost something, and "can't afford bounty + fee" should surface here.
+    const { collectPostingFee } = await import('@/lib/platform-fee')
+    await collectPostingFee(input.requesterAgentId, input.bountyUsd, `"${input.title}"`)
+
     const { postJob } = await import('@/lib/onchain/labor')
     const txHash = await postJob(input.requesterAgentId, input.bountyUsd, Math.round(input.minScore), specHash)
 

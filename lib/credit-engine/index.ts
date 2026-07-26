@@ -10,7 +10,7 @@ import { db } from '@/lib/db'
 import { agent, agentEvent, creditScoreEntry, creditTransaction, jobSpec } from '@/lib/db/schema'
 import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import { assessCredit, buildCalculationReason, type CreditAssessment } from './scoring'
+import { assessCredit, buildCalculationReason, collateralizedCreditLimit, type CreditAssessment } from './scoring'
 import { getEffectiveCreditRules } from '@/lib/credit-rules'
 
 /**
@@ -122,6 +122,24 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     }),
     { rating: rules.rating, risk: rules.risk },
   )
+
+  // Lending is where the platform can actually lose money, so the limit the
+  // score curve proposes is capped by collateral the halving math makes
+  // expensive to fake: settled escrow volume, discounted per repeat
+  // counterparty and by counterparty credibility (see scoring.ts). Score
+  // stays as-is — this caps only borrowing power.
+  const settledTrades = events
+    .filter((e) => e.eventType === 'JOB_COMPLETED')
+    .map((e) => {
+      const d = (e.detail ?? {}) as Record<string, unknown>
+      return {
+        amountUsd: typeof d.bounty === 'number' ? d.bounty : 0,
+        counterparty: typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null,
+        counterpartyScore: typeof d.requesterScore === 'number' ? d.requesterScore : null,
+        createdAt: e.createdAt,
+      }
+    })
+  assessment.creditLimit = collateralizedCreditLimit(assessment.creditLimit, settledTrades)
 
   const [previous] = await db
     .select()
