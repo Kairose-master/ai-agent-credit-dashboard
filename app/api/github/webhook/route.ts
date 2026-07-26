@@ -18,7 +18,7 @@
  */
 import { db } from '@/lib/db'
 import { jobSpec } from '@/lib/db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNotNull } from 'drizzle-orm'
 
 export const maxDuration = 300 // settlement runs on-chain UserOps
 
@@ -74,6 +74,28 @@ async function specForPr(repoFullName: string, prNumber: number) {
   return spec ?? null
 }
 
+/** Find the live job this issue label created without scanning every job. */
+async function specForIssue(repoFullName: string, issueNumber: number) {
+  const [spec] = await db
+    .select({
+      specHash: jobSpec.specHash,
+      title: jobSpec.title,
+      requesterAgentId: jobSpec.requesterAgentId,
+      onchainJobId: jobSpec.onchainJobId,
+      issueNumber: jobSpec.issueNumber,
+      repoFullName: jobSpec.repoFullName,
+    })
+    .from(jobSpec)
+    .where(
+      and(
+        eq(jobSpec.repoFullName, repoFullName),
+        eq(jobSpec.issueNumber, issueNumber),
+        isNotNull(jobSpec.onchainJobId),
+      ),
+    )
+  return spec ?? null
+}
+
 async function writeVerdict(specHash: string, verdict: Verdict, ciStatus: string | null) {
   await db
     .update(jobSpec)
@@ -121,9 +143,7 @@ async function handleIssue(payload: any): Promise<Response> {
 
     // Idempotency: one open job per (repo, issue).
     await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
-    const existing = (await db.select().from(jobSpec)).find(
-      (sp) => sp.repoFullName === repoFullName && sp.issueNumber === issueNumber && sp.onchainJobId !== null,
-    )
+    const existing = await specForIssue(repoFullName, issueNumber)
     if (existing) {
       const { readJobs } = await import('@/lib/onchain/labor')
       const jobs = await readJobs().catch(() => [])
@@ -165,7 +185,10 @@ async function handleIssue(payload: any): Promise<Response> {
         bountyUsd,
         issueNumber,
       })
-      const [posted] = (await db.select().from(jobSpec).where(eq(jobSpec.specHash, res.specHash)))
+      const [posted] = await db
+        .select({ onchainJobId: jobSpec.onchainJobId })
+        .from(jobSpec)
+        .where(eq(jobSpec.specHash, res.specHash))
       await commentOnPr(repoFullName, issueNumber, bountyPostedComment({ bountyUsd, jobId: posted?.onchainJobId ?? null, origin }))
       const { logPlatformEvent } = await import('@/lib/platform-feed')
       await logPlatformEvent('BOUNTY_LABELED', `A bounty label minted a $${bountyUsd} job from ${repoFullName}#${issueNumber}`).catch(() => {})
@@ -187,9 +210,7 @@ async function handleIssue(payload: any): Promise<Response> {
         return Response.json({ status: 'ignored', reason: 'another bounty label remains' })
       }
     }
-    const spec = (await db.select().from(jobSpec)).find(
-      (sp) => sp.repoFullName === repoFullName && sp.issueNumber === issueNumber && sp.onchainJobId !== null,
-    )
+    const spec = await specForIssue(repoFullName, issueNumber)
     if (!spec?.requesterAgentId || spec.onchainJobId === null) return Response.json({ status: 'ignored' })
 
     const { readJobs, cancelJob } = await import('@/lib/onchain/labor')
