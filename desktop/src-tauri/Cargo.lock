@@ -1887,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "ledgermind-miner"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "open",
  "reqwest 0.12.28",
