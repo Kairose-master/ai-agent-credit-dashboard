@@ -13,11 +13,6 @@ export const maxDuration = 120
  * spending policy and is recorded as a WALLET_TRANSFER behavioral event.
  */
 export async function POST(request: Request) {
-  const expected = process.env.RUNTIME_SHARED_SECRET ?? ''
-  if (expected && request.headers.get('x-runtime-secret') !== expected) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   const body = await request.json().catch(() => null)
   const action = body?.action as string | undefined
   const agentId = body?.agent_id as string | undefined
@@ -26,6 +21,33 @@ export async function POST(request: Request) {
   const [ag] = await db.select().from(agent).where(eq(agent.id, agentId))
   if (!ag?.smartAccountAddress) {
     return Response.json({ error: 'Agent has no smart account' }, { status: 404 })
+  }
+
+  // Authenticate against THIS agent's own key, and fail closed.
+  //
+  // Two problems with what stood here. It read
+  // `if (expected && header !== expected)`, so an unset or emptied
+  // RUNTIME_SHARED_SECRET skipped the check entirely and left an endpoint
+  // that sends an agent's USDC to any address completely open — fail-open
+  // on the one route where the cost of being wrong is the funds. And it
+  // accepted a single platform-wide secret to move ANY agent's money,
+  // which is exactly the shared-service-account model lib/agent-keys.ts
+  // was written to end; the callback path moved to per-agent keys and this
+  // one was left behind.
+  //
+  // resolveCallbackAuth gives both: the agent's own key, with the shared
+  // secret still tolerated for platform-runtime agents during the external
+  // runtime's transition (and only for them).
+  const { resolveCallbackAuth, callbackSecretMatches } = await import('@/lib/webhook')
+  const auth = await resolveCallbackAuth(agentId)
+  if (!auth.required) {
+    return Response.json(
+      { error: 'Wallet actions are unavailable: this agent has no key and no runtime secret is configured.' },
+      { status: 503 },
+    )
+  }
+  if (!callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
