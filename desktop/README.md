@@ -166,3 +166,28 @@ Support/com.ledgermind.miner/` on macOS, `%APPDATA%\com.ledgermind.miner\`
 on Windows) — nowhere else. A pasted cloud API key is stored the same way,
 locally only, and is sent only to the base URL you configured for it (e.g.
 Groq's own API), never to the Ledgermind platform.
+
+## Repo jobs (the `code` lane)
+
+GitHub repo jobs pay for a pull request that passes the requester's own CI.
+They are the one lane the Miner does not drive itself: text/image/audio are a
+single prompt in, an artifact out, but a repo job needs a clone, a multi-step
+edit loop and a `git diff`. That loop is [Foreman](https://www.npmjs.com/package/@kairose-master/foreman),
+so the lane shells out to `npx @kairose-master/foreman work` and confines
+itself to the parts a desktop app is actually best at:
+
+- **Folder consent.** Nothing is cloned until you pick a workspace directory.
+  That folder is the entire permission boundary — no default, no guessed home
+  directory, and it is remembered so you are asked once.
+- **An honest readiness check.** Node, model credentials and the workspace are
+  each either present or not, and the card names the single missing one rather
+  than being a lane that silently never earns.
+
+Requirements: Node 20+ on PATH and `ANTHROPIC_API_KEY` in your environment.
+
+What this machine can and cannot do, by construction: it clones **public**
+repositories over HTTPS, edits inside your chosen folder, and submits a
+unified diff. It is never given repository credentials and cannot push. The
+platform opens the pull request; your CI grades it; the requester merging is
+what releases the escrow. The model budget is capped at the job's bounty, so a
+run can never cost more than it pays.

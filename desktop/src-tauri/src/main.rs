@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod protocol;
+mod repo_lane;
 
 use protocol::{ModelBackend, RegisterRequest, RegisterResponse};
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,11 @@ struct StoredConfig {
     /// code, e.g. "en", "ko"). None → English.
     #[serde(default)]
     audio_voice: Option<String>,
+    /// The folder the owner approved for repo-job clones. Absent until they
+    /// pick one — this is the repo lane's entire permission boundary, so it
+    /// is never defaulted to the cwd or a guessed home directory.
+    #[serde(default)]
+    repo_workspace: Option<String>,
 }
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -612,9 +618,77 @@ async fn governance(
     protocol::governance(&agent.platform_url, &agent.agent_id, &agent.secret, &action, args).await
 }
 
+
+// ── Repo-job lane ───────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn repo_lane_status(app: tauri::AppHandle) -> Result<repo_lane::RepoLaneReadiness, String> {
+    let cfg = load_config(app);
+    let ws = cfg.repo_workspace.map(PathBuf::from);
+    Ok(repo_lane::readiness(ws).await)
+}
+
+/// Ask the owner for a workspace folder and remember it. The dialog IS the
+/// consent: nothing is cloned anywhere until this returns a path.
+#[tauri::command]
+async fn pick_repo_workspace(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let handle = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .set_title("Choose a folder for repo-job clones")
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None); // cancelled — not an error, and nothing is stored
+    };
+    let display = path.display().to_string();
+    let mut cfg = load_config(app.clone());
+    cfg.repo_workspace = Some(display.clone());
+    save_stored_config(&app, &cfg)?;
+    Ok(Some(display))
+}
+
+#[tauri::command]
+fn clear_repo_workspace(app: tauri::AppHandle) -> Result<(), String> {
+    let mut cfg = load_config(app.clone());
+    cfg.repo_workspace = None;
+    save_stored_config(&app, &cfg)
+}
+
+/// Work one repo job end to end. Long-running by nature (clone + a real
+/// coding loop), so the UI shows a spinner rather than polling.
+#[tauri::command]
+async fn run_repo_job(
+    app: tauri::AppHandle,
+    min_bounty_usd: Option<f64>,
+    dry_run: Option<bool>,
+) -> Result<repo_lane::RepoRunResult, String> {
+    let cfg = load_config(app);
+    let agent = cfg.agent.ok_or("Sign in first")?;
+    let workspace = cfg
+        .repo_workspace
+        .ok_or("Choose a workspace folder before running repo jobs")?;
+    Ok(repo_lane::run_once(
+        &agent.platform_url,
+        &agent.agent_id,
+        &agent.secret,
+        std::path::Path::new(&workspace),
+        min_bounty_usd,
+        dry_run.unwrap_or(false),
+    )
+    .await)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             default_platform_url,
@@ -642,6 +716,10 @@ fn main() {
             set_image_mining,
             set_lanes,
             open_url,
+            repo_lane_status,
+            pick_repo_workspace,
+            clear_repo_workspace,
+            run_repo_job,
         ])
         .setup(|app| {
             // System tray: the Miner's real home. Closing the window hides

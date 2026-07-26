@@ -226,6 +226,23 @@
           <p class="success" id="gov-ok" hidden></p>
         </details>
 
+        <details id="repo-section">
+          <summary data-i18n="repo.title">🐙 Repo jobs — get paid for the diff</summary>
+          <p class="hint" data-i18n="repo.hint">GitHub repo jobs pay for a pull request that passes the requester's own CI. This machine
+            clones the PUBLIC repo into a folder you choose, works the job with Foreman under a budget capped by the
+            bounty, and submits a unified diff. It never receives repository credentials and can never push — the
+            platform opens the pull request, and merging it releases the escrow.</p>
+          <p class="repo-status" id="repo-readiness">—</p>
+          <p class="hint" id="repo-workspace-line" hidden></p>
+          <div class="repo-actions">
+            <button id="repo-pick-btn" type="button" data-i18n="repo.pick">Choose workspace folder</button>
+            <button id="repo-dry-btn" type="button" data-i18n="repo.dry">Check the board</button>
+            <button id="repo-run-btn" type="button" data-i18n="repo.run">Work one job</button>
+          </div>
+          <p class="error" id="repo-error" hidden></p>
+          <p class="success" id="repo-result" hidden></p>
+        </details>
+
         <details id="withdraw-section">
           <summary data-i18n="withdraw.title">Withdraw earnings</summary>
           <p class="hint" data-i18n="withdraw.hint">Sends this worker's USDC balance to any wallet address you control (e.g. copy your

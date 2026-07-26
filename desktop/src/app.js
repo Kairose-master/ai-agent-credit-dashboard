@@ -4,6 +4,11 @@ const { listen } = window.__TAURI__.event
 // ---------- i18n (EN default, KO toggle) ----------
 
 const KO = {
+  'repo.title': '🐙 레포 작업 — diff로 돈 받기',
+  'repo.hint': 'GitHub 레포 작업은 요청자의 CI를 통과하는 PR에 값을 지불합니다. 이 컴퓨터가 공개 레포를 여러분이 고른 폴더에 클론하고, 현상금을 상한으로 한 예산 안에서 Foreman으로 작업한 뒤, 통합 diff를 제출합니다. 저장소 자격증명은 절대 받지 않고 푸시도 할 수 없습니다 — PR은 플랫폼이 열고, 머지가 에스크로를 풉니다.',
+  'repo.pick': '작업 폴더 선택',
+  'repo.dry': '게시판 확인',
+  'repo.run': '한 건 작업하기',
   subtitle: '다운로드하면 내 모델이 백그라운드에서 USDC를 벌어요 — 텍스트·이미지 일감, 터미널 없이. 채굴 펫 키우고, 일감 맡기고, Claude/ChatGPT에 연결까지.',
   'reg.title': '1. 계정 연결',
   'reg.hint': '처음이신가요? 계정과 워커 에이전트가 한 번에 만들어져요. 이미 Ledgermind 계정이 있다면 같은 이메일/비밀번호를 입력하면 새 에이전트가 추가됩니다.',
@@ -1765,6 +1770,7 @@ function initMiningView() {
 }
 
 async function enterMiningView() {
+  refreshRepoLane().catch(() => {})
   const cfg = await invoke('load_config')
   if (!cfg.agent) return showView('register')
   if (!cfg.backend) return enterBackendView()
@@ -1789,6 +1795,84 @@ async function enterMiningView() {
 
 // ---------- Boot ----------
 
+// ── Repo-job lane ───────────────────────────────────────────────────────
+//
+// The lane's whole job in the UI is to be honest about two things: whether
+// this machine can actually do repo work (Node, credentials, an approved
+// folder), and what the last run really produced. A claimed job that quietly
+// did nothing is worse than a lane that says it is not ready.
+
+function repoSay(kind, text) {
+  const err = document.getElementById('repo-error')
+  const ok = document.getElementById('repo-result')
+  err.hidden = kind !== 'error'
+  ok.hidden = kind !== 'ok'
+  if (kind === 'error') err.textContent = text
+  if (kind === 'ok') ok.textContent = text
+}
+
+async function refreshRepoLane() {
+  try {
+    const st = await invoke('repo_lane_status')
+    document.getElementById('repo-readiness').textContent = st.detail
+    const line = document.getElementById('repo-workspace-line')
+    line.hidden = !st.workspace
+    if (st.workspace) line.textContent = `Workspace: ${st.workspace}`
+    document.getElementById('repo-run-btn').disabled = !st.ready
+    document.getElementById('repo-dry-btn').disabled = !st.node
+  } catch (e) {
+    document.getElementById('repo-readiness').textContent = String(e)
+  }
+}
+
+function describeRepoRun(r) {
+  if (r.status === 'no-jobs') return r.note || 'No open repo jobs on the board right now.'
+  if (r.status === 'dry-run') {
+    return r.job_id
+      ? `Would claim job #${r.job_id} — ${r.repo} ($${r.bounty_usd}). Nothing claimed or spent.`
+      : 'Nothing to claim right now.'
+  }
+  if (r.status === 'no-changes') return r.note || 'The run changed no files, so nothing was submitted.'
+  if (r.status === 'error') return r.note || r.error || 'The run failed.'
+  const parts = [`Job #${r.job_id} — ${r.repo}`]
+  if (typeof r.cost_usd === 'number') parts.push(`spent $${r.cost_usd.toFixed(2)} of $${r.bounty_usd}`)
+  parts.push(r.verdict === 'awaiting review' ? 'submitted; the PR is open and CI decides next' : `verdict: ${r.verdict}`)
+  return parts.join(' · ')
+}
+
+async function runRepoJob(dryRun) {
+  const btn = document.getElementById(dryRun ? 'repo-dry-btn' : 'repo-run-btn')
+  const label = btn.textContent
+  btn.disabled = true
+  btn.textContent = dryRun ? 'Checking…' : 'Working… (this takes a while)'
+  repoSay(null, '')
+  try {
+    const r = await invoke('run_repo_job', { dryRun })
+    repoSay(r.status === 'error' ? 'error' : 'ok', describeRepoRun(r))
+  } catch (e) {
+    repoSay('error', String(e))
+  } finally {
+    btn.textContent = label
+    btn.disabled = false
+    await refreshRepoLane()
+  }
+}
+
+function initRepoView() {
+  document.getElementById('repo-pick-btn').addEventListener('click', async () => {
+    try {
+      const picked = await invoke('pick_repo_workspace')
+      if (picked) repoSay('ok', `Workspace set to ${picked}. Repo jobs are cloned there and nowhere else.`)
+    } catch (e) {
+      repoSay('error', String(e))
+    }
+    await refreshRepoLane()
+  })
+  document.getElementById('repo-dry-btn').addEventListener('click', () => runRepoJob(true))
+  document.getElementById('repo-run-btn').addEventListener('click', () => runRepoJob(false))
+}
+
+
 async function boot() {
   applyLang()
   document.getElementById('lang-toggle').addEventListener('click', () => {
@@ -1803,6 +1887,7 @@ async function boot() {
   initMiningView()
   initDelegateView()
   initGovernanceView()
+  initRepoView()
 
   document.getElementById('pet-wrap').addEventListener('click', onPetClick)
   document.getElementById('shop-toggle').addEventListener('click', () => {
