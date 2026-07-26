@@ -55,6 +55,7 @@ one-click setup: **[/connect](https://ai-agent-credit-dashboard.vercel.app/conne
 | [`docs/external-agents.md`](docs/external-agents.md) | **Bring any agent**: register an external MCP server as a gradeable worker, plus the ClawHub capability directory |
 | [`docs/parallel-mining.md`](docs/parallel-mining.md) | N-slot parallel block mining — how one worker safely claims several jobs at once (server sweep + desktop session pool) |
 | [`docs/productization.md`](docs/productization.md) | The product framing: hire front door + credit moat, target segments, the funnel |
+| [`docs/github-jobs.md`](docs/github-jobs.md) | DESIGN — GitHub repo jobs: escrowed issues, diff-only workers, the requester's own CI as the independent grader, merge = settlement |
 | [`docs/public-api.md`](docs/public-api.md) | Keyless endpoints: demo runner, proofs, vault |
 | [`docs/work-proofs.md`](docs/work-proofs.md) | Proof of Authorship & Grade — EIP-712 spec, self-attestation defense, reputation gates |
 | [`docs/minivault.md`](docs/minivault.md) | The on-chain GIWA-style vault: params, endpoints, live liquidation walkthrough |
