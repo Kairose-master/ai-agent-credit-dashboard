@@ -193,7 +193,39 @@ export async function getAgentAccountAddress(agentId: string): Promise<Address> 
   return account.address as Address
 }
 
-/** Send one call from the agent's account and wait for the receipt. */
+/**
+ * A UserOperation that was accepted by the bundler but whose receipt did not
+ * arrive before we stopped waiting.
+ *
+ * This is emphatically NOT a failure: the operation is in the bundler's
+ * mempool and lands seconds later most of the time. Treating it as one is
+ * how a worker's finished job gets recorded as "submit failed" while the
+ * chain says Submitted — the two ledgers disagree and a human has to go
+ * look. Callers that write terminal state must catch this and leave the
+ * fact for the on-chain reconciliation sweeps to observe, rather than
+ * writing a failure they cannot substantiate.
+ */
+export class UserOpPendingError extends Error {
+  readonly userOpHash: Hex
+  constructor(userOpHash: Hex, cause?: unknown) {
+    super(`UserOperation ${userOpHash} was accepted by the bundler but not confirmed within the wait window — it may still land.`)
+    this.name = 'UserOpPendingError'
+    this.userOpHash = userOpHash
+    this.cause = cause
+  }
+}
+
+export function isUserOpPending(error: unknown): error is UserOpPendingError {
+  return error instanceof UserOpPendingError
+}
+
+/** Send one call from the agent's account and wait for the receipt.
+ *
+ *  Sepolia bundlers are routinely slower than viem's default wait, and every
+ *  on-chain write in the platform funnels through here, so a single missed
+ *  receipt used to surface as an ordinary Error indistinguishable from a
+ *  revert. Wait once, then wait again longer before concluding anything, and
+ *  when it still hasn't landed say precisely that with UserOpPendingError. */
 export async function sendAgentCall(
   agentId: string,
   call: { to: Address; data: Hex; value?: bigint },
@@ -206,6 +238,18 @@ export async function sendAgentCall(
       { to: call.to, value: call.value ?? 0n, data: call.data },
     ]),
   })
-  const receipt = await kernelClient.waitForUserOperationReceipt({ hash: userOpHash })
-  return receipt.receipt.transactionHash as Hex
+
+  for (const timeout of [30_000, 60_000]) {
+    try {
+      const receipt = await kernelClient.waitForUserOperationReceipt({ hash: userOpHash, timeout })
+      return receipt.receipt.transactionHash as Hex
+    } catch (error) {
+      // A timeout means "not yet"; anything else (a revert, an RPC refusal)
+      // is a real answer and must propagate unchanged.
+      if (!/timed out/i.test(error instanceof Error ? error.message : String(error))) throw error
+      console.warn(`[onchain] userOp ${userOpHash} not confirmed within ${timeout}ms — waiting longer`)
+    }
+  }
+
+  throw new UserOpPendingError(userOpHash)
 }

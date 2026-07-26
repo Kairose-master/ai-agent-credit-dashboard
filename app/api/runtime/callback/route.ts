@@ -290,7 +290,17 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
     submitted = true
     await logPlatformEvent('JOB_SUBMITTED', `"${spec.title}" — worker submitted real output for review`)
   } catch (error) {
-    console.error('[runtime/callback] labor market auto-submit failed:', error)
+    const { isUserOpPending } = await import('@/lib/onchain/account')
+    if (isUserOpPending(error)) {
+      // The bundler took it; it usually lands moments later. Treat the
+      // submission as done for grading purposes — the alternative is
+      // recording "submit failed" for work that IS on-chain, and every
+      // settlement path re-reads live status before it moves money anyway.
+      submitted = true
+      console.warn(`[runtime/callback] submitWork for job ${spec.onchainJobId} is pending confirmation — continuing to grade`)
+    } else {
+      console.error('[runtime/callback] labor market auto-submit failed:', error)
+    }
   }
 
   // Three independent grading paths produce the same verdict shape:
