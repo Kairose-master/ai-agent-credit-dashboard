@@ -100,6 +100,43 @@ export async function GET() {
     health.governanceOnchain = { error: e instanceof Error ? e.message : String(e) }
   }
 
+  // GitHub repo jobs: are the App credentials real? Nothing here echoes a
+  // secret — only whether each piece is present, and whether GitHub actually
+  // accepts our signed JWT (the one failure that is invisible until a
+  // requester tries to post a job).
+  try {
+    const { getGithubAppConfig, getGithubWebhookSecret, appJwt } = await import('@/lib/github-app')
+    const config = await getGithubAppConfig()
+    const webhookSecret = await getGithubWebhookSecret()
+    if (!config) {
+      health.githubApp = {
+        configured: false,
+        webhookSecretConfigured: Boolean(webhookSecret),
+        note: 'Set GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY (or the platform_secrets keys) to enable repo jobs.',
+      }
+    } else {
+      const res = await fetch('https://api.github.com/app/installations?per_page=100', {
+        headers: {
+          Authorization: `Bearer ${appJwt(config.appId, config.privateKey)}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'ledgermind-repo-jobs',
+        },
+      })
+      const installs = res.ok ? ((await res.json()) as Array<{ account?: { login?: string } }>) : null
+      health.githubApp = {
+        configured: true,
+        appId: config.appId,
+        webhookSecretConfigured: Boolean(webhookSecret),
+        githubAccepted: res.ok,
+        installations: installs
+          ? installs.map((i) => i.account?.login).filter(Boolean)
+          : `GitHub rejected the App JWT (${res.status}) — check the App id and private key`,
+      }
+    }
+  } catch (e) {
+    health.githubApp = { error: e instanceof Error ? e.message : String(e) }
+  }
+
   // Settlement heartbeat wiring.
   health.cronSecretConfigured = Boolean(process.env.CRON_SECRET)
   health.faucetEnabled = process.env.FAUCET_DISABLED !== 'true'
