@@ -50,6 +50,8 @@ async function callbackUrl() {
 /** Jobs enriched with off-chain title/description/criteria, agent names, and
  *  (once submitted) the worker agent's real output. */
 export async function getJobs() {
+  await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
+
   const userId = await requireUser()
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
   if (!isLaborMarketConfigured()) {

@@ -25,6 +25,10 @@ function truncate(addr: string | null | undefined): string | null {
  *  session-less on-chain read instead of duplicating it — that route passes
  *  its own `limit`; the guest page keeps relying on the 10-row default. */
 export async function publicJobs(limit = 10) {
+  // Close the window between a deploy and its migration: a column declared
+  // in schema.ts but missing in the database breaks EVERY reader of the table.
+  await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
+
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
   if (!isLaborMarketConfigured()) return []
 

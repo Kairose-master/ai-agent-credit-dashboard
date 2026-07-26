@@ -15,6 +15,8 @@ const CACHE_MS = 60_000
 
 /** Observed clearing prices per job class, from real settled jobs. */
 export async function observedPrices(opts?: { maxAgeMs?: number }): Promise<PriceStat[]> {
+  await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
+
   const maxAge = opts?.maxAgeMs ?? CACHE_MS
   if (cache && Date.now() - cache.at < maxAge) return cache.stats
 

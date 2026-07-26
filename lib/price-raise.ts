@@ -102,6 +102,8 @@ export async function raiseJobPrice(
  * have waited long enough. Throttled; failures are logged, never thrown.
  */
 export async function sweepPriceRaises(): Promise<number> {
+  await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
+
   const now = Date.now()
   if (now - lastRaiseSweepAt < RAISE_SWEEP_COOLDOWN_MS) return 0
   lastRaiseSweepAt = now

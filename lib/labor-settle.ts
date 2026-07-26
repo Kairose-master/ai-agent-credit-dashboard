@@ -396,6 +396,8 @@ let lastStuckSweepAt = 0
  * functions re-check live on-chain status before moving anything.
  */
 export async function sweepStuckGradedJobs(): Promise<void> {
+  await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
+
   const now = Date.now()
   if (now - lastStuckSweepAt < STUCK_SWEEP_COOLDOWN_MS) return
   lastStuckSweepAt = now
