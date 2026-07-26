@@ -2,7 +2,7 @@ import { db } from '@/lib/db'
 import { agentTask, taskProgress } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
-import { resolveCallbackAuth } from '@/lib/webhook'
+import { resolveCallbackAuth, callbackSecretMatches } from '@/lib/webhook'
 
 /**
  * POST /api/runtime/progress — live, best-effort step updates while a task
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   if (!taskRow) return Response.json({ status: 'ignored' }) // unknown task — idempotent no-op
 
   const auth = await resolveCallbackAuth(taskRow.agentId)
-  if (auth.required && request.headers.get('x-runtime-secret') !== auth.secret) {
+  if (auth.required && !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

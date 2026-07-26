@@ -1,4 +1,4 @@
-import { resolveCallbackAuth } from '@/lib/webhook'
+import { resolveCallbackAuth, callbackSecretMatches } from '@/lib/webhook'
 import { markMessagesReadByIds, pollAgentInbox } from '@/lib/agent-messages'
 
 /**
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   if (!agentId) return Response.json({ error: 'Missing agent_id' }, { status: 400 })
 
   const auth = await resolveCallbackAuth(agentId)
-  if (!auth.required || request.headers.get('x-runtime-secret') !== auth.secret) {
+  if (!auth.required || !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

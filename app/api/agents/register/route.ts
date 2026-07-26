@@ -212,6 +212,8 @@ export async function POST(request: Request) {
     availableCredit: '0',
     capabilities,
   })
+  // Per-agent key from birth — no worker ever runs on the shared secret.
+  await (await import('@/lib/agent-keys')).ensureAgentKey(agentId)
 
   // Provision the on-chain smart account — best-effort. A registration
   // shouldn't hard-fail just because on-chain isn't configured on this

@@ -4,7 +4,7 @@ import { recalculateCredit } from '@/lib/credit-engine'
 import { eq, and } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { extractAnswer } from '@/lib/verifiable/problems'
-import { resolveCallbackAuth } from '@/lib/webhook'
+import { resolveCallbackAuth, callbackSecretMatches } from '@/lib/webhook'
 import { logPlatformEvent } from '@/lib/platform-feed'
 import { autoApprovePassedJob, returnFailedJobToMarket } from '@/lib/labor-settle'
 
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   if (!taskRow) return Response.json({ status: 'ignored' }) // unknown task — idempotent no-op
 
   const auth = await resolveCallbackAuth(taskRow.agentId)
-  if (auth.required && request.headers.get('x-runtime-secret') !== auth.secret) {
+  if (auth.required && !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

@@ -25,6 +25,17 @@ export { encryptSecret as encryptWebhookSecret }
 export type CallbackAuth =
   | { required: false } // platform runtime, no RUNTIME_SHARED_SECRET configured (open dev mode)
   | { required: true; secret: string } // must match exactly
+  | { required: true; secret: string; alsoAccept: string } // transition: per-agent key preferred, legacy shared secret tolerated
+
+/** Does a presented callback secret satisfy this agent's auth? Constant
+ *  shape for every runtime type — call sites stop caring which kind of
+ *  worker produced the callback. */
+export function callbackSecretMatches(auth: CallbackAuth, presented: string | null): boolean {
+  if (!auth.required) return true
+  if (presented === null) return false
+  if (presented === auth.secret) return true
+  return 'alsoAccept' in auth && presented === auth.alsoAccept
+}
 
 /** What an incoming callback for this agent's task must present to be
  *  authentic. Applies to 'webhook' agents (their server calls us back),
@@ -36,15 +47,19 @@ export type CallbackAuth =
 export async function resolveCallbackAuth(agentId: string): Promise<CallbackAuth> {
   const [ag] = await db.select().from(agent).where(eq(agent.id, agentId))
 
-  if (
-    (ag?.runtimeType === 'webhook' ||
-      ag?.runtimeType === 'local' ||
-      ag?.runtimeType === 'cloud' ||
-      ag?.runtimeType === 'mcp') &&
-    ag.webhookSecretEnc
-  ) {
+  if (ag?.webhookSecretEnc) {
     try {
-      return { required: true, secret: decryptSecret(ag.webhookSecretEnc) }
+      const perAgent = decryptSecret(ag.webhookSecretEnc)
+      // 'platform' agents live in a transition: the external Python runtime
+      // still presents the shared secret it was configured with, so both are
+      // accepted until STRICT_AGENT_KEYS=true. Every OTHER runtime type has
+      // always been strict per-agent and stays that way.
+      const isPlatform = (ag.runtimeType ?? 'platform') === 'platform'
+      const shared = process.env.RUNTIME_SHARED_SECRET ?? ''
+      if (isPlatform && shared && process.env.STRICT_AGENT_KEYS !== 'true') {
+        return { required: true, secret: perAgent, alsoAccept: shared }
+      }
+      return { required: true, secret: perAgent }
     } catch (error) {
       console.error('[webhook] failed to decrypt secret for agent', agentId, error)
       // Fail CLOSED: a decrypt failure must never fall through to "any secret

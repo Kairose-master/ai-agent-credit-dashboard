@@ -57,6 +57,29 @@ export async function GET(request: Request) {
     .then((n) => { report.pricesRaised = n })
     .catch((e) => { report.pricesRaised = String(e) })
 
+  // The fleet controller's identity pass: every agent gets its own key
+  // (docker/k8s framing: no pod runs on the shared service account).
+  try {
+    const { ensureFleetKeys } = await import('@/lib/agent-keys')
+    report.keysIssued = await ensureFleetKeys()
+  } catch (e) {
+    report.keysIssued = String(e)
+  }
+
+  // Cloud/MCP auto-miners previously only ticked when a USER loaded a page —
+  // luck, not a control loop. The heartbeat now reconciles unconditionally,
+  // scaled by queue depth (the HPA analog in worker-fleet.ts).
+  try {
+    const { tickCloudAutoMineAgents } = await import('@/lib/auto-mine')
+    const { reapStuckTasks } = await import('@/lib/agent-tasks')
+    await reapStuckTasks()
+    const url = new URL(request.url)
+    await tickCloudAutoMineAgents(`${url.origin}/api/runtime/callback`)
+    report.fleetTick = 'ok'
+  } catch (e) {
+    report.fleetTick = String(e)
+  }
+
   // House wallet stays solvent without a human: below the floor, mint free
   // testnet USDC back to the ceiling. The posting paths already top up on
   // demand; this keeps headroom so a label-to-bounty webhook never has to

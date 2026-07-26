@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { agent, agentTask } from '@/lib/db/schema'
 import { and, asc, eq } from 'drizzle-orm'
-import { resolveCallbackAuth } from '@/lib/webhook'
+import { resolveCallbackAuth, callbackSecretMatches } from '@/lib/webhook'
 import { autoMineTick } from '@/lib/auto-mine'
 
 // Auto-mine may perform an on-chain accept inside a poll (Sepolia blocks
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   }
 
   const auth = await resolveCallbackAuth(agentId)
-  if (!auth.required || request.headers.get('x-runtime-secret') !== auth.secret) {
+  if (!auth.required || !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     // A local agent without a secret is misconfigured — fail closed.
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }

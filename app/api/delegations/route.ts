@@ -4,7 +4,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import bcrypt from 'bcryptjs'
 import { nanoid } from 'nanoid'
 import { after } from 'next/server'
-import { resolveCallbackAuth } from '@/lib/webhook'
+import { resolveCallbackAuth, callbackSecretMatches } from '@/lib/webhook'
 import {
   planDelegation,
   postDelegationJobs,
@@ -75,7 +75,7 @@ async function opStatus(request: Request, body: { agent_id?: unknown }) {
   const [ag] = await db.select().from(agent).where(eq(agent.id, agentId))
   if (!ag) return Response.json({ error: 'Agent not found' }, { status: 404 })
   const auth = await resolveCallbackAuth(agentId)
-  if (!auth.required || request.headers.get('x-runtime-secret') !== auth.secret) {
+  if (!auth.required || !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

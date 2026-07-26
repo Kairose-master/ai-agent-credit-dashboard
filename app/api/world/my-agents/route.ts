@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { agent, agentEvent } from '@/lib/db/schema'
 import { desc, eq, inArray, sql } from 'drizzle-orm'
-import { resolveCallbackAuth } from '@/lib/webhook'
+import { resolveCallbackAuth, callbackSecretMatches } from '@/lib/webhook'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   if (!caller) return Response.json({ error: 'Unknown agent' }, { status: 404 })
 
   const auth = await resolveCallbackAuth(agentId)
-  if (!auth.required || request.headers.get('x-runtime-secret') !== auth.secret) {
+  if (!auth.required || !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

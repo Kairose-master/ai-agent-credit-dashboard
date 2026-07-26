@@ -64,6 +64,9 @@ export async function bootstrapFirstAgent() {
     availableCredit: '0',
   })
 
+  // Per-agent key from birth — no worker ever runs on the shared secret.
+  await (await import('@/lib/agent-keys')).ensureAgentKey(agentId)
+
   revalidatePath('/')
   revalidatePath('/agents')
   return { created: true, id: agentId }
@@ -104,6 +107,9 @@ export async function createAgent(data: { name: string; description?: string }) 
     totalCreditLine: '0',
     availableCredit: '0',
   })
+
+  // Per-agent key from birth — no worker ever runs on the shared secret.
+  await (await import('@/lib/agent-keys')).ensureAgentKey(agentId)
 
   revalidatePath('/')
   revalidatePath('/agents')
