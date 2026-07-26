@@ -70,6 +70,8 @@ export async function getJobs() {
     after(async () => {
       const { sweepStuckGradedJobs } = await import('@/lib/labor-settle')
       await sweepStuckGradedJobs().catch((e) => console.error('[jobs] settle sweep failed:', e))
+      const { sweepPriceRaises } = await import('@/lib/price-raise')
+      await sweepPriceRaises().catch((e) => console.error('[jobs] price-raise sweep failed:', e))
       // Refill starter jobs while someone is actually looking at the
       // market — an empty jobs page is exactly what the faucet prevents.
       // Internally throttled to one real tick per 10 minutes.

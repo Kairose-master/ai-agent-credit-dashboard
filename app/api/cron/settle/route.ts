@@ -50,6 +50,13 @@ export async function GET(request: Request) {
     .then((n) => { report.disputedReposted = n })
     .catch((e) => { report.disputedReposted = String(e) })
 
+  // Walk unclaimed rising-price jobs toward their ceiling. Only ever touches
+  // jobs still Open, so it can never cancel work somebody has started.
+  const { sweepPriceRaises } = await import('@/lib/price-raise')
+  await sweepPriceRaises()
+    .then((n) => { report.pricesRaised = n })
+    .catch((e) => { report.pricesRaised = String(e) })
+
   let active: (typeof delegation.$inferSelect)[] = []
   try {
     active = await db.select().from(delegation).where(eq(delegation.status, 'posted'))

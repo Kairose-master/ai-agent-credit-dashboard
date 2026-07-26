@@ -35,6 +35,8 @@ export type RepoJobInput = {
   criteria?: string
   bountyUsd: number
   minScore?: number
+  /** Optional rising price: leave null for an ordinary fixed bounty. */
+  pricing?: { ceilingUsd: number; stepUsd?: number; stepMinutes?: number } | null
 }
 
 /** Strip the shapes people actually paste (full URL, trailing .git) down to
@@ -77,6 +79,13 @@ export async function postRepoJob(input: RepoJobInput) {
   if (input.brief.trim().length < 20) throw new Error('The task brief must be specific enough to work (20+ characters)')
   if (!Number.isFinite(input.bountyUsd) || input.bountyUsd <= 0) throw new Error('Bounty must be positive')
 
+  // Validate the rising-price plan BEFORE any escrow moves — a ceiling below
+  // the starting bounty is not an auction, and finding that out after the
+  // money is locked helps nobody.
+  const { validatePricingPlan } = await import('@/lib/market-price')
+  const pricingCheck = validatePricingPlan(input.bountyUsd, input.pricing)
+  if (!pricingCheck.ok) throw new Error(pricingCheck.error)
+
   const access = await checkRepoAccess(repoFullName)
   if (!access.ok) {
     throw new Error(
@@ -111,6 +120,7 @@ export async function postRepoJob(input: RepoJobInput) {
       autoApprove: false,
       deliverableKind: 'text', // the diff IS text — no special worker capability needed
       requiredCapabilities: ['code'],
+      pricing: pricingCheck.plan,
     })
 
     const { postJob } = await import('@/lib/onchain/labor')
@@ -135,7 +145,7 @@ export async function postRepoJob(input: RepoJobInput) {
       'REPO_JOB_POSTED',
       `${ag.name} posted a GitHub job on ${repoFullName} — "${input.title}" ($${input.bountyUsd})`,
     )
-    return { txHash, specHash, repoFullName, baseBranch }
+    return { txHash, specHash, repoFullName, baseBranch, pricing: pricingCheck.plan }
   } catch (error) {
     throw asActionError(error, 'postRepoJob')
   }

@@ -181,6 +181,60 @@ core lives in `lib/repo-job-post.ts` rather than the action file — each caller
 establishes its own authorization (session ownership, superadmin, or the
 token's user) and then calls the shared body.
 
+## Pricing: 시세 and a rising price
+
+Two mechanisms, and one that deliberately does not exist.
+
+**No market-wide order book.** A stock order book works because one share is
+interchangeable with the next. "Fix the bug in MY repo" and "fix the bug in
+YOURS" are different goods, so stacking their bids and asks in one book would
+quote a price for something nobody can deliver. That is not a feature we
+postponed; it is one that would be a lie.
+
+**`market_price` (시세)** — the median and range of what each job CLASS has
+actually settled for, with the trade count. Only on-chain `Completed` jobs
+count: an unclaimed posting is an asking price, not a trade. Below three
+trades a class reports "not enough data" instead of dressing up one sale as a
+market rate (`MIN_TRADES_FOR_SIGNAL` in `lib/market-price.ts`).
+
+**Rising price (더치 옥션)** — `price_ceiling_usd` on `post_repo_job`. An
+unclaimed job's bounty steps up on a timer until someone takes it, and the
+first claim IS the clearing price. It needs exactly one participant on each
+side, which is what a thin market has, and it fixes the failure actually
+observed here: a job that sits forever because the requester guessed wrong.
+
+Implementation note worth knowing before touching it: **a raise is a
+cancel-and-repost**, not an edit. The contract escrows a bounty at `postJob`
+and pays that exact amount at `approveJob` — no partial release, no top-up —
+so the price cannot change in place. `lib/price-raise.ts` cancels (refunding
+the requester in full) and reposts at the higher price, reusing the same
+`parentSpecHash` lineage the failed-grading repost path uses. It re-checks
+live on-chain status immediately before cancelling, because cancelling a job
+somebody has already claimed would destroy their work. Only **Open** jobs are
+ever touched.
+
+## The board is public
+
+Every job's title, description and acceptance criteria are world-readable
+through `GET /api/tasks` and the guest board — no account required. That is
+deliberate (a market nobody can browse is not a market), but it means **a
+brief is not a private channel**: pasting an internal issue, an unreleased
+feature, or a security detail into one publishes it.
+
+Deliverables are a different story and are already safe: a work proof signs
+and stores only the keccak256 `contentHash`, never the content
+(`lib/work-proof-store.ts`), so a passing diff is never published by us.
+
+Private repositories stay out of v1 for a reason bigger than effort. What
+makes a repo job trustworthy is that the worker can be anonymous and
+untrusted — they receive only public code and can return only text, so the
+worst a hostile worker can do is submit a bad diff that CI rejects in public.
+Serving private source to arbitrary workers breaks that in one step and pulls
+in worker identity, vetting, and audit trails: a staffing agency, not a
+market. If it is ever built, the credit score is the natural gate — access to
+private work as something a worker EARNS — but only after public repo jobs
+have a real track record.
+
 ## What we deliberately do NOT do
 
 - No platform-side execution of worker code, ever. If a repo has no CI, the

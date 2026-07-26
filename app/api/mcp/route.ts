@@ -408,7 +408,8 @@ const TOOLS = [
       'MOVES MONEY: escrow a bounty on a task in a real GitHub repository. Workers submit a unified DIFF (they never ' +
       'get credentials); the platform opens the pull request; YOUR repository\'s own CI is the independent grader; ' +
       'merging the PR releases the escrow and closing it refunds you. Requires the Ledgermind GitHub App to be ' +
-      'installed on the repository — call check_repo_access first if unsure.',
+      'installed on the repository — call check_repo_access first if unsure. NOTE: the job brief you write here is ' +
+      'posted to a PUBLIC board and is readable by anyone, so do not paste anything confidential into it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -421,10 +422,28 @@ const TOOLS = [
         criteria: { type: 'string', description: 'Extra acceptance criteria beyond "CI passes"' },
         agent_id: { type: 'string', description: 'Which agent escrows the bounty, by id' },
         agent_name: { type: 'string', description: 'Which agent escrows it, by name (used only if agent_id is omitted)' },
+        price_ceiling_usd: {
+          type: 'number',
+          description:
+            'Optional rising price: if nobody claims the job, its bounty steps up on a timer until it reaches this ceiling. ' +
+            'The first worker to claim sets the clearing price, so the market finds the number instead of you guessing. ' +
+            'Must be above bounty_usd. Only ever raises an UNCLAIMED job.',
+        },
+        price_step_usd: { type: 'number', description: 'How much each raise adds (default: 25% of the starting bounty)' },
+        price_step_minutes: { type: 'number', description: 'How long to wait between raises (default 60, minimum 5)' },
       },
       required: ['repo', 'title', 'brief', 'bounty_usd'],
       additionalProperties: false,
     },
+  },
+  {
+    name: 'market_price',
+    description:
+      'What each class of work has ACTUALLY settled for on this market — median and range of real completed jobs, ' +
+      'with the trade count so you can judge how much the number is worth. Call before pricing a job so the bounty ' +
+      'reflects the going rate instead of a guess. Classes with fewer than 3 settled trades report "not enough data" ' +
+      'rather than a made-up rate. Read-only.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'github_status',
@@ -812,6 +831,7 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           'DeFi sandbox: vault_status · quote_credit_line (GIWA-style collateral vault, live on Sepolia)',
           'Governance: governance · vote · set_auto_vote ($LEDGER, earned-not-bought)',
           'GitHub: github_status → post_repo_job → repo_job_status (help topic:"github")',
+          'Pricing: market_price (what work actually settles for) · price_ceiling_usd (let an unclaimed job walk its own price up)',
         ].join('\n'),
         site: [
           `🌐 WEBSITE — ${origin}`,
@@ -918,6 +938,22 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           `attested by: ${stored.attester} → signature ${v.valid ? 'VALID ✅ (trusted oracle)' : 'INVALID ⚠️'}\n` +
           (stored.cid ? `content id: ipfs://${stored.cid}\n` : '') +
           `certificate: ${origin}/proof/${stored.id}`,
+      )
+    }
+
+    case 'market_price': {
+      const { observedPrices } = await import('@/lib/market-price-read')
+      const { priceHint } = await import('@/lib/market-price')
+      const stats = await observedPrices()
+      if (stats.length === 0) {
+        return toolText(id, 'No jobs have settled on this market yet, so there is no going rate to quote. You would be setting the first price.')
+      }
+      const lines = stats.map((st) => `• ${st.jobClass} — ${priceHint(st)}`)
+      return toolText(
+        id,
+        `Observed clearing prices (real completed jobs only — unclaimed postings are asking prices, not trades):\n\n${lines.join('\n')}\n\n` +
+          'Pricing a job below the median means waiting longer for a worker; a rising-price plan (price_ceiling_usd on post_repo_job) ' +
+          'lets the market find the number instead of you guessing it.',
       )
     }
 
@@ -1041,12 +1077,21 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           issueUrl: args.issue_url ? String(args.issue_url) : undefined,
           criteria: args.criteria ? String(args.criteria) : undefined,
           bountyUsd: bounty,
+          pricing:
+            args.price_ceiling_usd === undefined
+              ? null
+              : {
+                  ceilingUsd: Number(args.price_ceiling_usd),
+                  stepUsd: args.price_step_usd === undefined ? undefined : Number(args.price_step_usd),
+                  stepMinutes: args.price_step_minutes === undefined ? undefined : Number(args.price_step_minutes),
+                },
         })
         return toolText(
           id,
           `Posted a GitHub job on ${res.repoFullName} (base ${res.baseBranch}), $${bounty} escrowed by ${requester.name}.\n\n` +
             'A worker will submit a unified diff; the platform opens the pull request from it and your own CI grades it. ' +
-            'Merging the PR pays the worker; closing it unmerged refunds you and reposts the job.',
+            'Merging the PR pays the worker; closing it unmerged refunds you and reposts the job.' +
+            (res.pricing ? `\n\nRising price: if nobody claims it, the bounty steps up $${res.pricing.stepUsd} every ${res.pricing.stepMinutes}m to a ceiling of $${res.pricing.ceilingUsd}. The first claim sets the clearing price.` : ''),
         )
       } catch (error) {
         return toolText(id, error instanceof Error ? error.message : String(error), true)

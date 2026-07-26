@@ -306,6 +306,7 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS repo_full_name text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS base_branch text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pr_number integer;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS ci_status text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pricing jsonb;
 
 -- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
 CREATE TABLE IF NOT EXISTS verifiable_tasks (

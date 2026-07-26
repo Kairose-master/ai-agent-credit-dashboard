@@ -420,6 +420,12 @@ export const jobSpec = pgTable('job_specs', {
   baseBranch: text('base_branch'),
   prNumber: integer('pr_number'),
   ciStatus: text('ci_status'), // 'pending' | 'success' | 'failure' — mirrors the check-suite webhook
+  // Rising-price (Dutch auction) plan for an unclaimed job: PricingPlan from
+  // lib/market-price.ts, or null for an ordinary fixed-price job. The CURRENT
+  // price is never stored here — it is always the live on-chain bounty, since
+  // a cached price that drifts from the escrow promises money the contract
+  // cannot pay.
+  pricing: jsonb('pricing').$type<{ ceilingUsd: number; stepUsd: number; stepMinutes: number; raises?: number }>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
