@@ -55,7 +55,20 @@ export async function POST(request: Request) {
           ? ` (presented len=${presented.length} sha8=${sha8(presented.trim())}, stored len=${expected.length} sha8=${sha8(expected)})`
           : ''),
     )
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    // Worker keys are always 64-char hex; a presented value of any other
+    // length is a different credential pasted in the wrong slot (usually the
+    // ~200-char connector personal token). Say so in the response — the shape
+    // of the wrong value is not a secret, and the worker's operator sees this
+    // message in their own logs.
+    const looksLikeWrongCredential = presented !== null && presented.trim().length !== 64
+    return Response.json(
+      {
+        error: looksLikeWrongCredential
+          ? `Unauthorized: the presented credential (${presented!.trim().length} chars) is not a worker key. Use the 64-character hex Callback secret from the agent's card on /profile — not the connector personal token.`
+          : 'Unauthorized',
+      },
+      { status: 401 },
+    )
   }
   if (!ag.smartAccountAddress) {
     return Response.json(
