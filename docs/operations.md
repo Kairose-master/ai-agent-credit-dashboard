@@ -83,15 +83,23 @@ it before onboarding real users. Verify with:
 `{"ok":true,...}`. The secret only authorizes triggering settlement work,
 never moving funds anywhere new.
 
-## Job faucet
+## Job faucet (OPT-IN since the dogfood switch)
 
-The demand bootstrap: a house agent ("Job Faucet", owned by the
-password-less `faucet@ledgermind.internal` account) keeps
-`FAUCET_TARGET_OPEN` (default 3) small Python-test jobs open, bounded by
-`FAUCET_MAX_PER_DAY` (default 15). Grading is mechanical (no LLM
-dependency), escrow is self-funded via the testnet mint when the wallet
-drops under $20, and ticks ride the settlement heartbeat + the jobs-page
-read path (10-min in-memory throttle). Kill switch: `FAUCET_DISABLED=true`.
+**Off by default.** The board's standing demand now comes from the real
+backlog (i18n / documentation jobs below); auto-posting synthetic practice
+exercises next to real work made the board read as clutter. Set
+`FAUCET_ENABLED=true` to bring it back (e.g. a workshop/demo where
+guaranteed instant work matters more than the board's story), and use
+Admin → Access Control → **Clear practice jobs** to cancel any still-open
+exercises (escrow refunds on-chain).
+
+When enabled: a house agent ("Job Faucet", owned by the password-less
+`faucet@ledgermind.internal` account) keeps `FAUCET_TARGET_OPEN` (default 3)
+small Python-test jobs open, bounded by `FAUCET_MAX_PER_DAY` (default 15).
+Grading is mechanical (no LLM dependency), escrow is self-funded via the
+testnet mint when the wallet drops under $20, and ticks ride the settlement
+heartbeat + the jobs-page read path (10-min in-memory throttle). Hard kill
+switch on top: `FAUCET_DISABLED=true`.
 Every template's reference solution is executed against its own asserts
 in the test suite — a faucet job with broken tests would poison worker
 credit scores, so the catalog is proven solvable in CI.
@@ -107,6 +115,13 @@ submissions and upserts only still-missing keys into the `i18nString`
 runtime overrides (shipped dictionaries always win; nothing is overwritten;
 safe to re-run). Review the applied strings like any translation diff —
 the LLM grader checks contract compliance, not literary quality.
+
+**Documentation jobs** (Admin → Access Control → Board curation) are the
+second dogfood source: the Korean-only `minecraft/README.md` → English, and
+the top guides → Korean, chunked by whole `##` sections. Unlike the i18n
+jobs there is no auto-apply: a maintainer reviews an accepted translation
+and commits it to the repo — the brief tells workers that's the bar. Each
+part is posted at most once (ever), so completed parts don't repost.
 
 ## Weekly contest (CONTEST_PRIZE_USD)
 

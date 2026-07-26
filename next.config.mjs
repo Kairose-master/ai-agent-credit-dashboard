@@ -12,6 +12,9 @@ const nextConfig = {
     '/examples': ['./docs/test-scenarios/**'],
     '/examples/[slug]': ['./docs/test-scenarios/**'],
     '/api/mcp': ['./docs/test-scenarios/**'],
+    // Docs-translation jobs read their source files at post time (the server
+    // action bundles under the admin page that invokes it).
+    '/admin/access': ['./docs/*.md', './minecraft/README.md'],
   },
   async rewrites() {
     // OAuth discovery documents for MCP connectors (Claude/ChatGPT).

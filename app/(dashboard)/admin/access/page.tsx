@@ -5,6 +5,7 @@ import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, Shi
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
 import { applyPassedI18nTranslations, getI18nJobsStatus, postI18nGapJobs } from '@/app/actions/i18n-jobs'
+import { cancelPracticeJobs, postDocsTranslationJobs } from '@/app/actions/dogfood-jobs'
 import { getSuspendedAgents, suspendAgentMessaging, unsuspendAgentMessaging } from '@/app/actions/agent-messages'
 
 /**
@@ -167,6 +168,72 @@ function I18nJobsCard() {
         >
           {busy === 'apply' ? <Loader2 className="size-4 animate-spin" /> : <DatabaseZap className="size-4" />}
           Apply passed translations
+        </button>
+      </div>
+      {result && <p className="mt-2 text-sm text-success">{result}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Board curation: post the documentation backlog as jobs, and sweep the
+ * synthetic practice clutter (seed exercises / faucet templates) off the
+ * board — dogfood work stays, escrow refunds on-chain. The faucet itself is
+ * opt-in now (FAUCET_ENABLED), so cleared clutter doesn't grow back.
+ */
+function BoardCurationCard() {
+  const [busy, setBusy] = useState<'docs' | 'cancel' | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = async (which: 'docs' | 'cancel') => {
+    setBusy(which)
+    setError(null)
+    setResult(null)
+    try {
+      if (which === 'docs') {
+        const r = await postDocsTranslationJobs()
+        const failed = r.results.filter((x) => !x.ok)
+        setResult(`Posted ${r.posted} documentation job(s).${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+      } else {
+        const r = await cancelPracticeJobs()
+        setResult(`Cancelled ${r.cancelled}/${r.attempted} practice job(s) — escrow refunded on-chain.`)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-6">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <Briefcase className="size-5" /> Board curation
+      </h3>
+      <p className="text-sm text-muted-foreground mb-3">
+        <strong>Post documentation jobs</strong> turns the real docs backlog (Korean Minecraft README → English,
+        top guides → Korean) into LLM-graded jobs; accepted work is reviewed and committed by a maintainer.{' '}
+        <strong>Clear practice jobs</strong> cancels every Open non-dogfood job owned by the house/faucet agents
+        (escrow refunds on-chain) — the faucet is opt-in now, so the clutter stays gone.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => run('docs')}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {busy === 'docs' ? <Loader2 className="size-4 animate-spin" /> : <Briefcase className="size-4" />}
+          Post documentation jobs
+        </button>
+        <button
+          onClick={() => run('cancel')}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md border border-destructive/40 px-4 py-2 text-sm font-medium text-destructive disabled:opacity-50"
+        >
+          {busy === 'cancel' ? <Loader2 className="size-4 animate-spin" /> : <ShieldOff className="size-4" />}
+          Clear practice jobs
         </button>
       </div>
       {result && <p className="mt-2 text-sm text-success">{result}</p>}
@@ -558,6 +625,7 @@ export default function AccessControlPage() {
 
       <SeedJobsCard />
       <I18nJobsCard />
+      <BoardCurationCard />
 
       <TranslationsCard />
 
