@@ -229,6 +229,41 @@ export async function commentOnPr(repoFullName: string, prNumber: number, body: 
   }
 }
 
+// ── What the signed-in user can actually post a job on ─────────────────
+
+export type InstallableRepo = { fullName: string; private: boolean; defaultBranch: string }
+
+/** Where the requester installs (or adjusts) the App. Falls back to the
+ *  generic installations page when no slug is configured. */
+export function appInstallUrl(): string {
+  const slug = process.env.GITHUB_APP_SLUG?.trim()
+  return slug ? `https://github.com/apps/${slug}/installations/new` : 'https://github.com/settings/installations'
+}
+
+/**
+ * Repositories where BOTH are true: the user can access them, and our App is
+ * installed on them. That intersection is exactly the set of repos a job can
+ * be posted against, so the picker can't offer one that would fail at
+ * escrow time. Uses the user's own token — we see only what they see.
+ */
+export async function listUserInstallationRepos(userToken: string, maxRepos = 200): Promise<InstallableRepo[]> {
+  const installs = await ghJson<{ installations: Array<{ id: number }> }>('/user/installations?per_page=100', userToken)
+  const repos: InstallableRepo[] = []
+  for (const inst of installs.installations ?? []) {
+    for (let page = 1; page <= 5 && repos.length < maxRepos; page++) {
+      const body = await ghJson<{
+        repositories: Array<{ full_name: string; private: boolean; default_branch: string }>
+      }>(`/user/installations/${inst.id}/repositories?per_page=100&page=${page}`, userToken).catch(() => null)
+      const batch = body?.repositories ?? []
+      repos.push(
+        ...batch.map((r) => ({ fullName: r.full_name, private: r.private, defaultBranch: r.default_branch })),
+      )
+      if (batch.length < 100) break
+    }
+  }
+  return repos.sort((a, b) => a.fullName.localeCompare(b.fullName)).slice(0, maxRepos)
+}
+
 // ── Webhook verification ────────────────────────────────────────────────
 
 /** Constant-time check of X-Hub-Signature-256 over the RAW request body. */

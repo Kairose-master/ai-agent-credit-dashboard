@@ -123,9 +123,40 @@ Create at github.com/settings/apps → New GitHub App:
   **including** its `-----BEGIN/END RSA PRIVATE KEY-----` lines; it never
   belongs in the repo.
 - **Events:** Pull request, Check suite, Check run.
+- **Callback URL:** `https://ai-agent-credit-dashboard.vercel.app/api/github/oauth/callback`,
+  plus a generated client secret in `GITHUB_CLIENT_SECRET` and the client id
+  in `GITHUB_CLIENT_ID`. This turns the same App into the sign-in provider —
+  see "GitHub sign-in" below. Skip it and repo jobs still work; requesters
+  just type `owner/name` by hand.
 - Installation is **per requester, per repo** — the requester chooses what
   the platform can touch, which is exactly the consent shape the OAuth
   consent screen already establishes for accounts.
+
+## GitHub sign-in and the repository picker
+
+One App, two roles: it opens pull requests *and* authorizes users. Signing in
+with GitHub is what lets the platform answer "which of your repositories can
+I actually post a job on?" — the intersection of what the user can see and
+where the App is installed (`listUserInstallationRepos`). The picker can
+therefore never offer a repo that would fail at escrow time.
+
+Implementation notes worth knowing before touching it:
+
+- **This app's sign-in is not better-auth's.** The live path is the
+  hand-rolled one (`/api/signin`: bcrypt → `session` row → `auth_session`
+  cookie), and `getSession()` reads exactly that. A better-auth social
+  provider would mint a session `getSession()` cannot see, so
+  `/api/github/oauth/{start,callback}` create the app's own session instead.
+- **The user token lives in our own encrypted table** (`github_identities`,
+  `lib/github-identity.ts`) rather than better-auth's account model — the two
+  stay independent, and the token is encrypted at rest like every other
+  secret. It is user-to-server: it sees only what that user sees, is never
+  given to a worker, and is never returned to the client.
+- **Only a GitHub-VERIFIED email may link to an existing account.** That is
+  the single rule standing between "sign in with GitHub" and account
+  takeover, and it has its own test (`tests/github-oauth.test.ts`).
+- Token refresh is handled when the App has user-token expiration enabled;
+  a failed refresh surfaces as "reconnect", never as a silent empty list.
 
 ## What we deliberately do NOT do
 

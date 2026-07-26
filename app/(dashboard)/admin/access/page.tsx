@@ -322,6 +322,25 @@ function RepoJobsCard() {
   const [busy, setBusy] = useState<'check' | 'post' | null>(null)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [gh, setGh] = useState<{
+    loginEnabled: boolean
+    connected: boolean
+    login: string | null
+    repos: { fullName: string; private: boolean; defaultBranch: string }[]
+    installUrl: string
+    error: string | null
+  } | null>(null)
+
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const { getGithubConnection } = await import('@/app/actions/repo-jobs')
+        setGh(await getGithubConnection())
+      } catch {
+        /* picker is an accelerator — the manual owner/name field still works */
+      }
+    })()
+  }, [])
 
   const check = async () => {
     setBusy('check')
@@ -372,13 +391,62 @@ function RepoJobsCard() {
         Merging the PR releases the escrow; closing it unmerged refunds and reposts. Check access first — the App
         must be installed on the repo.
       </p>
+      {gh && (
+        <p className="text-sm text-muted-foreground mb-3">
+          {!gh.connected ? (
+            gh.loginEnabled ? (
+              <>
+                <a href="/api/github/oauth/start?next=/admin/access" className="text-foreground font-medium underline underline-offset-4">
+                  Connect GitHub
+                </a>{' '}
+                to pick from your repositories instead of typing owner/name.
+              </>
+            ) : (
+              'GitHub sign-in is not configured on this deployment — type owner/name manually.'
+            )
+          ) : gh.repos.length > 0 ? (
+            <>
+              Connected as <strong>{gh.login}</strong> — {gh.repos.length} repositor{gh.repos.length === 1 ? 'y has' : 'ies have'} the
+              App installed.{' '}
+              <a href={gh.installUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                Install on more
+              </a>
+            </>
+          ) : (
+            <>
+              Connected as <strong>{gh.login}</strong>, but the App is not installed on any of your repositories yet.{' '}
+              <a href={gh.installUrl} target="_blank" rel="noreferrer" className="text-foreground font-medium underline underline-offset-4">
+                Install it
+              </a>
+              , then reload.
+            </>
+          )}
+          {gh.error ? ` (${gh.error})` : ''}
+        </p>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
-        <input
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="owner/name"
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm"
-        />
+        {gh?.repos.length ? (
+          <select
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          >
+            <option value="">Choose a repository…</option>
+            {gh.repos.map((r) => (
+              <option key={r.fullName} value={r.fullName}>
+                {r.fullName}
+                {r.private ? ' (private)' : ''}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            placeholder="owner/name"
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+          />
+        )}
         <input
           value={bounty}
           onChange={(e) => setBounty(e.target.value)}

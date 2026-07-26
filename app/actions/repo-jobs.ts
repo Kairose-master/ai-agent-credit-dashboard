@@ -52,6 +52,57 @@ export async function postRepoJobAsHouse(input: Omit<RepoJobInput, 'requesterAge
   return postRepoJob({ ...input, requesterAgentId: houseAgentId })
 }
 
+/**
+ * The signed-in user's GitHub connection and the repositories they can post
+ * jobs on — the intersection of "you can see it" and "our App is installed".
+ * Everything the picker needs in one round trip, including where to go when
+ * the answer is "nowhere yet".
+ */
+export async function getGithubConnection(): Promise<{
+  loginEnabled: boolean
+  connected: boolean
+  login: string | null
+  repos: { fullName: string; private: boolean; defaultBranch: string }[]
+  installUrl: string
+  error: string | null
+}> {
+  const { isGithubLoginEnabled } = await import('@/lib/github-oauth')
+  const { appInstallUrl } = await import('@/lib/github-app')
+  const base = { loginEnabled: await isGithubLoginEnabled(), connected: false, login: null, repos: [], installUrl: appInstallUrl(), error: null }
+
+  const session = await getSession()
+  if (!session?.user) return { ...base, error: 'Sign in first.' }
+
+  const { getGithubIdentity, githubUserToken } = await import('@/lib/github-identity')
+  const identity = await getGithubIdentity(session.user.id)
+  if (!identity) return base
+
+  const token = await githubUserToken(session.user.id)
+  if (!token) {
+    return { ...base, connected: true, login: identity.login, error: 'Your GitHub authorization expired — reconnect.' }
+  }
+
+  try {
+    const { listUserInstallationRepos } = await import('@/lib/github-app')
+    return { ...base, connected: true, login: identity.login, repos: await listUserInstallationRepos(token) }
+  } catch (error) {
+    return {
+      ...base,
+      connected: true,
+      login: identity.login,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+/** Unlink GitHub from the signed-in account (deletes the stored token). */
+export async function disconnectGithubAction() {
+  const session = await getSession()
+  if (!session?.user) throw new Error('Unauthorized')
+  const { disconnectGithub } = await import('@/lib/github-identity')
+  await disconnectGithub(session.user.id)
+}
+
 /** Is the App installed and the branch real? Returns a human-readable reason
  *  when not, so the UI/MCP can tell the requester exactly what to fix. */
 export async function checkRepoAccess(
