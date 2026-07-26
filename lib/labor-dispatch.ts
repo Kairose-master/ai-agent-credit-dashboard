@@ -195,8 +195,20 @@ export async function acceptAndDispatchJob(
   try {
     txHash = await acceptJob(worker.id, jobId)
   } catch (error) {
-    if (spec) await releaseJobClaim(spec.specHash, worker.id) // free it for the next rig
-    throw error
+    // An unconfirmed accept is the likeliest way a job becomes a zombie:
+    // if it DID land, releasing the claim frees a job the chain already
+    // says is Accepted, the next worker's accept reverts, and this worker
+    // never gets dispatched — nobody is working a job whose escrow is
+    // locked. So on pending, keep the claim and go do the work; if it
+    // truly never landed, the claim TTL expires and the job returns to
+    // the market on its own.
+    const { isUserOpPending } = await import('@/lib/onchain/account')
+    if (!isUserOpPending(error)) {
+      if (spec) await releaseJobClaim(spec.specHash, worker.id) // free it for the next rig
+      throw error
+    }
+    console.warn(`[labor-dispatch] accept of job ${jobId} is pending confirmation — keeping the claim and dispatching`)
+    txHash = '0x'
   }
 
   if (spec) {
@@ -260,8 +272,15 @@ export async function acceptJobForExternalWorker(
   try {
     await acceptJob(worker.id, jobId)
   } catch (error) {
-    await releaseJobClaim(spec.specHash, worker.id)
-    throw error
+    // Same reasoning as the dispatched path above: a pending accept may
+    // already be on-chain, so releasing the claim is what manufactures a
+    // zombie. Hold it and let the worker proceed.
+    const { isUserOpPending } = await import('@/lib/onchain/account')
+    if (!isUserOpPending(error)) {
+      await releaseJobClaim(spec.specHash, worker.id)
+      throw error
+    }
+    console.warn(`[labor-dispatch] external accept of job ${jobId} is pending confirmation — keeping the claim`)
   }
 
   const { nanoid } = await import('nanoid')
