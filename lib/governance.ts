@@ -562,7 +562,16 @@ async function commitDelegateVoteOnchain(
 export async function revealOnchainVotes(): Promise<{ pending: number; revealed: number }> {
   const { isGovernanceOnchainConfigured } = await import('@/lib/onchain/config')
   if (!isGovernanceOnchainConfigured()) return { pending: 0, revealed: 0 }
-  const committed = await db.select().from(govOnchainVote).where(eq(govOnchainVote.status, 'committed'))
+  // The table ships behind a migration that this deployment may not have run
+  // yet, and an optional governance feature must never make the settlement
+  // heartbeat report an error on every single pass — that trains everyone to
+  // ignore the one field that would show a real outage.
+  const committed = await db
+    .select()
+    .from(govOnchainVote)
+    .where(eq(govOnchainVote.status, 'committed'))
+    .catch(() => null)
+  if (committed === null) return { pending: 0, revealed: 0 }
   if (committed.length === 0) return { pending: 0, revealed: 0 }
   const { pollPhase, revealOnchainVote } = await import('@/lib/onchain/governance-poll')
   const { decryptSecret } = await import('@/lib/crypto')
