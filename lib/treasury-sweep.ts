@@ -28,7 +28,20 @@ export async function doTransfer(
   const balance = await usdcBalanceOf(smartAccountAddress as `0x${string}`)
   if (amountUsd > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
 
-  const txHash = await transferUsdc(agentId, to as `0x${string}`, amountUsd)
+  // Every withdrawal path funnels through here, so this is where a lost
+  // receipt would otherwise become a double withdrawal: the caller sees an
+  // error, the user presses the button again, and the first transfer lands
+  // too. Pending is recorded and reported, never thrown.
+  let txHash: string
+  let pending = false
+  try {
+    txHash = await transferUsdc(agentId, to as `0x${string}`, amountUsd)
+  } catch (error) {
+    const { isUserOpPending } = await import('@/lib/onchain/account')
+    if (!isUserOpPending(error)) throw error
+    pending = true
+    txHash = error.userOpHash
+  }
 
   await db.insert(agentEvent).values({
     id: nanoid(),
@@ -39,7 +52,7 @@ export async function doTransfer(
     executionTime: 0,
     tokenCost: 0,
     qualityScore: null,
-    detail: { amountUsd, to, memo, txHash, initiator },
+    detail: { amountUsd, to, memo, txHash, initiator, pending },
   })
 
   return txHash

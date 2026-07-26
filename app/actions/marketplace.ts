@@ -153,7 +153,17 @@ export async function purchaseTemplate(templateId: string, payingAgentId: string
       const balance = await usdcBalanceOf(payer.smartAccountAddress as `0x${string}`)
       if (price > balance) throw new Error(`Insufficient balance ($${balance.toFixed(2)})`)
 
-      txHash = await transferUsdc(payingAgentId, creatorExemplar.smartAccountAddress as `0x${string}`, price)
+      // A purchase that reports failure while the payment landed invites the
+      // buyer to pay twice for one template. Record and continue on pending:
+      // the money has probably moved, and charging twice is the worse error.
+      try {
+        txHash = await transferUsdc(payingAgentId, creatorExemplar.smartAccountAddress as `0x${string}`, price)
+      } catch (error) {
+        const { isUserOpPending } = await import('@/lib/onchain/account')
+        if (!isUserOpPending(error)) throw error
+        txHash = error.userOpHash
+        console.warn(`[marketplace] payment for template ${templateId} is pending confirmation — granting and recording`)
+      }
 
       await db.insert(agentEvent).values({
         id: nanoid(),

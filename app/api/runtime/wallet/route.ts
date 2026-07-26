@@ -58,7 +58,21 @@ export async function POST(request: Request) {
         return Response.json({ error: `Insufficient balance ($${balance.toFixed(2)})` }, { status: 400 })
       }
 
-      const txHash = await transferUsdc(agentId, to, amountUsd)
+      // A withdrawal that reports failure while the money actually left is
+      // the one error a user WILL act on — by pressing withdraw again. So a
+      // pending transfer is reported as pending, never as failed, and the
+      // audit event is written either way: the funds may be gone, and an
+      // unrecorded outgoing transfer is exactly what a ledger is for.
+      let txHash: string
+      let pending = false
+      try {
+        txHash = await transferUsdc(agentId, to, amountUsd)
+      } catch (error) {
+        const { isUserOpPending } = await import('@/lib/onchain/account')
+        if (!isUserOpPending(error)) throw error
+        pending = true
+        txHash = error.userOpHash
+      }
 
       await db.insert(agentEvent).values({
         id: nanoid(),
@@ -69,8 +83,22 @@ export async function POST(request: Request) {
         executionTime: 0,
         tokenCost: 0,
         qualityScore: null,
-        detail: { amountUsd, to, memo, txHash, initiator: 'agent' },
+        detail: { amountUsd, to, memo, txHash, initiator: 'agent', pending },
       })
+
+      if (pending) {
+        return Response.json(
+          {
+            status: 'pending',
+            userOpHash: txHash,
+            amountUsd,
+            to,
+            message:
+              'The transfer was accepted but is not confirmed yet. Do NOT retry — check the balance in a minute; retrying could send it twice.',
+          },
+          { status: 202 },
+        )
+      }
 
       return Response.json({ txHash, amountUsd, to })
     }
