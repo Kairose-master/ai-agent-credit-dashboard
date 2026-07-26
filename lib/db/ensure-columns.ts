@@ -33,7 +33,14 @@ const JOB_SPEC_ADDITIONS = [
   'ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pricing jsonb',
 ]
 
+const CREDIT_TX_ADDITIONS = [
+  'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "dueAt" timestamptz',
+  'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "termDays" integer',
+  'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "defaultedAt" timestamptz',
+]
+
 let inFlight: Promise<void> | null = null
+let creditTxInFlight: Promise<void> | null = null
 
 /**
  * Ensure job_specs has every column the running schema declares. Memoized per
@@ -55,4 +62,21 @@ export function ensureJobSpecColumns(): Promise<void> {
     })()
   }
   return inFlight
+}
+
+/** Same defence for creditTransaction — added BEFORE the deploy this time,
+ *  not after the outage. */
+export function ensureCreditTransactionColumns(): Promise<void> {
+  if (!creditTxInFlight) {
+    creditTxInFlight = (async () => {
+      for (const statement of CREDIT_TX_ADDITIONS) {
+        try {
+          await pool.query(statement)
+        } catch (error) {
+          console.error('[ensure-columns]', statement, error)
+        }
+      }
+    })()
+  }
+  return creditTxInFlight
 }

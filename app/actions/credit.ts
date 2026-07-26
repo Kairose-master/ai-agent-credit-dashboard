@@ -51,6 +51,16 @@ export async function drawCredit(agentId: string, amount: number, description?: 
     throw new Error(`Amount exceeds available credit ($${Math.round(available).toLocaleString()})`)
   }
 
+  // Delinquency gate: an owner with any past-due or defaulted loan cannot
+  // draw more, on any agent. The due date has to bite before the sweep runs.
+  await (await import('@/lib/db/ensure-columns')).ensureCreditTransactionColumns()
+  const { canDrawMore, dueAtFor, DEFAULT_TERM_DAYS } = await import('@/lib/loan-terms')
+  const openLoans = (
+    await db.select().from(creditTransaction).where(eq(creditTransaction.userId, userId))
+  ).filter((t) => t.type === 'credit_draw' && (t.status === 'active' || t.status === 'defaulted'))
+  const gate = canDrawMore(new Date(), openLoans)
+  if (!gate.ok) throw new Error(gate.reason)
+
   const ownerOutstanding = await ownerOutstandingBalance(userId)
   const ownerNettedAvailable = Math.max(0, parseFloat(ag.totalCreditLine ?? '0') - ownerOutstanding)
   if (amount > ownerNettedAvailable) {
@@ -67,6 +77,8 @@ export async function drawCredit(agentId: string, amount: number, description?: 
     amount: amount.toString(),
     type: 'credit_draw',
     description: description || 'Credit draw',
+    dueAt: dueAtFor(new Date(), DEFAULT_TERM_DAYS),
+    termDays: DEFAULT_TERM_DAYS,
   })
 
   // Recalculation folds the new outstanding balance into available credit.
@@ -86,9 +98,10 @@ export async function repayCredit(txId: string) {
 
   const [tx] = await db.select().from(creditTransaction).where(eq(creditTransaction.id, txId))
   if (!tx || tx.userId !== session.user.id) throw new Error('Transaction not found')
-  if (tx.status !== 'active' || tx.type !== 'credit_draw') {
-    throw new Error('Transaction is not an active credit draw')
+  if ((tx.status !== 'active' && tx.status !== 'defaulted') || tx.type !== 'credit_draw') {
+    throw new Error('Transaction is not an open credit draw')
   }
+  const wasDefaulted = tx.status === 'defaulted'
 
   await db
     .update(creditTransaction)
@@ -104,7 +117,10 @@ export async function repayCredit(txId: string) {
     executionTime: 0,
     tokenCost: 0,
     qualityScore: '1.000',
-    detail: { amount: tx.amount, transactionId: txId },
+    // A late repayment settles the debt but does not erase the default —
+    // the REPAYMENT_DEFAULTED event stays in history, exactly like a real
+    // credit record. paymentHistory in scoring nets the two.
+    detail: { amount: tx.amount, transactionId: txId, late: wasDefaulted },
   })
 
   const credit = await recalculateCredit(tx.fromAgentId)

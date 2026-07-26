@@ -396,6 +396,10 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
     return
   }
 
+  // Counterparty identity rides on the event so the scoring engine can
+  // apply the collusion discount (repeat requester → diminishing weight)
+  // without a join at score time.
+  const [specRow] = await db.select({ requesterAgentId: jobSpec.requesterAgentId }).from(jobSpec).where(eq(jobSpec.onchainJobId, jobId))
   await db.insert(agentEvent).values({
     id: nanoid(),
     agentId: workerAgent.id,
@@ -405,7 +409,7 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
     executionTime: 0,
     tokenCost: 0,
     qualityScore: '1.000',
-    detail: { jobId, bounty, txHash, onchain: true },
+    detail: { jobId, bounty, txHash, onchain: true, requesterAgentId: specRow?.requesterAgentId ?? null },
   })
   await recalculateCredit(workerAgent.id)
   await logPlatformEvent('JOB_COMPLETED', `${workerAgent.name} completed job #${jobId} — $${bounty.toLocaleString()}`)

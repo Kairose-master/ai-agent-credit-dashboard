@@ -157,6 +157,7 @@ async function handleCheck(event: string, payload: any) {
         repo: repoFullName,
         prNumber: pr.number,
         grader: 'repo-ci',
+        requesterAgentId: spec.requesterAgentId ?? null,
         conclusion,
       })
       const { logPlatformEvent } = await import('@/lib/platform-feed')
@@ -183,6 +184,7 @@ async function handleCheck(event: string, payload: any) {
         repo: repoFullName,
         prNumber: pr.number,
         grader: 'repo-ci',
+        requesterAgentId: spec.requesterAgentId ?? null,
         conclusion,
       })
       const { commentOnPr } = await import('@/lib/github-app')

@@ -24,6 +24,15 @@ export type AgentEventInput = {
   tokenCost: number
   qualityScore: number | null // 0–1
   createdAt: Date
+  /** Who was on the other side of this graded fact (requester agent id).
+   *  Null for legacy events and non-market events. Drives the collusion
+   *  discount: repeat counterparties earn diminishing reputation. */
+  counterparty?: string | null
+  /** Which grader produced this verdict ('repo-ci' | 'code' | 'tests' |
+   *  'vision' | 'audio' | 'llm-review'). Null = legacy/unknown. Drives the
+   *  grader-strength weight: verdicts a colluding pair can author their own
+   *  criteria for count less than verdicts they cannot reach. */
+  grader?: string | null
 }
 
 export type CreditAssessment = {
@@ -158,8 +167,9 @@ export function assessCredit(
   const defaults = events.filter((e) => e.eventType === 'REPAYMENT_DEFAULTED').length
 
   // Completed paid jobs on the labor market — real economic activity, the
-  // strongest reputation signal an agent can accumulate.
-  const jobsCompleted = events.filter((e) => e.eventType === 'JOB_COMPLETED').length
+  // strongest reputation signal an agent can accumulate. Weighted, not
+  // counted: see collusionWeight/graderWeight below.
+  const jobsCompleted = weightedMarketSignal(events, 'JOB_COMPLETED')
 
   // ── Reputation (20%) ─────────────────────────────────────────────
   // Verified achievements are explicit third-party attestations; the rest
@@ -170,7 +180,7 @@ export function assessCredit(
   // Acceptance tests on code jobs, run by the platform runtime (grader ≠
   // solver) — a fact, same trust class as VERIFIED_TASK_*. Supplementary to
   // the run's own terminal event, so they don't join TERMINAL above.
-  const testsPassed = events.filter((e) => e.eventType === 'JOB_TESTS_PASSED').length
+  const testsPassed = weightedMarketSignal(events, 'JOB_TESTS_PASSED')
   const testsFailed = events.filter((e) => e.eventType === 'JOB_TESTS_FAILED').length
   const reputation = dampen(
     clamp(
@@ -181,7 +191,7 @@ export function assessCredit(
         verifiedCompleted * 10 + // ground-truth-verified capability
         testsPassed * 10, // independently test-verified deliverables
     ),
-    n + achievements + repayments + jobsCompleted + testsPassed,
+    n + achievements + repayments + Math.round(jobsCompleted) + Math.round(testsPassed),
   )
 
   // ── Risk (10%) — higher is safer ─────────────────────────────────
@@ -215,6 +225,68 @@ export function assessCredit(
       avgQuality: Math.round(avgQuality * 1000) / 1000,
     },
   }
+}
+
+// ── Collusion resistance ──────────────────────────────────────────────
+//
+// Two empirical findings drive these weights (docs/market-design-notes.md):
+// "Agent Bazaar" (arXiv:2605.17698) shows Sybil/collusion rings are the C2C
+// failure mode, and "When Agent Markets Arrive" (arXiv:2604.06688) shows
+// naive reputation counting is exploitable. Neither tested wash trading —
+// two accounts trading easy jobs to farm each other's scores — which is the
+// obvious attack HERE. Counting can be farmed; weighting makes farming pay
+// sub-linearly on both axes that matter.
+
+/** k-th graded fact with the SAME counterparty is worth 1/√k: the first
+ *  trade with a stranger carries full weight, the tenth with the same
+ *  partner ~0.32. Diversity is what a collusion ring cannot fake cheaply —
+ *  every additional identity it mints starts at score 300 with no history.
+ *  Null counterparty (legacy events) keeps full weight: no retroactive
+ *  penalty for events recorded before enrichment existed. */
+export function collusionWeight(priorWithSameCounterparty: number): number {
+  return 1 / Math.sqrt(priorWithSameCounterparty + 1)
+}
+
+/** Verdicts differ in how hard they are for a colluding requester+worker
+ *  pair to manufacture. A repo job's CI belongs to a real repository and
+ *  runs on GitHub's infrastructure; a mutation-graded test suite must kill
+ *  hidden mutants; an LLM review grades against criteria the requester
+ *  AUTHORED — a colluding requester writes trivially-passable criteria.
+ *  Unknown graders get the middle weight rather than the top one. */
+export const GRADER_WEIGHTS: Record<string, number> = {
+  'repo-ci': 1.25,
+  tests: 1.0,
+  code: 1.0,
+  vision: 0.8,
+  audio: 0.8,
+  'llm-review': 0.6,
+  text: 0.6,
+}
+
+export function graderWeight(grader: string | null | undefined): number {
+  if (!grader) return 0.8
+  return GRADER_WEIGHTS[grader] ?? 0.8
+}
+
+/** Weighted count of a market signal: each event discounted by counterparty
+ *  repetition and grader strength. Chronological order matters — the FIRST
+ *  trades with a counterparty keep the most weight. */
+export function weightedMarketSignal(events: AgentEventInput[], eventType: string): number {
+  const seen = new Map<string, number>()
+  let total = 0
+  const chronological = events
+    .filter((e) => e.eventType === eventType)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  for (const e of chronological) {
+    let diversity = 1
+    if (e.counterparty) {
+      const prior = seen.get(e.counterparty) ?? 0
+      diversity = collusionWeight(prior)
+      seen.set(e.counterparty, prior + 1)
+    }
+    total += diversity * graderWeight(e.grader)
+  }
+  return total
 }
 
 /** A DMN-style decision-table row: "score >= minScore -> value". Rows are

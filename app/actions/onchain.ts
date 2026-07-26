@@ -91,6 +91,18 @@ export async function provisionSmartAccount(agentId: string) {
 /** Draw credit on-chain (real USDC via UserOp) and mirror to off-chain books. */
 export async function drawOnchain(agentId: string, amount: number, description?: string) {
   const { agent: ag, userId } = await requireOwnedAgent(agentId)
+
+  // Same delinquency gate and loan term as the off-chain path — the on-chain
+  // vault moves real USDC, so it is the LAST place terms may be skipped.
+  await (await import('@/lib/db/ensure-columns')).ensureCreditTransactionColumns()
+  const { canDrawMore } = await import('@/lib/loan-terms')
+  const { creditTransaction: ctx } = await import('@/lib/db/schema')
+  const { eq: eqOp } = await import('drizzle-orm')
+  const openLoans = (
+    await db.select().from(ctx).where(eqOp(ctx.userId, userId))
+  ).filter((t) => t.type === 'credit_draw' && (t.status === 'active' || t.status === 'defaulted'))
+  const gate = canDrawMore(new Date(), openLoans)
+  if (!gate.ok) throw new Error(gate.reason)
   if (!ag.smartAccountAddress) throw new Error('Provision the smart account first')
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be positive')
 
@@ -98,11 +110,14 @@ export async function drawOnchain(agentId: string, amount: number, description?:
     const { drawOnchain: draw } = await import('@/lib/onchain/credit')
     const txHash = await draw(agentId, amount)
 
+    const { dueAtFor, DEFAULT_TERM_DAYS } = await import('@/lib/loan-terms')
     await db.insert(creditTransaction).values({
       id: nanoid(),
       userId,
       fromAgentId: agentId,
       status: 'active',
+      dueAt: dueAtFor(new Date(), DEFAULT_TERM_DAYS),
+      termDays: DEFAULT_TERM_DAYS,
       amount: amount.toString(),
       type: 'credit_draw',
       description: description || `On-chain draw (${txHash.slice(0, 10)}…)`,

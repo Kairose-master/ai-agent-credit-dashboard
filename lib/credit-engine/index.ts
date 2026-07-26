@@ -58,12 +58,16 @@ async function overrideSelfReportsWithGradedVerdicts<
 
 /** Sum of credit drawn but not yet repaid — reduces available credit. */
 async function outstandingBalance(agentId: string): Promise<number> {
-  const active = await db
+  // Defaulted loans MUST stay on the books: with the naive status === 'active'
+  // filter, marking a loan defaulted made the debt vanish — so a default
+  // would have RAISED the borrower's available credit (lib/loan-terms.ts).
+  const { isOutstandingStatus } = await import('@/lib/loan-terms')
+  const rows = await db
     .select()
     .from(creditTransaction)
-    .where(and(eq(creditTransaction.fromAgentId, agentId), eq(creditTransaction.status, 'active')))
-  return active
-    .filter((t) => t.type === 'credit_draw')
+    .where(eq(creditTransaction.fromAgentId, agentId))
+  return rows
+    .filter((t) => t.type === 'credit_draw' && isOutstandingStatus(t.status))
     .reduce((sum, t) => sum + parseFloat(t.amount), 0)
 }
 
@@ -78,12 +82,13 @@ async function outstandingBalance(agentId: string): Promise<number> {
  * the owner is the real unit of credit exposure, not the agent address.
  */
 export async function ownerOutstandingBalance(userId: string): Promise<number> {
-  const active = await db
+  const { isOutstandingStatus } = await import('@/lib/loan-terms')
+  const rows = await db
     .select()
     .from(creditTransaction)
-    .where(and(eq(creditTransaction.userId, userId), eq(creditTransaction.status, 'active')))
-  return active
-    .filter((t) => t.type === 'credit_draw')
+    .where(eq(creditTransaction.userId, userId))
+  return rows
+    .filter((t) => t.type === 'credit_draw' && isOutstandingStatus(t.status))
     .reduce((sum, t) => sum + parseFloat(t.amount), 0)
 }
 
@@ -101,14 +106,19 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
 
   const rules = await getEffectiveCreditRules()
   const assessment = assessCredit(
-    events.map((e) => ({
-      eventType: e.eventType,
-      success: e.success,
-      executionTime: e.executionTime,
-      tokenCost: e.tokenCost,
-      qualityScore: e.qualityScore === null ? null : parseFloat(e.qualityScore),
-      createdAt: e.createdAt,
-    })),
+    events.map((e) => {
+      const d = (e.detail ?? {}) as Record<string, unknown>
+      return {
+        eventType: e.eventType,
+        success: e.success,
+        executionTime: e.executionTime,
+        tokenCost: e.tokenCost,
+        qualityScore: e.qualityScore === null ? null : parseFloat(e.qualityScore),
+        createdAt: e.createdAt,
+        counterparty: typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null,
+        grader: typeof d.grader === 'string' ? d.grader : null,
+      }
+    }),
     { rating: rules.rating, risk: rules.risk },
   )
 

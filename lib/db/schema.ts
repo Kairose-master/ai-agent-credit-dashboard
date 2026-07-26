@@ -498,6 +498,13 @@ export const creditTransaction = pgTable('creditTransaction', {
   amount: decimal('amount', { precision: 18, scale: 2 }).notNull(),
   type: text('type').notNull(),
   description: text('description'),
+  // Loan terms (lib/loan-terms.ts): every credit_draw now matures. dueAt is
+  // set at draw time; defaultedAt is stamped by the default sweep when the
+  // loan runs past due + grace. Null dueAt = drawn before terms existed —
+  // grandfathered, never retroactively defaulted.
+  dueAt: timestamp('dueAt', { withTimezone: true }),
+  termDays: integer('termDays'),
+  defaultedAt: timestamp('defaultedAt', { withTimezone: true }),
   approvedAt: timestamp('approvedAt', { withTimezone: true }),
   rejectedAt: timestamp('rejectedAt', { withTimezone: true }),
   settledAt: timestamp('settledAt', { withTimezone: true }),

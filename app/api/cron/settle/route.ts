@@ -57,6 +57,13 @@ export async function GET(request: Request) {
     .then((n) => { report.pricesRaised = n })
     .catch((e) => { report.pricesRaised = String(e) })
 
+  // Loans past due + grace become real defaults: status flip, the
+  // REPAYMENT_DEFAULTED event, and the score hit it was designed to cause.
+  const { sweepDefaultedLoans } = await import('@/lib/loan-sweep')
+  await sweepDefaultedLoans()
+    .then((n) => { report.loansDefaulted = n })
+    .catch((e) => { report.loansDefaulted = String(e) })
+
   let active: (typeof delegation.$inferSelect)[] = []
   try {
     active = await db.select().from(delegation).where(eq(delegation.status, 'posted'))

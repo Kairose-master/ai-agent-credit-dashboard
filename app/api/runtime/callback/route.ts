@@ -361,7 +361,16 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         executionTime: 0,
         tokenCost: 0,
         qualityScore: grade.passed ? '1.000' : '0.000', // graded fact, not self-opinion
-        detail: { jobId: spec.onchainJobId, testOutput: grade.output.slice(0, 500) },
+        detail: {
+          jobId: spec.onchainJobId,
+          testOutput: grade.output.slice(0, 500),
+          // Grader class + counterparty feed the collusion-resistant scoring
+          // weights: an LLM review against requester-authored criteria is
+          // cheaper for a colluding pair to manufacture than a mutation-
+          // graded suite, and repeat counterparties earn diminishing weight.
+          grader: testSuiteSpec ? 'tests' : isImageJob ? 'vision' : isAudioJob ? 'audio' : isLlmGradableText ? 'llm-review' : 'code',
+          requesterAgentId: spec.requesterAgentId ?? null,
+        },
       })
       await logPlatformEvent(
         grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
