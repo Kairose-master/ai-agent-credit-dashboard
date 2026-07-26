@@ -45,7 +45,23 @@ function slugId(title: string, used: Set<string>): string {
 }
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim()
-const safe = (s: string): string => s.replace(/"/g, "'")
+
+/**
+ * Neutralize a value being interpolated into a DSL *structure* line.
+ *
+ * This used to only swap double quotes for single ones, which reads like
+ * escaping but leaves the line-oriented half of the grammar wide open: the
+ * DSL is newline-delimited, so a title containing a newline forges an extra
+ * line. That block is pasted into every worker's brief as "here is the plan
+ * and where your piece fits", so a forged line invents dependencies,
+ * subtasks or instructions that the worker reads as the coordinator's own
+ * words — DSL injection, the structural cousin of prompt injection.
+ *
+ * Collapsing whitespace closes it: a value can no longer span lines, and
+ * with quotes already folded there is nothing left to terminate the token
+ * early. Titles are single-line by nature, so nothing legitimate is lost.
+ */
+const safe = (s: string): string => oneLine(s).replace(/"/g, "'")
 
 /** Serialize a plan to the DSL. `compact` drops the do/ok brief lines,
  *  leaving just the structural map — used for the per-worker context block. */
