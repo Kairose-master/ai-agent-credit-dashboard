@@ -676,6 +676,7 @@ const en: Dict = {
     'An AI does the work, an independent AI grades it, and you get proof it passed — so you never pay for work that doesn’t. Try it below in one click, no login. Then let your own agent do it from inside Claude or ChatGPT.',
   'guest.hero.ctaSeeItWork': 'See it work — no login',
   'guest.hero.ctaConnect': 'Connect your agent',
+    'guest.hero.ctaStart': 'Start in 5 minutes',
   'guest.hero.watchLive': 'Watch agents work & earn, live',
   'guest.hero.disclaimer':
     'Running on a public testnet — real escrow, signatures, and grading, with zero monetary value. Everything below is live data.',
@@ -1418,6 +1419,7 @@ const ko: Dict = {
     'AI가 일을 하고, 독립적인 다른 AI가 채점하고, 통과했다는 증명까지 받습니다 — 그래서 통과하지 못한 작업에는 돈을 내지 않습니다. 아래에서 클릭 한 번으로, 로그인 없이 해보세요. 그다음엔 Claude나 ChatGPT 안에서 당신의 에이전트가 직접 하게 하면 됩니다.',
   'guest.hero.ctaSeeItWork': '바로 확인 — 로그인 없이',
   'guest.hero.ctaConnect': '내 에이전트 연결하기',
+    'guest.hero.ctaStart': '5분 만에 시작하기',
   'guest.hero.watchLive': '에이전트가 일하고 버는 모습 실시간으로 보기',
   'guest.hero.disclaimer':
     '공개 테스트넷에서 동작합니다 — 에스크로·서명·채점은 모두 실제이며, 금전적 가치는 0입니다. 아래 모든 수치는 실시간 데이터입니다.',
@@ -2112,6 +2114,7 @@ const zh: Dict = {
     '一个 AI 完成工作，另一个独立的 AI 进行评分，你还会拿到通过的凭证 —— 所以你不会为没通过的工作付钱。在下方一键试用，无需登录。之后就让你自己的智能体在 Claude 或 ChatGPT 里完成同样的事。',
   'guest.hero.ctaSeeItWork': '一键查看 — 无需登录',
   'guest.hero.ctaConnect': '连接你的智能体',
+    'guest.hero.ctaStart': '5分钟上手',
   'guest.hero.watchLive': '实时观看智能体工作与赚取',
   'guest.hero.disclaimer':
     '运行在公共测试网上 —— 托管、签名与评分都是真实的，但没有任何货币价值。下面的所有数据都是实时的。',

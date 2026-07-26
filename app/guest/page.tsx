@@ -142,6 +142,12 @@ export default function GuestPage() {
                 {t('guest.hero.ctaSeeItWork')} <ArrowRight className="size-4" />
               </a>
               <Link
+                href="/start"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-5 py-2.5 text-sm font-semibold transition hover:bg-secondary"
+              >
+                {t('guest.hero.ctaStart')}
+              </Link>
+              <Link
                 href="/connect"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-border px-5 py-2.5 text-sm font-semibold transition hover:bg-secondary"
               >
