@@ -25,10 +25,41 @@ export const maxDuration = 300
  * Processing is claimed atomically (running → processing) so a retried
  * callback can't double-insert events.
  */
+/**
+ * Ceiling on a stored deliverable. Generous for what this market actually
+ * trades — a text answer, or a unified diff of a few thousand lines — and
+ * far below the point where one worker's submissions become the database's
+ * problem. Binary deliverables do not come through here at all; they go to
+ * blob storage as artifacts, which have their own limits.
+ */
+const MAX_OUTPUT_BYTES = 256 * 1024
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null)
   const taskId = body?.task_id as string | undefined
   if (!taskId) return Response.json({ error: 'Missing task_id' }, { status: 400 })
+
+  // The output is worker-controlled and was stored with no size limit at
+  // all, three times over (verified task, labor settlement, task row). A
+  // worker could claim, submit megabytes, and repeat — cheap for them,
+  // permanent for the database, and paid for by every later reader of the
+  // table.
+  //
+  // Rejected rather than truncated, deliberately: a silently shortened
+  // unified diff is a patch that no longer applies, so the worker would be
+  // failed by CI for something the platform did to their work. Better to
+  // refuse it and say why while they can still act on it.
+  const rawOutput = String(body?.output ?? '')
+  const outputBytes = Buffer.byteLength(rawOutput, 'utf8')
+  if (outputBytes > MAX_OUTPUT_BYTES) {
+    return Response.json(
+      {
+        error: `Submission is ${Math.round(outputBytes / 1024)}KB; the limit is ${MAX_OUTPUT_BYTES / 1024}KB. ` +
+          `Submit a unified diff rather than whole files, or attach large deliverables as artifacts.`,
+      },
+      { status: 413 },
+    )
+  }
 
   const [taskRow] = await db.select().from(agentTask).where(eq(agentTask.id, taskId))
   if (!taskRow) return Response.json({ status: 'ignored' }) // unknown task — idempotent no-op
@@ -95,7 +126,7 @@ export async function POST(request: Request) {
     }
 
     // Verified task? Grade against the hidden answer and settle the escrow.
-    const verifiedOutcome = await settleVerifiedTask(taskId, agentId, String(body?.output ?? ''))
+    const verifiedOutcome = await settleVerifiedTask(taskId, agentId, rawOutput)
     if (verifiedOutcome !== null) {
       const { publishValidation } = await import('@/lib/onchain/erc8004')
       await publishValidation(agentId, verifiedOutcome ? 100 : 0, 'proving-ground', `task-${taskId}`)
@@ -104,7 +135,7 @@ export async function POST(request: Request) {
     // Labor Market job? Submit the REAL output on-chain — no more manual
     // "Submit work" click, no more placeholder text. The verdict comes back
     // so the worker's log can show paid / refunded / manual review.
-    const grading = await settleLaborMarketJob(taskId, String(body?.output ?? ''))
+    const grading = await settleLaborMarketJob(taskId, rawOutput)
 
     const credit = await recalculateCredit(agentId)
 
@@ -112,7 +143,7 @@ export async function POST(request: Request) {
       .update(agentTask)
       .set({
         status: 'completed',
-        output: String(body?.output ?? ''),
+        output: rawOutput,
         result: {
           success: Boolean(body?.success),
           plan: body?.plan ?? '',
