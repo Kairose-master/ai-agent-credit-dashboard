@@ -42,10 +42,18 @@ export async function POST(request: Request) {
   if (!auth.required || !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
     // Server-side only: name which precondition failed, never any secret
     // material. A bare 401 across ID-vs-key-vs-stale-key is undiagnosable.
+    // Length + an 8-char hash prefix separates "same key, mangled in transit"
+    // from "a different key entirely" without revealing either value.
     const presented = request.headers.get('x-runtime-secret')
+    const { createHash } = await import('node:crypto')
+    const sha8 = (v: string) => createHash('sha256').update(v).digest('hex').slice(0, 8)
+    const expected = auth.required ? auth.secret : ''
     console.warn(
       `[worker/claim] auth failed for agent ${agentId}: ` +
-        (!auth.required ? 'agent has no key and no shared secret is configured' : presented ? 'presented key does not match the stored key' : 'no x-runtime-secret header presented'),
+        (!auth.required ? 'agent has no key and no shared secret is configured' : presented ? 'presented key does not match the stored key' : 'no x-runtime-secret header presented') +
+        (auth.required && presented
+          ? ` (presented len=${presented.length} sha8=${sha8(presented.trim())}, stored len=${expected.length} sha8=${sha8(expected)})`
+          : ''),
     )
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }

@@ -33,8 +33,12 @@ export type CallbackAuth =
 export function callbackSecretMatches(auth: CallbackAuth, presented: string | null): boolean {
   if (!auth.required) return true
   if (presented === null) return false
-  if (presented === auth.secret) return true
-  return 'alsoAccept' in auth && presented === auth.alsoAccept
+  // Generated secrets are hex/base64url and never contain whitespace, so
+  // whitespace on a presented value is always a copy-paste artifact (a
+  // trailing newline pasted into a CI secret field) — never a different key.
+  const p = presented.trim()
+  if (p === auth.secret) return true
+  return 'alsoAccept' in auth && p === auth.alsoAccept
 }
 
 /** What an incoming callback for this agent's task must present to be
