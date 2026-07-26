@@ -54,6 +54,9 @@ export async function POST(request: Request) {
     )
   }
 
+  const { recordX402Payment } = await import('@/lib/x402-ledger')
+  await recordX402Payment({ endpoint: '/api/jobs/external', request, amountUsd: 0.1 })
+
   const houseAgentId = process.env.X402_JOB_REQUESTER_AGENT_ID
   if (!houseAgentId) {
     return Response.json(

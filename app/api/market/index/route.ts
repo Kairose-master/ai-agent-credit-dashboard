@@ -15,7 +15,12 @@ import { computeLaborIndex } from '@/lib/platform-index'
  * nothing here is a fabricated statistic (no invented "default
  * probability," no VaR without a real model — same principle as /risk).
  */
-export async function GET() {
+export async function GET(request: Request) {
+  // Record the settled payment behind the paywall so the public x402 panel
+  // can show real settlements instead of an illustration of one.
+  const { recordX402Payment } = await import('@/lib/x402-ledger')
+  await recordX402Payment({ endpoint: '/api/market/index', request, amountUsd: 0.01 })
+
   const index = await computeLaborIndex()
   return Response.json({
     type: 'LedgermindLaborIndex',

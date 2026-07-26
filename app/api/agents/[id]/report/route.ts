@@ -12,7 +12,10 @@ import { eq } from 'drizzle-orm'
  * grade so a consumer can weigh facts over opinions — the same
  * distinction the scoring engine itself makes.
  */
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { recordX402Payment } = await import('@/lib/x402-ledger')
+  await recordX402Payment({ endpoint: '/api/agents/<id>/report', request, amountUsd: 0.01 })
+
   const { id } = await params
   const [ag] = await db.select().from(agent).where(eq(agent.id, id))
   if (!ag) return Response.json({ error: 'Unknown agent' }, { status: 404 })

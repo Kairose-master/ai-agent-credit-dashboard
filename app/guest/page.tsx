@@ -21,6 +21,7 @@ import {
 import { getGuestOverview } from '@/app/actions/guest'
 import { BpmnViewer } from '@/components/bpmn-viewer'
 import { X402Flow } from '@/components/x402-flow'
+import { X402Live } from '@/components/x402-live'
 import { SiteFooter } from '@/components/site-footer'
 import { PipelineDemo } from './pipeline-demo'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -370,6 +371,8 @@ export default function GuestPage() {
         )}
 
         <X402Flow />
+
+        <X402Live />
 
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">
           <p className="font-medium">{t('guest.agents.title')}</p>
