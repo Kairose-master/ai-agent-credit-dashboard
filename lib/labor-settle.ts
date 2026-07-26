@@ -26,12 +26,28 @@ import { logPlatformEvent } from '@/lib/platform-feed'
 /** Retries a step that runs AFTER a prior on-chain action already
  *  succeeded and can't be undone — a transient DB/RPC failure here would
  *  otherwise permanently strand bookkeeping for money that already moved. */
+/**
+ * An operation the bundler accepted but hasn't confirmed. Matched by name
+ * rather than `instanceof` so this stays free of the heavy on-chain module
+ * (retry is used from plain unit tests too) and survives bundling
+ * boundaries where identity checks can fail.
+ */
+export function isPendingUserOp(error: unknown): boolean {
+  return error instanceof Error && error.name === 'UserOpPendingError'
+}
+
 export async function retry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 500): Promise<T> {
   let lastError: unknown
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn()
     } catch (error) {
+      // NEVER retry an operation that may already be on-chain. This wrapper
+      // guards postJob, which locks escrow — a blind retry of a pending post
+      // can put the same spec on the market twice and charge the requester
+      // twice for it. Unconfirmed is not failed; hand it to the caller and
+      // let the reconciliation sweeps observe what actually landed.
+      if (isPendingUserOp(error)) throw error
       lastError = error
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs * (i + 1)))
     }

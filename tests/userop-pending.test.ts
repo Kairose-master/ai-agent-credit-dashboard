@@ -27,3 +27,48 @@ describe('UserOpPendingError', () => {
     expect(isUserOpPending('timed out')).toBe(false)
   })
 })
+
+import { retry, retryRpc, isPendingUserOp } from '@/lib/labor-settle'
+
+// retry() wraps postJob, which locks escrow. Retrying an operation that may
+// already be on-chain is how a requester gets charged twice for one job.
+
+describe('retry vs pending operations', () => {
+  const pending = () => Object.assign(new Error('pending'), { name: 'UserOpPendingError' })
+
+  it('recognises a pending error by name across module boundaries', () => {
+    expect(isPendingUserOp(pending())).toBe(true)
+    expect(isPendingUserOp(new Error('execution reverted'))).toBe(false)
+  })
+
+  it('never re-sends a pending money operation', async () => {
+    let calls = 0
+    const fn = async () => {
+      calls++
+      throw pending()
+    }
+    await expect(retry(fn, 3, 1)).rejects.toThrow('pending')
+    expect(calls).toBe(1) // not 3 — a second postJob would double-escrow
+  })
+
+  it('still retries ordinary failures', async () => {
+    let calls = 0
+    const fn = async () => {
+      calls++
+      if (calls < 3) throw new Error('flaky')
+      return 'ok'
+    }
+    await expect(retry(fn, 3, 1)).resolves.toBe('ok')
+    expect(calls).toBe(3)
+  })
+
+  it('retryRpc leaves pending alone too (only 429s are transient)', async () => {
+    let calls = 0
+    const fn = async () => {
+      calls++
+      throw pending()
+    }
+    await expect(retryRpc(fn, 3, 1)).rejects.toThrow('pending')
+    expect(calls).toBe(1)
+  })
+})
