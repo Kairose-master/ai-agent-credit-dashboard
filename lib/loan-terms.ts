@@ -57,6 +57,42 @@ export function daysUntilDue(now: Date, dueAt: Date): number {
   return Math.ceil((dueAt.getTime() - now.getTime()) / DAY_MS)
 }
 
+/** How many days before maturity the "due soon" notice fires. */
+export const DUE_SOON_DAYS = 3
+
+export type LoanNoticePhase = 'due-soon' | 'overdue' | 'defaulted'
+
+const NOTICE_RANK: Record<LoanNoticePhase, number> = { 'due-soon': 1, overdue: 2, defaulted: 3 }
+
+/**
+ * Which notification (if any) a loan deserves right now. Phases only move
+ * forward — comparing against the last-notified phase makes the reminder
+ * sweep idempotent per phase, never per run. Grandfathered term-less loans
+ * notify nothing, matching their perpetual-active status.
+ */
+export function loanNoticeDue(
+  now: Date,
+  loan: { dueAt: Date | null; status: string; remindedPhase?: string | null },
+  graceDays: number = GRACE_DAYS,
+): LoanNoticePhase | null {
+  if (!loan.dueAt) return null
+  if (loan.status !== 'active' && loan.status !== 'defaulted') return null
+
+  let phase: LoanNoticePhase | null = null
+  if (loan.status === 'defaulted') phase = 'defaulted'
+  else {
+    const p = loanPhase(now, loan.dueAt, graceDays)
+    if (p === 'defaulted') phase = 'defaulted'
+    else if (p === 'overdue') phase = 'overdue'
+    else if (loan.dueAt.getTime() - now.getTime() <= DUE_SOON_DAYS * DAY_MS) phase = 'due-soon'
+  }
+  if (!phase) return null
+
+  const last = loan.remindedPhase as LoanNoticePhase | undefined | null
+  if (last && NOTICE_RANK[last] !== undefined && NOTICE_RANK[last] >= NOTICE_RANK[phase]) return null
+  return phase
+}
+
 export type OpenLoan = { dueAt: Date | null; status: string }
 
 /**

@@ -4,7 +4,7 @@ import { headers } from 'next/headers'
 import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { SAFE_JOB_SPEC_COLUMNS } from '@/lib/db/safe-select'
-import { agent, agentEvent, agentTask, jobSpec } from '@/lib/db/schema'
+import { agent, agentEvent, agentTask, jobSpec, user } from '@/lib/db/schema'
 import { recalculateCredit } from '@/lib/credit-engine'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
@@ -432,6 +432,18 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
   })
   await recalculateCredit(workerAgent.id)
   await logPlatformEvent('JOB_COMPLETED', `${workerAgent.name} completed job #${jobId} — $${bounty.toLocaleString()}`)
+
+  // "You got paid" — the one moment a worker's owner always wants to hear
+  // about. Best-effort: mail must never touch settlement.
+  try {
+    const [owner] = await db.select({ email: user.email }).from(user).where(eq(user.id, workerAgent.userId))
+    if (owner?.email) {
+      const { sendPayoutEmail } = await import('@/lib/email')
+      await sendPayoutEmail({ to: owner.email, agentId: workerAgent.id, agentName: workerAgent.name, bountyUsd: bounty, jobId })
+    }
+  } catch (error) {
+    console.error('[labor] payout email failed (non-fatal):', error)
+  }
 
   // Governance: reward the worker's owner with $LEDGER — voting weight is
   // earned from real completed work, never bought. Best-effort.

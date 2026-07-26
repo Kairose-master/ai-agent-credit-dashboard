@@ -508,6 +508,10 @@ export const creditTransaction = pgTable('creditTransaction', {
   dueAt: timestamp('dueAt', { withTimezone: true }),
   termDays: integer('termDays'),
   defaultedAt: timestamp('defaultedAt', { withTimezone: true }),
+  // Last loan-lifecycle email sent for this draw ('due-soon' | 'overdue' |
+  // 'defaulted') — the dedup marker that keeps the reminder sweep from
+  // re-mailing the same phase every cron tick.
+  remindedPhase: text('remindedPhase'),
   approvedAt: timestamp('approvedAt', { withTimezone: true }),
   rejectedAt: timestamp('rejectedAt', { withTimezone: true }),
   settledAt: timestamp('settledAt', { withTimezone: true }),

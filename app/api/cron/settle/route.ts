@@ -102,10 +102,16 @@ export async function GET(request: Request) {
 
   // Loans past due + grace become real defaults: status flip, the
   // REPAYMENT_DEFAULTED event, and the score hit it was designed to cause.
-  const { sweepDefaultedLoans } = await import('@/lib/loan-sweep')
+  const { sweepDefaultedLoans, sweepLoanReminders } = await import('@/lib/loan-sweep')
   await sweepDefaultedLoans()
     .then((n) => { report.loansDefaulted = n })
     .catch((e) => { report.loansDefaulted = String(e) })
+
+  // Loan lifecycle emails (due-soon / overdue / defaulted) — one per phase
+  // transition per loan; no-op while email is unconfigured.
+  await sweepLoanReminders()
+    .then((n) => { report.loanReminders = n })
+    .catch((e) => { report.loanReminders = String(e) })
 
   let active: (typeof delegation.$inferSelect)[] = []
   try {

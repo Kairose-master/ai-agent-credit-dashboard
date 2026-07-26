@@ -1,4 +1,4 @@
-import { githubAppChecks, houseChecks } from '@/lib/github-doctor'
+import { githubAppChecks, houseChecks, emailCheck } from '@/lib/github-doctor'
 
 /**
  * GET /api/doctor — machine-readable platform health for the GitHub-jobs
@@ -9,7 +9,7 @@ import { githubAppChecks, houseChecks } from '@/lib/github-doctor'
  */
 export async function GET() {
   const [github, house] = await Promise.all([githubAppChecks(), houseChecks()])
-  const checks = [...github, ...house]
+  const checks = [...github, ...house, emailCheck()]
   const worst = checks.some((c) => c.status === 'fail') ? 'fail' : checks.some((c) => c.status === 'warn') ? 'warn' : 'pass'
   return Response.json({ status: worst, checks, checkedAt: new Date().toISOString() })
 }

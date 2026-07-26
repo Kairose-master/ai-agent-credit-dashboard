@@ -38,6 +38,7 @@ const CREDIT_TX_ADDITIONS = [
   'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "dueAt" timestamptz',
   'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "termDays" integer',
   'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "defaultedAt" timestamptz',
+  'ALTER TABLE "creditTransaction" ADD COLUMN IF NOT EXISTS "remindedPhase" text',
 ]
 
 let inFlight: Promise<void> | null = null

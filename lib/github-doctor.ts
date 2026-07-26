@@ -167,6 +167,20 @@ export async function githubAppChecks(): Promise<DoctorCheck[]> {
   return checks
 }
 
+/** Email infra: optional, but when configured the payout + loan-lifecycle
+ *  notices flow; when not, the check names the two env vars. */
+export function emailCheck(): DoctorCheck {
+  const configured = Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM)
+  return configured
+    ? { id: 'email', label: 'Email notifications', status: 'pass', detail: 'Resend configured — payout and loan-lifecycle emails active.' }
+    : {
+        id: 'email',
+        label: 'Email notifications',
+        status: 'warn',
+        detail: 'Not configured (optional). Set RESEND_API_KEY and EMAIL_FROM to enable payout + loan due/overdue/default emails.',
+      }
+}
+
 /** House-economy checks: is the wallet that funds faucet jobs and top-ups
  *  actually solvent? Only meaningful when a house agent is configured. */
 export async function houseChecks(): Promise<DoctorCheck[]> {

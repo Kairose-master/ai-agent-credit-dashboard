@@ -3,7 +3,7 @@ import { getSession } from '@/lib/get-session'
 import { db } from '@/lib/db'
 import { agent } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
-import { githubAppChecks, houseChecks, type DoctorCheck } from '@/lib/github-doctor'
+import { githubAppChecks, houseChecks, emailCheck, type DoctorCheck } from '@/lib/github-doctor'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,6 +83,7 @@ export default async function DoctorPage() {
         {house.map((c) => (
           <CheckRow key={c.id} check={c} />
         ))}
+        <CheckRow check={emailCheck()} />
       </ul>
 
       <h2 className="text-lg font-medium mb-2">Your agents</h2>
