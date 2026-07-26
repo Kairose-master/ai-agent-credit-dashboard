@@ -21,7 +21,7 @@
  */
 import { db } from '@/lib/db'
 import { agentEvent, jobSpec } from '@/lib/db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 
 /** Bounded per pass: each miss costs a credit recalculation. */
 const MAX_PER_PASS = 5
@@ -37,12 +37,15 @@ export async function reconcileUncreditedPayouts(): Promise<ReconcileReport> {
   const completed = jobs.filter((j) => j.status === 'Completed')
   if (completed.length === 0) return { credited: 0, examined: 0 }
 
-  // One query for every completion event, rather than one per job: this runs
-  // on a traffic-driven tick and must not scale its cost with market size.
+  // One query rather than one per job — but scoped to the completed jobs we
+  // are actually examining, not to every completion event the market has
+  // ever produced. The unscoped version was still O(all history) on a
+  // traffic-driven tick: correct, and quietly more expensive every week.
+  const wantedTaskIds = completed.map((j) => `job-${j.id}`)
   const events = await db
     .select({ taskId: agentEvent.taskId })
     .from(agentEvent)
-    .where(eq(agentEvent.eventType, 'JOB_COMPLETED'))
+    .where(and(eq(agentEvent.eventType, 'JOB_COMPLETED'), inArray(agentEvent.taskId, wantedTaskIds)))
   const credited = new Set(events.map((e) => e.taskId))
 
   let fixed = 0

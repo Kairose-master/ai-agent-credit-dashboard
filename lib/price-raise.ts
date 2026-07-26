@@ -22,7 +22,7 @@
  */
 import { db } from '@/lib/db'
 import { jobSpec } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { logPlatformEvent } from '@/lib/platform-feed'
 import { nextPriceRaise } from '@/lib/market-price'
@@ -132,7 +132,33 @@ export async function resumeOrphanedRaises(now = new Date()): Promise<number> {
     const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
     if (!isLaborMarketConfigured()) return 0
 
-    const orphans = (await db.select().from(jobSpec)).filter((s) => isOrphanedRaise(now, s))
+    // Both halves of this query matter, and I got both wrong when I first
+    // wrote it: it selected EVERY column and filtered in JavaScript.
+    //
+    // Selecting every column is the schema-ahead-of-migration trap that has
+    // taken the public task feed down once already — drizzle asks Postgres
+    // for each column schema.ts declares, so a new column breaks this reader
+    // the moment it ships, before its migration runs. And this step is
+    // marked `fast`, so it runs on every traffic tick: a full table scan,
+    // every five minutes anyone is looking, to find rows that are almost
+    // always zero.
+    //
+    // Push both the predicate and the projection into SQL. The pure
+    // isOrphanedRaise still decides the age rule, which is the part worth
+    // testing.
+    const candidates = await db
+      .select({
+        specHash: jobSpec.specHash,
+        title: jobSpec.title,
+        requesterAgentId: jobSpec.requesterAgentId,
+        pricing: jobSpec.pricing,
+        parentSpecHash: jobSpec.parentSpecHash,
+        onchainJobId: jobSpec.onchainJobId,
+        createdAt: jobSpec.createdAt,
+      })
+      .from(jobSpec)
+      .where(and(isNotNull(jobSpec.parentSpecHash), isNull(jobSpec.onchainJobId)))
+    const orphans = candidates.filter((s) => isOrphanedRaise(now, s))
     if (orphans.length === 0) return 0
 
     const { readJobs, postJob } = await import('@/lib/onchain/labor')
