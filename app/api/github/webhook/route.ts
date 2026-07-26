@@ -48,7 +48,15 @@ export async function POST(request: Request) {
   try {
     if (event === 'pull_request') return await handlePullRequest(payload)
     if (event === 'check_suite' || event === 'check_run') return await handleCheck(event, payload)
-    if (event === 'issues') return await handleIssue(payload)
+    if (event === 'issues') {
+      const res = await handleIssue(payload)
+      // The bot's only observable output is a comment; when it stays silent we
+      // need the exit path to be readable from the runtime logs.
+      console.log(
+        `[github/webhook] issues action=${String(payload?.action ?? '')} label=${String(payload?.label?.name ?? '')} -> ${await res.clone().text()}`,
+      )
+      return res
+    }
     return Response.json({ status: 'ignored', event })
   } catch (error) {
     console.error(`[github/webhook] ${event} handling failed:`, error)
