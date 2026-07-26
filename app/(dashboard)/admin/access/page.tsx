@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, ShieldOff } from 'lucide-react'
+import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, ShieldOff, GitPullRequest } from 'lucide-react'
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
 import { applyPassedI18nTranslations, getI18nJobsStatus, postI18nGapJobs } from '@/app/actions/i18n-jobs'
@@ -246,6 +246,122 @@ function BoardCurationCard() {
         >
           {busy === 'cancel' ? <Loader2 className="size-4 animate-spin" /> : <ShieldOff className="size-4" />}
           Clear practice jobs
+        </button>
+      </div>
+      {result && <p className="mt-2 text-sm text-success">{result}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * GitHub repo jobs (docs/github-jobs.md). Two buttons because the failure
+ * mode we most want to avoid is escrowing a bounty on a repository the
+ * platform's App can't actually open a PR against — so access is checkable
+ * on its own, before any money moves.
+ */
+function RepoJobsCard() {
+  const [repo, setRepo] = useState('')
+  const [title, setTitle] = useState('')
+  const [brief, setBrief] = useState('')
+  const [bounty, setBounty] = useState('15')
+  const [busy, setBusy] = useState<'check' | 'post' | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const check = async () => {
+    setBusy('check')
+    setError(null)
+    setResult(null)
+    try {
+      const { checkRepoAccess } = await import('@/app/actions/repo-jobs')
+      const r = await checkRepoAccess(repo.trim())
+      if (r.ok) setResult(r.reason)
+      else setError(r.reason)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const post = async () => {
+    setBusy('post')
+    setError(null)
+    setResult(null)
+    try {
+      const { postRepoJobAsHouse } = await import('@/app/actions/repo-jobs')
+      const r = await postRepoJobAsHouse({
+        repoFullName: repo.trim(),
+        title: title.trim(),
+        brief: brief.trim(),
+        bountyUsd: Number(bounty),
+      })
+      setResult(`Posted on ${r.repoFullName} (base ${r.baseBranch}). Workers submit a diff; your CI grades the PR.`)
+      setTitle('')
+      setBrief('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-6">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <GitPullRequest className="size-5" /> GitHub repo jobs
+      </h3>
+      <p className="text-sm text-muted-foreground mb-3">
+        Escrow a bounty on a real repository task. The worker submits a unified diff (never credentials), the
+        platform&apos;s GitHub App opens the pull request, and <strong>the repository&apos;s own CI is the grader</strong>.
+        Merging the PR releases the escrow; closing it unmerged refunds and reposts. Check access first — the App
+        must be installed on the repo.
+      </p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <input
+          value={repo}
+          onChange={(e) => setRepo(e.target.value)}
+          placeholder="owner/name"
+          className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+        />
+        <input
+          value={bounty}
+          onChange={(e) => setBounty(e.target.value)}
+          placeholder="Bounty (USDC)"
+          inputMode="decimal"
+          className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+        />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Change title, e.g. Fix off-by-one in pagination"
+          className="rounded-md border border-border bg-background px-3 py-2 text-sm sm:col-span-2"
+        />
+        <textarea
+          value={brief}
+          onChange={(e) => setBrief(e.target.value)}
+          placeholder="What needs to change and why (20+ characters) — paste the issue body if you have one."
+          rows={3}
+          className="rounded-md border border-border bg-background px-3 py-2 text-sm sm:col-span-2"
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={check}
+          disabled={busy !== null || !repo.trim()}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {busy === 'check' ? <Loader2 className="size-4 animate-spin" /> : <GitPullRequest className="size-4" />}
+          Check App access
+        </button>
+        <button
+          onClick={post}
+          disabled={busy !== null || !repo.trim() || !title.trim() || brief.trim().length < 20}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {busy === 'post' ? <Loader2 className="size-4 animate-spin" /> : <Briefcase className="size-4" />}
+          Post repo job (house agent)
         </button>
       </div>
       {result && <p className="mt-2 text-sm text-success">{result}</p>}
@@ -638,6 +754,7 @@ export default function AccessControlPage() {
       <SeedJobsCard />
       <I18nJobsCard />
       <BoardCurationCard />
+      <RepoJobsCard />
 
       <TranslationsCard />
 

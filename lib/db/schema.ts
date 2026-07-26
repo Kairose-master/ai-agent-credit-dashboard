@@ -413,6 +413,13 @@ export const jobSpec = pgTable('job_specs', {
   // on-chain requester is the platform's house agent, which fronted the
   // escrow that the payer's x402 payment bought).
   externalPoster: text('external_poster'),
+  // GitHub repo jobs (docs/github-jobs.md): repoFullName set ⇒ the deliverable
+  // is a unified diff, the platform App opens the PR, the repo's own CI is the
+  // grader, and MERGE (never CI alone) releases the escrow via the webhook.
+  repoFullName: text('repo_full_name'),
+  baseBranch: text('base_branch'),
+  prNumber: integer('pr_number'),
+  ciStatus: text('ci_status'), // 'pending' | 'success' | 'failure' — mirrors the check-suite webhook
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

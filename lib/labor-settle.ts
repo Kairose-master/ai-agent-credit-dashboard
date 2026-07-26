@@ -80,9 +80,29 @@ export const AUTO_APPROVE_MAX_BOUNTY_USD = Number(process.env.AUTO_APPROVE_MAX_B
  * at the time THEY posted the job. AUTO_APPROVE_MAX_BOUNTY_USD is the
  * second, independent layer bounding what a single grader mistake can move.
  */
-export async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): Promise<void> {
+export async function autoApprovePassedJob(
+  spec: typeof jobSpec.$inferSelect,
+  opts?: {
+    /**
+     * What authorizes this release.
+     *  - 'grader' (default): an automated verdict. Gated by the requester's
+     *    autoApprove consent AND the DMN bounty ceiling.
+     *  - 'merge': the requester personally merged the pull request this job
+     *    produced. That IS the approve click — a stronger, first-party
+     *    authorization than any grader verdict — so it bypasses both gates,
+     *    which exist to bound UNATTENDED grader mistakes, not to second-guess
+     *    the requester's own action.
+     */
+    authorization?: 'grader' | 'merge'
+  },
+): Promise<void> {
   if (!spec.requesterAgentId || !spec.workerAgentId || spec.onchainJobId === null) return
-  if (!spec.autoApprove) return // requester opted out — stays Submitted for their own review
+  const authorization = opts?.authorization ?? 'grader'
+  // GitHub repo jobs: CI green is a grading signal, never a release trigger.
+  // A malicious-but-CI-passing diff must not move money — only the
+  // requester's merge does (docs/github-jobs.md).
+  if (spec.repoFullName && authorization !== 'merge') return
+  if (authorization !== 'merge' && !spec.autoApprove) return // requester opted out — stays Submitted for their own review
 
   let approvedTxHash: string | null = null
   try {
@@ -115,12 +135,15 @@ export async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): P
     // The auto-release decision is delegated to the DMN decision table, so the
     // rule that runs here is the exact one printed in the auditable policy.
     const { decideAutoRelease } = await import('@/lib/decision-table')
-    const decision = decideAutoRelease({
-      verdict: 'pass', // this path only runs on a passing grade
-      autoApprove: true, // spec.autoApprove was checked at the top
-      bountyUsd: job.bounty,
-      capUsd: Number.isFinite(effectiveCapUsd) ? effectiveCapUsd : Number.MAX_SAFE_INTEGER,
-    })
+    const decision =
+      authorization === 'merge'
+        ? { action: 'auto_release' as const, reason: 'requester merged the pull request' }
+        : decideAutoRelease({
+            verdict: 'pass', // this path only runs on a passing grade
+            autoApprove: true, // spec.autoApprove was checked at the top
+            bountyUsd: job.bounty,
+            capUsd: Number.isFinite(effectiveCapUsd) ? effectiveCapUsd : Number.MAX_SAFE_INTEGER,
+          })
     if (decision.action !== 'auto_release') {
       console.log(
         `[labor-settle] job ${spec.onchainJobId} — ${decision.reason} (bounty $${job.bounty}, ceiling $${effectiveCapUsd})`,
@@ -146,7 +169,9 @@ export async function autoApprovePassedJob(spec: typeof jobSpec.$inferSelect): P
 
     await logPlatformEvent(
       'JOB_AUTO_APPROVED',
-      `"${spec.title}" — acceptance tests passed (independent grader), escrow released automatically`,
+      authorization === 'merge'
+        ? `"${spec.title}" — pull request merged by the requester, escrow released to the worker`
+        : `"${spec.title}" — acceptance tests passed (independent grader), escrow released automatically`,
     )
   } catch (error) {
     console.error('[labor-settle] auto-approve failed:', error)
@@ -221,6 +246,11 @@ export async function returnFailedJobToMarket(spec: typeof jobSpec.$inferSelect)
       repostCount: spec.repostCount + 1,
       failedWorkerIds: failedWorkers,
       autoApprove: spec.autoApprove, // carry the requester's original consent choice forward, don't silently reset it
+      // Repo identity must survive a repost, or the replacement job silently
+      // stops being a GitHub job (no PR, no CI grader). prNumber/ciStatus are
+      // deliberately NOT carried — the replacement gets its own PR.
+      repoFullName: spec.repoFullName,
+      baseBranch: spec.baseBranch,
       parentSpecHash: spec.specHash, // explicit lineage — lets delegations follow the work to its replacement
     })
     const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
@@ -305,6 +335,8 @@ export async function returnDisputedJobToMarket(spec: typeof jobSpec.$inferSelec
       repostCount: spec.repostCount + 1,
       failedWorkerIds: failedWorkers,
       autoApprove: spec.autoApprove,
+      repoFullName: spec.repoFullName, // keep GitHub jobs GitHub jobs across a repost
+      baseBranch: spec.baseBranch,
       parentSpecHash: spec.specHash, // lineage — delegations follow the replacement
     })
     const txHash = await retry(() => postJob(spec.requesterAgentId!, job.bounty, job.minScore, newSpecHash))
@@ -428,15 +460,20 @@ export async function regradeSubmittedSpec(spec: typeof jobSpec.$inferSelect): P
 
   const { resolveTestSuiteSpec } = await import('@/lib/test-suite-jobs')
   const testSuiteSpec = !spec.testCode ? resolveTestSuiteSpec(spec.title) : null
+  // A repo job's deliverable is a diff, and its grader is the repository's own
+  // CI — never the text reviewer. Re-driving it means (re-)opening the PR;
+  // openPrForSubmission is idempotent once prNumber is set.
+  const isRepo = Boolean(spec.repoFullName)
   const isImage = spec.deliverableKind === 'image'
   const isAudio = spec.deliverableKind === 'audio' && Boolean(spec.acceptanceCriteria?.trim())
   const isLlmText =
     !spec.testCode &&
     !testSuiteSpec &&
+    !isRepo &&
     !isImage &&
     (spec.deliverableKind ?? 'text') === 'text' &&
     Boolean(spec.acceptanceCriteria?.trim())
-  if (!spec.testCode && !testSuiteSpec && !isImage && !isAudio && !isLlmText) return null
+  if (!spec.testCode && !testSuiteSpec && !isRepo && !isImage && !isAudio && !isLlmText) return null
 
   const [task] = await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId))
   const output = task?.output ?? ''
@@ -447,7 +484,12 @@ export async function regradeSubmittedSpec(spec: typeof jobSpec.$inferSelect): P
   const gspec = { title: spec.title, description: spec.description, acceptanceCriteria: spec.acceptanceCriteria }
 
   let grade: { passed: boolean | null; output: string; gradedAt: string }
-  if (testSuiteSpec) {
+  if (isRepo) {
+    if (!output) return null
+    const [workerAg] = spec.workerAgentId ? await db.select().from(agent).where(eq(agent.id, spec.workerAgentId)) : []
+    const { openPrForSubmission } = await import('@/lib/repo-job-pipeline')
+    grade = await openPrForSubmission(spec, output, { workerName: workerAg?.name })
+  } else if (testSuiteSpec) {
     if (!output) return null
     const { gradeTestSuiteSubmission } = await import('@/lib/test-suite-grading')
     grade = await gradeTestSuiteSubmission(testSuiteSpec, output)

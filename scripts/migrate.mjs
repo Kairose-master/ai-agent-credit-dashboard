@@ -302,6 +302,10 @@ ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS external_poster text;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS auto_approve boolean NOT NULL DEFAULT true;
 ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS parent_spec_hash text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS repo_full_name text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS base_branch text;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS pr_number integer;
+ALTER TABLE job_specs ADD COLUMN IF NOT EXISTS ci_status text;
 
 -- ── Verified tasks (ground-truth graded, escrow-settled) ────────────
 CREATE TABLE IF NOT EXISTS verifiable_tasks (

@@ -403,6 +403,42 @@ const TOOLS = [
     },
   },
   {
+    name: 'post_repo_job',
+    description:
+      'MOVES MONEY: escrow a bounty on a task in a real GitHub repository. Workers submit a unified DIFF (they never ' +
+      'get credentials); the platform opens the pull request; YOUR repository\'s own CI is the independent grader; ' +
+      'merging the PR releases the escrow and closing it refunds you. Requires the Ledgermind GitHub App to be ' +
+      'installed on the repository — call check_repo_access first if unsure.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'owner/name, e.g. acme/widgets (public repos only in v1)' },
+        title: { type: 'string', description: 'Short title of the change, e.g. "Fix the off-by-one in pagination"' },
+        brief: { type: 'string', description: 'What needs to change and why (20+ chars). Paste the issue body if you have one.' },
+        bounty_usd: { type: 'number', description: 'Bounty in testnet USDC, escrowed now' },
+        base_branch: { type: 'string', description: "Branch to diff against (defaults to the repo's default branch)" },
+        issue_url: { type: 'string', description: 'Link to the GitHub issue, if any' },
+        criteria: { type: 'string', description: 'Extra acceptance criteria beyond "CI passes"' },
+        agent_id: { type: 'string', description: 'Which agent escrows the bounty, by id' },
+        agent_name: { type: 'string', description: 'Which agent escrows it, by name (used only if agent_id is omitted)' },
+      },
+      required: ['repo', 'title', 'brief', 'bounty_usd'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'check_repo_access',
+    description:
+      'Check whether the Ledgermind GitHub App is installed on a repository (and what its default branch is) before ' +
+      'escrowing anything with post_repo_job. Read-only, no money moves.',
+    inputSchema: {
+      type: 'object',
+      properties: { repo: { type: 'string', description: 'owner/name' } },
+      required: ['repo'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_work_proof',
     description:
       'Fetch the Proof of Authorship & Grade for a paid labor-market job: keccak256 fingerprint of the exact deliverable, ' +
@@ -853,6 +889,56 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
           (stored.cid ? `content id: ipfs://${stored.cid}\n` : '') +
           `certificate: ${origin}/proof/${stored.id}`,
       )
+    }
+
+    case 'check_repo_access': {
+      const repo = String(args.repo ?? '').trim()
+      const { checkRepoAccess } = await import('@/app/actions/repo-jobs')
+      const access = await checkRepoAccess(repo)
+      return toolText(
+        id,
+        access.ok
+          ? `${access.reason}\nYou can post a repo job here with post_repo_job.`
+          : `Not usable yet: ${access.reason}\n\nInstall the Ledgermind GitHub App on ${repo} (the repo owner does this once) and try again.`,
+        !access.ok,
+      )
+    }
+
+    case 'post_repo_job': {
+      const repo = String(args.repo ?? '').trim()
+      const bounty = Number(args.bounty_usd)
+      if (!repo || !Number.isFinite(bounty) || bounty <= 0) return toolText(id, 'repo and a positive bounty_usd are required.', true)
+      const agents = await db.select().from(agent).where(eq(agent.userId, auth.userId))
+      const wantedId = args.agent_id ? String(args.agent_id) : null
+      const wanted = args.agent_name ? String(args.agent_name) : null
+      const requester = wantedId
+        ? agents.find((a) => a.id === wantedId)
+        : wanted
+          ? agents.find((a) => a.name.toLowerCase() === wanted.toLowerCase())
+          : agents.find((a) => a.smartAccountAddress)
+      if (!requester) return toolText(id, 'No provisioned agent to escrow the bounty — create_worker_agent adds one.', true)
+
+      try {
+        const { postRepoJobAction } = await import('@/app/actions/repo-jobs')
+        const res = await postRepoJobAction({
+          requesterAgentId: requester.id,
+          repoFullName: repo,
+          baseBranch: args.base_branch ? String(args.base_branch) : undefined,
+          title: String(args.title ?? ''),
+          brief: String(args.brief ?? ''),
+          issueUrl: args.issue_url ? String(args.issue_url) : undefined,
+          criteria: args.criteria ? String(args.criteria) : undefined,
+          bountyUsd: bounty,
+        })
+        return toolText(
+          id,
+          `Posted a GitHub job on ${res.repoFullName} (base ${res.baseBranch}), $${bounty} escrowed by ${requester.name}.\n\n` +
+            'A worker will submit a unified diff; the platform opens the pull request from it and your own CI grades it. ' +
+            'Merging the PR pays the worker; closing it unmerged refunds you and reposts the job.',
+        )
+      } catch (error) {
+        return toolText(id, error instanceof Error ? error.message : String(error), true)
+      }
     }
 
     case 'claim_job': {

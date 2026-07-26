@@ -286,18 +286,28 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
   // without criteria stay ungraded for manual requester review.
   const { resolveTestSuiteSpec } = await import('@/lib/test-suite-jobs')
   const testSuiteSpec = !spec.testCode ? resolveTestSuiteSpec(spec.title) : null
+  const isRepoJob = Boolean(spec.repoFullName)
   const isImageJob = spec.deliverableKind === 'image'
   const isAudioJob = spec.deliverableKind === 'audio' && Boolean(spec.acceptanceCriteria?.trim())
   const isLlmGradableText =
     !spec.testCode &&
     !testSuiteSpec &&
+    !isRepoJob &&
     !isImageJob &&
     (spec.deliverableKind ?? 'text') === 'text' &&
     Boolean(spec.acceptanceCriteria?.trim())
-  if (!spec.testCode && !testSuiteSpec && !isImageJob && !isAudioJob && !isLlmGradableText) return null
+  if (!spec.testCode && !testSuiteSpec && !isRepoJob && !isImageJob && !isAudioJob && !isLlmGradableText) return null
   try {
     let grade: { passed: boolean | null; output: string; gradedAt: string }
-    if (testSuiteSpec) {
+    if (isRepoJob) {
+      // GitHub repo job: the deliverable is a diff. Opening the PR is where
+      // grading STARTS — the requester's CI writes the verdict later, via
+      // /api/github/webhook. Only a bad diff fails here and now.
+      const { agent } = await import('@/lib/db/schema')
+      const [workerAgent] = await db.select().from(agent).where(eq(agent.id, spec.workerAgentId))
+      const { openPrForSubmission } = await import('@/lib/repo-job-pipeline')
+      grade = await openPrForSubmission(spec, output, { workerName: workerAgent?.name })
+    } else if (testSuiteSpec) {
       // Mutation grading: the worker submitted TESTS; the platform supplies
       // the hidden reference + buggy implementations. Fully mechanical.
       const { gradeTestSuiteSubmission } = await import('@/lib/test-suite-grading')
@@ -355,7 +365,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
       })
       await logPlatformEvent(
         grade.passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
-        `"${spec.title}" — ${isImageJob ? 'vision review' : isAudioJob ? 'audio transcription review' : isLlmGradableText ? 'LLM review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
+        `"${spec.title}" — ${isRepoJob ? 'diff validation' : isImageJob ? 'vision review' : isAudioJob ? 'audio transcription review' : isLlmGradableText ? 'LLM review' : 'acceptance tests'} ${grade.passed ? 'passed' : 'FAILED'} (independent grader)`,
       )
 
       // Mirror the graded fact into the ERC-8004 Validation Registry — but
@@ -372,7 +382,7 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
         await publishValidation(
           spec.workerAgentId,
           grade.passed ? 100 : 0,
-          isImageJob ? 'vision-review' : isAudioJob ? 'audio-review' : isLlmGradableText ? 'llm-review' : 'acceptance-tests',
+          isRepoJob ? 'repo-diff' : isImageJob ? 'vision-review' : isAudioJob ? 'audio-review' : isLlmGradableText ? 'llm-review' : 'acceptance-tests',
           `job-${spec.onchainJobId}`,
         )
       }

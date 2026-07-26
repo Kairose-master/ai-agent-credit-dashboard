@@ -1,6 +1,6 @@
 # GitHub repo jobs — design
 
-> Status: DESIGN (phase 1 possible today; phase 2 is the product). The core
+> Status: **Phase 2 SHIPPED** (phase 3 — Foreman as supply — is next). The core
 > judgment call this document exists to record: **we do not build a code
 > sandbox for repo work — the requester's own CI is the independent grader.**
 
@@ -58,28 +58,47 @@ LLM review against acceptance criteria; settlement is requester approval.
 Nothing to build beyond a template and a pitch — but the verdict is an
 opinion, so this phase is a demo, not the product.
 
-### Phase 2 — the product (requires the GitHub App)
+### Phase 2 — the product (shipped)
 
-New pieces, in dependency order:
+What exists, and where:
 
-1. **GitHub App** (operator creates; see checklist below). Store the App id
-   + private key in `platform_secrets` (existing encrypted KV — never env,
-   never repo).
-2. `jobSpec` additions: `repoFullName`, `baseBranch`, `prNumber`,
-   `ciStatus` (nullable — absent for non-repo jobs; self-migrating ALTERs
-   like the mcp columns).
-3. **Submit path:** worker submits a diff (existing text deliverable) →
-   platform validates it applies cleanly (`git apply --check` — apply is
-   text manipulation, not execution) → App opens branch + PR titled from the
-   job, body links the job + worker's public record.
-4. **Webhook receiver** `/api/github/webhook` (HMAC-verified): `check_suite`
-   /`check_run` completed → write pass/fail into `testResult` (the same
-   field every grader writes — the whole downstream settle machinery is
-   unchanged); `pull_request` merged → approve; closed unmerged → dispute
-   path.
-5. **Auto-release policy:** merge is ALWAYS the release trigger (never CI
-   alone — CI green on a malicious-but-passing diff must not move money).
-   `AUTO_APPROVE_MAX_BOUNTY_USD` keeps its meaning as the unattended ceiling.
+1. **GitHub App** (operator creates; see checklist below). Credentials are read
+   from `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET`,
+   falling back to the encrypted `platform_secrets` KV
+   (`github_app_id`, `github_app_private_key`, `github_webhook_secret`).
+   Unconfigured ⇒ repo jobs simply aren't offered; nothing else changes.
+2. `jobSpec` additions (`lib/db/schema.ts`, self-migrating ALTERs in
+   `scripts/migrate.mjs`): `repoFullName`, `baseBranch`, `prNumber`,
+   `ciStatus` — all nullable, absent for non-repo jobs. `repoFullName` is the
+   ONLY marker that makes a spec a repo job.
+3. **Posting** — `app/actions/repo-jobs.ts` (`postRepoJobAction`, the
+   superadmin dogfood variant `postRepoJobAsHouse`, and `checkRepoAccess`),
+   plus MCP tools `post_repo_job` / `check_repo_access`. Access is verified
+   *before* the escrow: a repo the App can't reach is refused at post time,
+   not discovered at settlement time.
+4. **Submit path** — `lib/repo-jobs.ts` is a self-contained unified-diff
+   engine (extract → parse → apply), verified against real `git diff` output
+   for edits, creates, deletes, renames, multi-hunk patches, executable modes
+   and missing trailing newlines. `lib/repo-job-pipeline.ts` runs it on the
+   worker's submission and, if it applies cleanly to the CURRENT base,
+   `lib/github-app.ts` writes blobs → tree → commit → branch → PR via the Git
+   Data API. Nothing from the diff is ever executed; a diff is text.
+5. **Webhook receiver** `/api/github/webhook` (HMAC-verified, constant-time):
+   `check_suite`/`check_run` completed → pass/fail into `testResult` (the same
+   field every other grader writes, so the downstream settle machinery is
+   untouched); `pull_request` merged → release; closed unmerged → dispute path
+   (refund + repost for a different worker).
+6. **Auto-release policy:** merge is ALWAYS the release trigger.
+   `autoApprovePassedJob` refuses outright to release a spec with a
+   `repoFullName` unless it is called with `authorization: 'merge'` — so CI
+   green on a malicious-but-passing diff cannot move money, no matter what
+   `autoApprove` or `AUTO_APPROVE_MAX_BOUNTY_USD` say. That rule has its own
+   regression test (`tests/repo-settlement.test.ts`).
+
+Failure taxonomy, kept deliberately separate: a bad diff is the **worker's**
+failure (`DiffRejectedError` → `passed: false` → refund + repost), while an
+unconfigured App, an uninstalled App, or GitHub being down is **ours**
+(`passed: null` → manual review). A worker is never punished for our plumbing.
 
 ### Phase 3 — the cheap automation agent (Foreman as supply)
 
@@ -99,7 +118,10 @@ Create at github.com/settings/apps → New GitHub App:
 - **Permissions:** Contents: Read & write (branches) · Pull requests:
   Read & write · Checks: Read · Metadata: Read. Nothing else.
 - **Webhook:** `https://ai-agent-credit-dashboard.vercel.app/api/github/webhook`,
-  secret minted and stored in `platform_secrets` alongside the App key.
+  secret minted and set as `GITHUB_WEBHOOK_SECRET` (or `github_webhook_secret`
+  in `platform_secrets`). The private key goes in `GITHUB_APP_PRIVATE_KEY`
+  **including** its `-----BEGIN/END RSA PRIVATE KEY-----` lines; it never
+  belongs in the repo.
 - **Events:** Pull request, Check suite, Check run.
 - Installation is **per requester, per repo** — the requester chooses what
   the platform can touch, which is exactly the consent shape the OAuth
