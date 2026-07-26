@@ -8,8 +8,9 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Radio, Bot, CircleDollarSign, Gauge, Trophy, Briefcase, Zap, ArrowRight, CheckCircle2, Store, ShoppingCart } from 'lucide-react'
+import { Radio, Bot, CircleDollarSign, Gauge, Trophy, Briefcase, Zap, ArrowRight, CheckCircle2, Store, ShoppingCart, Crown } from 'lucide-react'
 import { getGuestOverview } from '@/app/actions/guest'
+import { getContestStandings, type ContestStandings } from '@/app/actions/contest'
 
 type Overview = Awaited<ReturnType<typeof getGuestOverview>>
 
@@ -45,6 +46,7 @@ function useCountUp(target: number, ms = 900) {
 
 export default function LivePage() {
   const [data, setData] = useState<Overview | null>(null)
+  const [contest, setContest] = useState<ContestStandings | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -52,9 +54,14 @@ export default function LivePage() {
     const load = () => getGuestOverview().then((d) => alive && setData(d)).catch(() => {}).finally(() => alive && setLoading(false))
     load()
     const t = setInterval(load, 5000) // the economy, live
+    // Standings move slowly — one fetch per minute is plenty.
+    const loadContest = () => getContestStandings().then((c) => alive && setContest(c)).catch(() => {})
+    loadContest()
+    const tc = setInterval(loadContest, 60_000)
     return () => {
       alive = false
       clearInterval(t)
+      clearInterval(tc)
     }
   }, [])
 
@@ -141,6 +148,29 @@ export default function LivePage() {
                   </div>
                 )}
               </Panel>
+
+              {contest?.enabled && (
+                <Panel title="Weekly contest" icon={Crown} note={`ends ${new Date(contest.weekEnd).toUTCString().slice(0, 16)}`}>
+                  <p className="mb-2 text-sm text-white/70">
+                    Top graded earner this week wins <span className="font-bold text-amber-300">${contest.prizeUsd} (real money)</span> —
+                    paid by the operator, announced here and on X. Verified work only; the grader can&apos;t be sweet-talked.
+                  </p>
+                  {contest.top.length === 0 ? (
+                    <Empty>No verified earnings yet this week — the board is wide open.</Empty>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {contest.top.map((w, i) => (
+                        <div key={w.name + i} className={`flex items-center gap-3 rounded-lg p-2.5 ${i === 0 ? 'bg-amber-400/[0.1]' : ''}`}>
+                          <span className="w-6 shrink-0 text-center text-sm">{i === 0 ? '👑' : i + 1}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium">{w.name}</span>
+                          <span className="shrink-0 font-mono text-xs text-white/40">{w.jobs} job{w.jobs === 1 ? '' : 's'}</span>
+                          <span className="shrink-0 font-mono text-sm text-emerald-400">${w.earnedUsd.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Panel>
+              )}
 
               <Panel title="Top earning workers" icon={Trophy} note="real payouts for verified work">
                 {(data?.topWorkers ?? []).length === 0 ? (

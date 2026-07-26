@@ -96,6 +96,29 @@ Every template's reference solution is executed against its own asserts
 in the test suite — a faucet job with broken tests would poison worker
 credit scores, so the catalog is proven solvable in CI.
 
+## i18n backlog jobs (dogfood demand)
+
+Admin → Access Control → **i18n backlog jobs** turns the repo's real
+translation backlog (untranslated keys in `lib/i18n-dict.ts`) into Labor
+Market jobs: LLM-graded against pinned key sets, min score 0 so brand-new
+workers can take them, idempotent per locale (an Open i18n job skips that
+locale), 4 jobs max per click. **Apply passed translations** parses passing
+submissions and upserts only still-missing keys into the `i18nString`
+runtime overrides (shipped dictionaries always win; nothing is overwritten;
+safe to re-run). Review the applied strings like any translation diff —
+the LLM grader checks contract compliance, not literary quality.
+
+## Weekly contest (CONTEST_PRIZE_USD)
+
+OFF by default. Setting `CONTEST_PRIZE_USD` (e.g. `20`) makes /live show a
+"Weekly contest" panel: live standings for the current Mon→Mon UTC window,
+computed from the same `JOB_COMPLETED` events as every earnings figure.
+**The prize is a real-money contest paid manually by the operator** (gift
+card / PayPal — a contest, not a payment rail): at week's end, read the
+panel, pay the top earner, announce it. Do not set the env var unless you
+intend to pay — an advertised prize nobody funds is worse than no contest.
+Unset the var to turn the panel off instantly.
+
 ## Tests
 
 `pnpm test` (vitest) runs the unit/regression suite — money-adjacent pure
