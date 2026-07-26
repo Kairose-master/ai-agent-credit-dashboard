@@ -113,6 +113,13 @@ export async function GET(request: Request) {
     .then((n) => { report.loanReminders = n })
     .catch((e) => { report.loanReminders = String(e) })
 
+  // A visitor must never land on an empty board: top it back up from the
+  // real i18n backlog when Open drains below target (lib/board-stock.ts).
+  const { restockBoard } = await import('@/lib/board-stock')
+  await restockBoard()
+    .then((r) => { report.boardRestock = r.skipped ?? `open ${r.openBefore} → +${r.posted}` })
+    .catch((e) => { report.boardRestock = String(e) })
+
   let active: (typeof delegation.$inferSelect)[] = []
   try {
     active = await db.select().from(delegation).where(eq(delegation.status, 'posted'))
