@@ -38,6 +38,18 @@ jobs:
         with:
           node-version: 22
 
+      # Foreman is built from source rather than pulled from npm: the registry
+      # is published by a human and can lag the code (it did — the first run
+      # of this workflow died on a flag the published 0.1.0 didn't know).
+      # Building from main removes that failure class entirely: the cron
+      # always runs exactly what the repo says.
+      - name: Build foreman from source
+        run: |
+          git clone --depth 1 https://github.com/Kairose-master/Foreman.git foreman
+          cd foreman
+          npm ci
+          npm run build
+
       - name: Attempt one repo job
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -50,7 +62,7 @@ jobs:
             exit 0
           fi
           if [ -n "$JOB_ARG" ]; then
-            npx -y @kairose-master/foreman@latest work --clean --json --job "$JOB_ARG"
+            node foreman/dist/cli.js work --clean --json --job "$JOB_ARG"
           else
-            npx -y @kairose-master/foreman@latest work --clean --json
+            node foreman/dist/cli.js work --clean --json
           fi
