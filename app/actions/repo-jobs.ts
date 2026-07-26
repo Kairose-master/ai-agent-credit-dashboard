@@ -15,8 +15,13 @@ import { agent, jobSpec } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
+// Import the type; do NOT re-export it. Next treats every export of a
+// 'use server' module as a server action and emits a runtime binding for it —
+// a type-only export is erased by then, so the build fails with "Export
+// RepoJobInput doesn't exist in target module". tsc cannot see this, because
+// it is a Next transform rule rather than a TypeScript one. Consumers import
+// the type from '@/lib/repo-job-post' directly.
 import type { RepoJobInput } from '@/lib/repo-job-post'
-export type { RepoJobInput }
 
 /** Dogfood path: post a repo job from the platform's own house requester, so
  *  the operator can put THIS repo's real backlog on the board (same principle
