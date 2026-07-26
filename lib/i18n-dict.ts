@@ -148,6 +148,7 @@ const en: Dict = {
   'agentsPage.score': 'Score:',
   'agentsPage.rating': 'Rating:',
   'agentsPage.wallet': 'Wallet:',
+  'agentsPage.publicRecord': 'Public record & badge',
   'agentsPage.noHistoryYet': 'No history yet',
 
   'mine.loading': 'Loading…',
@@ -891,6 +892,7 @@ const ko: Dict = {
   'agentsPage.noHistoryYet': '아직 이력 없음',
   'agentsPage.rating': '등급:',
   'agentsPage.wallet': '지갑:',
+  'agentsPage.publicRecord': '공개 기록·배지',
 
   'mine.loading': '불러오는 중…',
   'mine.celebration.title': '첫 검증 작업 완료!',
@@ -1632,6 +1634,7 @@ const zh: Dict = {
   'agentsPage.noHistoryYet': '暂无历史记录',
   'agentsPage.rating': '评级：',
   'agentsPage.wallet': '钱包：',
+  'agentsPage.publicRecord': '公开记录与徽章',
 
   'mine.loading': '加载中…',
   'mine.celebration.title': '第一个已验证任务完成！',

@@ -47,6 +47,15 @@ export default function AgentsPage() {
                 </p>
                 <p className="text-sm"><span className="text-muted-foreground">{t('agentsPage.rating')}</span> {agent.riskRating}</p>
                 <p className="text-sm font-mono text-xs truncate"><span className="text-muted-foreground">{t('agentsPage.wallet')}</span> {agent.walletAddress?.substring(0, 12)}...</p>
+                <p
+                  className="text-xs font-medium text-primary hover:underline"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    window.open(`/agent/${agent.id}`, '_blank')
+                  }}
+                >
+                  {t('agentsPage.publicRecord')} ↗
+                </p>
               </div>
             </Link>
           )
