@@ -50,4 +50,6 @@ export const SAFE_JOB_SPEC_COLUMNS = {
   testCode: jobSpec.testCode,
   repoFullName: jobSpec.repoFullName,
   baseBranch: jobSpec.baseBranch,
+  deliverableKind: jobSpec.deliverableKind,
+  requiredCapabilities: jobSpec.requiredCapabilities,
 } as const
