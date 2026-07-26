@@ -284,14 +284,25 @@ async function settleLaborMarketJob(agentTaskId: string, output: string): Promis
   // and an LLM reviewer for text jobs with acceptance criteria. Only
   // audio/video/file (binary the graders can't inspect) and text jobs
   // without criteria stay ungraded for manual requester review.
+  const { resolveTestSuiteSpec } = await import('@/lib/test-suite-jobs')
+  const testSuiteSpec = !spec.testCode ? resolveTestSuiteSpec(spec.title) : null
   const isImageJob = spec.deliverableKind === 'image'
   const isAudioJob = spec.deliverableKind === 'audio' && Boolean(spec.acceptanceCriteria?.trim())
   const isLlmGradableText =
-    !spec.testCode && !isImageJob && (spec.deliverableKind ?? 'text') === 'text' && Boolean(spec.acceptanceCriteria?.trim())
-  if (!spec.testCode && !isImageJob && !isAudioJob && !isLlmGradableText) return null
+    !spec.testCode &&
+    !testSuiteSpec &&
+    !isImageJob &&
+    (spec.deliverableKind ?? 'text') === 'text' &&
+    Boolean(spec.acceptanceCriteria?.trim())
+  if (!spec.testCode && !testSuiteSpec && !isImageJob && !isAudioJob && !isLlmGradableText) return null
   try {
     let grade: { passed: boolean | null; output: string; gradedAt: string }
-    if (isImageJob) {
+    if (testSuiteSpec) {
+      // Mutation grading: the worker submitted TESTS; the platform supplies
+      // the hidden reference + buggy implementations. Fully mechanical.
+      const { gradeTestSuiteSubmission } = await import('@/lib/test-suite-grading')
+      grade = await gradeTestSuiteSubmission(testSuiteSpec, output)
+    } else if (isImageJob) {
       const { artifact, agent } = await import('@/lib/db/schema')
       const arts = await db.select().from(artifact).where(eq(artifact.taskId, agentTaskId))
       const [requesterAgent] = spec.requesterAgentId

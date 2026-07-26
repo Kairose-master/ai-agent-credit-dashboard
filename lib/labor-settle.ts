@@ -426,11 +426,17 @@ export async function regradeSubmittedSpec(spec: typeof jobSpec.$inferSelect): P
   if (spec.onchainJobId === null || !spec.agentTaskId) return null
   const { agentTask, artifact, agent } = await import('@/lib/db/schema')
 
+  const { resolveTestSuiteSpec } = await import('@/lib/test-suite-jobs')
+  const testSuiteSpec = !spec.testCode ? resolveTestSuiteSpec(spec.title) : null
   const isImage = spec.deliverableKind === 'image'
   const isAudio = spec.deliverableKind === 'audio' && Boolean(spec.acceptanceCriteria?.trim())
   const isLlmText =
-    !spec.testCode && !isImage && (spec.deliverableKind ?? 'text') === 'text' && Boolean(spec.acceptanceCriteria?.trim())
-  if (!spec.testCode && !isImage && !isAudio && !isLlmText) return null
+    !spec.testCode &&
+    !testSuiteSpec &&
+    !isImage &&
+    (spec.deliverableKind ?? 'text') === 'text' &&
+    Boolean(spec.acceptanceCriteria?.trim())
+  if (!spec.testCode && !testSuiteSpec && !isImage && !isAudio && !isLlmText) return null
 
   const [task] = await db.select().from(agentTask).where(eq(agentTask.id, spec.agentTaskId))
   const output = task?.output ?? ''
@@ -441,7 +447,11 @@ export async function regradeSubmittedSpec(spec: typeof jobSpec.$inferSelect): P
   const gspec = { title: spec.title, description: spec.description, acceptanceCriteria: spec.acceptanceCriteria }
 
   let grade: { passed: boolean | null; output: string; gradedAt: string }
-  if (isImage || isAudio) {
+  if (testSuiteSpec) {
+    if (!output) return null
+    const { gradeTestSuiteSubmission } = await import('@/lib/test-suite-grading')
+    grade = await gradeTestSuiteSubmission(testSuiteSpec, output)
+  } else if (isImage || isAudio) {
     const arts = await db.select().from(artifact).where(eq(artifact.taskId, spec.agentTaskId))
     if (!arts.length) return null // submitted on-chain but artifact not recorded yet
     if (isImage) {

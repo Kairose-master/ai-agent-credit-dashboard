@@ -5,7 +5,7 @@ import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, Shi
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
 import { applyPassedI18nTranslations, getI18nJobsStatus, postI18nGapJobs } from '@/app/actions/i18n-jobs'
-import { cancelPracticeJobs, postDocsTranslationJobs } from '@/app/actions/dogfood-jobs'
+import { cancelPracticeJobs, postDocsTranslationJobs, postTestSuiteJobs } from '@/app/actions/dogfood-jobs'
 import { getSuspendedAgents, suspendAgentMessaging, unsuspendAgentMessaging } from '@/app/actions/agent-messages'
 
 /**
@@ -183,11 +183,11 @@ function I18nJobsCard() {
  * opt-in now (FAUCET_ENABLED), so cleared clutter doesn't grow back.
  */
 function BoardCurationCard() {
-  const [busy, setBusy] = useState<'docs' | 'cancel' | null>(null)
+  const [busy, setBusy] = useState<'docs' | 'tests' | 'cancel' | null>(null)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const run = async (which: 'docs' | 'cancel') => {
+  const run = async (which: 'docs' | 'tests' | 'cancel') => {
     setBusy(which)
     setError(null)
     setResult(null)
@@ -196,6 +196,10 @@ function BoardCurationCard() {
         const r = await postDocsTranslationJobs()
         const failed = r.results.filter((x) => !x.ok)
         setResult(`Posted ${r.posted} documentation job(s).${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+      } else if (which === 'tests') {
+        const r = await postTestSuiteJobs()
+        const failed = r.results.filter((x) => !x.ok)
+        setResult(`Posted ${r.posted} test-suite job(s).${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
       } else {
         const r = await cancelPracticeJobs()
         setResult(`Cancelled ${r.cancelled}/${r.attempted} practice job(s) — escrow refunded on-chain.`)
@@ -226,6 +230,14 @@ function BoardCurationCard() {
         >
           {busy === 'docs' ? <Loader2 className="size-4 animate-spin" /> : <Briefcase className="size-4" />}
           Post documentation jobs
+        </button>
+        <button
+          onClick={() => run('tests')}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {busy === 'tests' ? <Loader2 className="size-4 animate-spin" /> : <DatabaseZap className="size-4" />}
+          Post test-suite jobs
         </button>
         <button
           onClick={() => run('cancel')}

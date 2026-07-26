@@ -10,6 +10,7 @@
  * server action (app/actions/dogfood-jobs.ts) does the fs/DB/chain work.
  */
 import { I18N_JOB_TITLE_PREFIX } from '@/lib/i18n-jobs'
+import { TESTS_JOB_TITLE_PREFIX } from '@/lib/test-suite-jobs'
 
 export const DOCS_JOB_TITLE_PREFIX = 'docs → '
 export const DOCS_JOB_BOUNTY_USD = 6
@@ -19,7 +20,11 @@ export const DOCS_JOB_CHUNK_CHARS = 6000
 
 /** A dogfood job (any source) — used to tell real work from practice clutter. */
 export function isDogfoodJobTitle(title: string): boolean {
-  return title.startsWith(I18N_JOB_TITLE_PREFIX) || title.startsWith(DOCS_JOB_TITLE_PREFIX)
+  return (
+    title.startsWith(I18N_JOB_TITLE_PREFIX) ||
+    title.startsWith(DOCS_JOB_TITLE_PREFIX) ||
+    title.startsWith(TESTS_JOB_TITLE_PREFIX)
+  )
 }
 
 export interface DocsJobSource {

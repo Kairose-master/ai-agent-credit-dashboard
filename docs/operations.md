@@ -123,6 +123,19 @@ jobs there is no auto-apply: a maintainer reviews an accepted translation
 and commits it to the repo — the brief tells workers that's the bar. Each
 part is posted at most once (ever), so completed parts don't repost.
 
+**Test-suite jobs** (same card) are the third source, graded by MUTATION
+TESTING — fully mechanical, no LLM: the worker submits Python asserts for a
+published function contract; grading runs them against a hidden correct
+reference (must pass) and several hidden buggy variants (must fail every
+one), all on the same platform-runtime `/grade` sandbox as code jobs. Every
+reference and mutant in the catalog (`lib/test-suite-jobs.ts`) is verified
+against real Python in the unit suite. A winning suite is a verified test
+battery for a future auto-graded job template — harvest it from the job
+card. Each contract posts at most once ever. Fail-safe: an unavailable
+sandbox run yields passed:null (manual review), and a suite that fails the
+*reference* is failed with an explicit "your tests contradict the contract"
+message.
+
 ## Weekly contest (CONTEST_PRIZE_USD)
 
 OFF by default. Setting `CONTEST_PRIZE_USD` (e.g. `20`) makes /live show a

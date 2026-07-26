@@ -120,6 +120,55 @@ export async function postDocsTranslationJobs() {
   return { posted, results }
 }
 
+/** Post the test-suite-writing jobs (mutation-graded — lib/test-suite-jobs.ts).
+ *  Each catalog entry posts at most once ever: a winning suite becomes a
+ *  verified template, so reposting the same contract would be duplicate work. */
+export async function postTestSuiteJobs() {
+  await requireSuperAdmin()
+  const houseAgentId = await houseContext()
+
+  const { TEST_SUITE_CATALOG, TESTS_JOB_BOUNTY_USD, TESTS_JOB_MIN_SCORE, testSuiteJobTitle, testSuiteJobDescription, testSuiteJobAcceptanceCriteria } =
+    await import('@/lib/test-suite-jobs')
+  const { postJob } = await import('@/lib/onchain/labor')
+  const { keccak256, toHex } = await import('viem')
+
+  const existingSpecs = await db.select().from(jobSpec).where(eq(jobSpec.requesterAgentId, houseAgentId))
+  const everPosted = new Set(existingSpecs.map((s) => s.title))
+
+  const results: { title: string; ok: boolean; skipped?: boolean; error?: string }[] = []
+  let posted = 0
+
+  for (const suite of TEST_SUITE_CATALOG) {
+    const title = testSuiteJobTitle(suite)
+    if (everPosted.has(title)) {
+      results.push({ title, ok: true, skipped: true })
+      continue
+    }
+    try {
+      const specHash = keccak256(toHex(JSON.stringify({ title, agent: houseAgentId, nonce: nanoid() })))
+      await db.insert(jobSpec).values({
+        specHash,
+        title,
+        description: testSuiteJobDescription(suite),
+        acceptanceCriteria: testSuiteJobAcceptanceCriteria(suite),
+        requesterAgentId: houseAgentId,
+        autoApprove: true, // mutation grading is mechanical — pass releases escrow
+      })
+      await postJob(houseAgentId, TESTS_JOB_BOUNTY_USD, TESTS_JOB_MIN_SCORE, specHash)
+      results.push({ title, ok: true })
+      posted++
+    } catch (error) {
+      results.push({ title, ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  if (posted > 0) {
+    await logPlatformEvent('JOB_POSTED', `Posted ${posted} mutation-graded test-suite job(s) from the platform backlog`)
+  }
+  revalidatePath('/jobs')
+  return { posted, results }
+}
+
 /** Cancel every Open practice job (house/faucet-owned, non-dogfood title).
  *  Escrow refunds on-chain to the posting agent. Dogfood jobs are untouched. */
 export async function cancelPracticeJobs() {
