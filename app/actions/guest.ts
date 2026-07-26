@@ -9,6 +9,7 @@
  * views: no per-user "mine" labeling (there's no user), no mutations.
  */
 import { db } from '@/lib/db'
+import { SAFE_JOB_SPEC_COLUMNS } from '@/lib/db/safe-select'
 import { agent, agentEvent, agentTemplate, platformEvent, jobSpec, agentTask } from '@/lib/db/schema'
 import { eq, desc, inArray } from 'drizzle-orm'
 import { computeLaborIndex } from '@/lib/platform-index'
@@ -37,7 +38,7 @@ export async function publicJobs(limit = 10) {
   await reapStuckTasks()
 
   const onchainJobs = await readJobs().catch(() => [])
-  const specs = await db.select().from(jobSpec)
+  const specs = await db.select(SAFE_JOB_SPEC_COLUMNS).from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
   const taskIds = specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id))
