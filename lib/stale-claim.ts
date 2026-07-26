@@ -167,6 +167,23 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
         `Job #${job.id} was claimed but never delivered — $${job.bounty} refunded to the requester and the claim recorded as a failed delivery`,
       ).catch(() => {})
 
+      // A refund the requester never hears about is barely better than the
+      // freeze: for a bounty that came from a GitHub issue, say so where it
+      // was posted, and name the one gesture that retries it.
+      if (spec.repoFullName && spec.issueNumber) {
+        try {
+          const { commentOnPr } = await import('@/lib/github-app')
+          await commentOnPr(
+            spec.repoFullName,
+            spec.issueNumber,
+            `↩️ The worker that claimed this bounty never delivered, so the escrow was released back to you — **$${job.bounty} refunded**, nothing was charged for the abandoned attempt.\n\n` +
+              `Re-add the \`bounty:$${job.bounty}\` label to put it back on the market for a different worker.`,
+          )
+        } catch (error) {
+          console.error(`[stale-claim] issue comment for job ${job.id} failed (non-fatal):`, error)
+        }
+      }
+
       reclaimed++
     } catch (error) {
       console.error(`[stale-claim] reclaiming job ${job.id} failed:`, error)
