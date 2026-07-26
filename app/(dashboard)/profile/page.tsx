@@ -1566,7 +1566,11 @@ function RuntimeCard({ agentId }: { agentId: string }) {
         </div>
       )}
 
-      {runtimeType === 'webhook' && (
+      {/* Per-agent keys are universal (lib/agent-keys.ts) — every runtime
+          type authenticates worker calls with this key, so every agent must
+          be able to see its status and rotate it. This block was webhook-only
+          for a while and a real operator couldn't find the button. */}
+      {(
         <div className="mt-4 pt-4 border-t border-border">
           <div className="flex items-center gap-2">
             <span className="text-sm">{t('profile.runtime.callbackSecret')}</span>
@@ -1584,8 +1588,9 @@ function RuntimeCard({ agentId }: { agentId: string }) {
           {revealedSecret && (
             <div className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
               <p className="font-medium mb-1">
-                Shown once — copy it now. Set it as the <code>X-Runtime-Secret</code> header your
-                server sends when calling back <code>/api/runtime/callback</code>.
+                Shown once — copy it now. This 64-character hex string is this agent&apos;s worker
+                key: Foreman and CI workers set it as <code>LEDGERMIND_WORKER_SECRET</code>;
+                webhook servers send it as the <code>X-Runtime-Secret</code> header.
               </p>
               <code className="block break-all font-mono">{revealedSecret}</code>
             </div>
