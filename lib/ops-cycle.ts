@@ -56,6 +56,15 @@ export const OPS_STEPS: OpsStep[] = [
     },
   },
   {
+    name: 'exhaustedRefunds',
+    fast: true,
+    run: async () => {
+      const { refundExhaustedJobs } = await import('@/lib/exhausted-refund')
+      const r = await refundExhaustedJobs()
+      return r.skipped ?? `${r.refunded}/${r.examined} refunded`
+    },
+  },
+  {
     name: 'boardRestock',
     fast: true,
     run: async () => {

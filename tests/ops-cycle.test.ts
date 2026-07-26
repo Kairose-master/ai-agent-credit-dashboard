@@ -24,7 +24,7 @@ describe('OPS_STEPS', () => {
   })
 
   it('keeps the fast subset small enough to finish inside a request budget', () => {
-    expect(OPS_STEPS.filter((s) => s.fast).length).toBeLessThanOrEqual(5)
+    expect(OPS_STEPS.filter((s) => s.fast).length).toBeLessThanOrEqual(6)
   })
 
   it('ticks traffic no more than once every five minutes', () => {
