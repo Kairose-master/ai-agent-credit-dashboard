@@ -71,7 +71,27 @@ export async function collectPostingFee(requesterAgentId: string, bountyUsd: num
   const feeUsd = feeForBounty(bountyUsd, bps)
   if (feeUsd <= 0) return { feeUsd: 0, skipped: 'zero fee for this bounty' }
 
-  const { transferUsdc } = await import('@/lib/onchain/treasury')
+  const [requester] = await db
+    .select({ address: agent.smartAccountAddress })
+    .from(agent)
+    .where(eq(agent.id, requesterAgentId))
+  if (!requester?.address) return { feeUsd: 0, skipped: 'requester has no wallet' }
+
+  // Affordability BEFORE any money moves. The fee is charged first and the
+  // escrow locks second, so a requester holding exactly the bounty would
+  // otherwise pay the fee and then watch the escrow revert with
+  // `USDC: balance` — fee gone, no job, no refund path. Checking the total
+  // up front turns that into one clear sentence and zero lost funds.
+  const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
+  const balanceUsd = await usdcBalanceOf(requester.address as `0x${string}`).catch(() => null)
+  if (balanceUsd !== null && balanceUsd < bountyUsd + feeUsd) {
+    throw new Error(
+      `Not enough test USDC: posting a $${bountyUsd} bounty costs $${(bountyUsd + feeUsd).toFixed(2)} ` +
+        `($${bountyUsd} escrowed + $${feeUsd.toFixed(2)} posting fee), and this agent holds $${balanceUsd.toFixed(2)}. ` +
+        `Mint more on the agent's page, then try again.`,
+    )
+  }
+
   const txHash = await transferUsdc(requesterAgentId, house.address as `0x${string}`, feeUsd)
 
   const { logPlatformEvent } = await import('@/lib/platform-feed')
