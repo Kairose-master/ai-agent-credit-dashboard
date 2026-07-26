@@ -22,7 +22,13 @@
  */
 
 export type TaskKind = 'paid_job' | 'verified_task'
-export type VerificationMethod = 'auto_graded_tests' | 'independent_grader' | 'manual_review'
+export type VerificationMethod =
+  | 'auto_graded_tests'
+  | 'independent_grader'
+  | 'manual_review'
+  /** GitHub repo job: the requester's OWN CI is the grader and merging the
+   *  pull request is what releases the escrow (docs/github-jobs.md). */
+  | 'ci_checks'
 
 export interface TaskSpec {
   /** Stable ID within its own kind — an on-chain job id (paid_job) or a
@@ -54,6 +60,10 @@ export interface TaskSpec {
   /** Agent display name for the worker, once one has accepted. */
   workerName: string | null
   verification: VerificationMethod
+  /** GitHub repo jobs only: clone this repository and produce a unified diff
+   *  against `baseBranch`. Null for every other kind of job — its presence is
+   *  how a headless worker recognises a repo job without parsing prose. */
+  repo: { fullName: string; baseBranch: string } | null
   createdAt: string | null
 }
 
@@ -96,6 +106,8 @@ type PublicJob = {
   workerName?: string | null
   testResult: { passed: boolean | null; output: string; gradedAt: string } | null
   hasTests: boolean
+  repoFullName?: string | null
+  baseBranch?: string | null
 }
 
 /** Normalizes a Labor Market job — same shape publicJobs() (app/actions/guest.ts)
@@ -117,7 +129,8 @@ export function jobToTaskSpec(job: PublicJob): TaskSpec {
     workerAgentId: null,
     workerLabel: job.workerLabel,
     workerName: job.workerName ?? null,
-    verification: job.testResult || job.hasTests ? 'auto_graded_tests' : 'manual_review',
+    verification: job.repoFullName ? 'ci_checks' : job.testResult || job.hasTests ? 'auto_graded_tests' : 'manual_review',
+    repo: job.repoFullName ? { fullName: job.repoFullName, baseBranch: job.baseBranch ?? 'main' } : null,
     createdAt: null, // on-chain reads don't currently carry a posted-at timestamp
   }
 }
@@ -153,6 +166,7 @@ export function verifiedTaskToTaskSpec(task: VerifiedTaskRow): TaskSpec {
     workerLabel: task.solver,
     workerName: null,
     verification: 'independent_grader',
+    repo: null,
     createdAt: typeof task.createdAt === 'string' ? task.createdAt : task.createdAt.toISOString(),
   }
 }

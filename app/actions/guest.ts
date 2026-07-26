@@ -82,6 +82,11 @@ export async function publicJobs(limit = 10) {
         attachmentName: spec?.attachmentName ?? null,
         testResult: spec?.testResult ?? null,
         hasTests: Boolean(spec?.testCode),
+        // GitHub repo jobs: where to clone and what to diff against. Exposed
+        // as structured fields so a headless worker doesn't have to regex the
+        // human-readable brief to find them.
+        repoFullName: spec?.repoFullName ?? null,
+        baseBranch: spec?.baseBranch ?? null,
       }
     })
 }
