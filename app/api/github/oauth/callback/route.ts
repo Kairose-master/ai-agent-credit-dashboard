@@ -99,13 +99,33 @@ export async function GET(request: Request) {
     const verifiedEmail = pickVerifiedEmail(await gh<GithubEmail[]>('/user/emails'))
 
     // ── Resolve which platform user this is ──────────────────────────
-    let userId = await userIdForGithubUser(githubUserId)
+    //
+    // A SIGNED-IN user always wins, even when this GitHub account is already
+    // linked elsewhere. Both sides are authenticated here — OAuth just proved
+    // control of the GitHub account, and the session proves control of the
+    // platform account — so "link GitHub to the account I am looking at" is a
+    // safe and unambiguous instruction.
+    //
+    // The alternative (letting an existing link win) silently signs the user
+    // into the OTHER account instead, which is exactly the trap this hit in
+    // practice: signing in with GitHub while logged out, with a GitHub email
+    // that matches no existing account, mints a second account — and then
+    // every attempt to "connect GitHub" from the real account bounces the
+    // user back into the accidental one, with no way out and no explanation.
+    const current = await getSession()
+    let userId: string | null = current?.user?.id ?? null
 
-    if (!userId) {
-      const current = await getSession()
-      if (current?.user) {
-        userId = current.user.id
-      } else if (verifiedEmail) {
+    if (userId) {
+      // Moving an identity between accounts: github_user_id is unique, so the
+      // stale row has to go before the upsert can claim it.
+      const previous = await userIdForGithubUser(githubUserId)
+      if (previous && previous !== userId) {
+        const { disconnectGithub } = await import('@/lib/github-identity')
+        await disconnectGithub(previous)
+      }
+    } else {
+      userId = await userIdForGithubUser(githubUserId)
+      if (!userId && verifiedEmail) {
         const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.email, verifiedEmail))
         if (existing) userId = existing.id
       }
