@@ -6,7 +6,7 @@ import { db } from '@/lib/db'
 import { SAFE_JOB_SPEC_COLUMNS } from '@/lib/db/safe-select'
 import { agent, agentEvent, agentTask, jobSpec, user } from '@/lib/db/schema'
 import { recalculateCredit } from '@/lib/credit-engine'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { asActionError } from '@/lib/action-error'
@@ -401,6 +401,20 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
     console.error(`[labor] creditWorkerForJob: no agent found for worker address ${workerAddress} (job ${jobId}) — payout succeeded on-chain but no credit event was recorded`)
     return
   }
+
+  // Idempotent on the job. Five call sites can observe the same completed
+  // job — the settlement sweep, a delegation tick, the two approve paths —
+  // and one of them is wrapped in retry(), so a partial failure (event
+  // written, recalculateCredit throws) used to re-enter here and write a
+  // SECOND completion. That inflates the worker's public earnings and job
+  // count and lifts their score for work done once, which is precisely the
+  // kind of unearned number this platform exists to not have.
+  const eventTaskId = `job-${jobId}`
+  const already = await db
+    .select({ id: agentEvent.id })
+    .from(agentEvent)
+    .where(and(eq(agentEvent.taskId, eventTaskId), eq(agentEvent.eventType, 'JOB_COMPLETED')))
+  if (already.length > 0) return
 
   // Counterparty identity rides on the event so the scoring engine can
   // apply the collusion discount (repeat requester → diminishing weight)

@@ -65,6 +65,15 @@ export const OPS_STEPS: OpsStep[] = [
     },
   },
   {
+    name: 'uncreditedPayouts',
+    fast: true,
+    run: async () => {
+      const { reconcileUncreditedPayouts } = await import('@/lib/credit-reconcile')
+      const r = await reconcileUncreditedPayouts()
+      return r.skipped ?? `${r.credited}/${r.examined} reconciled`
+    },
+  },
+  {
     name: 'boardRestock',
     fast: true,
     run: async () => {
