@@ -1021,7 +1021,9 @@ async function callTool(id: unknown, auth: McpAuth, name: string, args: Record<s
               ? 'CI FAILED'
               : sp.ciStatus === 'pending'
                 ? 'CI running'
-                : 'no CI result yet'
+                : sp.ciStatus === 'merged'
+                  ? 'merged (CI result predates this record)' // legacy rows: the merge used to overwrite the CI outcome
+                  : 'no CI result yet'
         return [
           `#${sp.onchainJobId ?? '?'} ${sp.title}`,
           `   repo    ${sp.repoFullName} @ ${sp.baseBranch ?? 'default'}`,

@@ -65,8 +65,57 @@ async function specForPr(repoFullName: string, prNumber: number) {
   return spec ?? null
 }
 
-async function writeVerdict(specHash: string, verdict: Verdict, ciStatus: string) {
-  await db.update(jobSpec).set({ testResult: verdict, ciStatus }).where(eq(jobSpec.specHash, specHash))
+async function writeVerdict(specHash: string, verdict: Verdict, ciStatus: string | null) {
+  await db
+    .update(jobSpec)
+    .set(ciStatus === null ? { testResult: verdict } : { testResult: verdict, ciStatus })
+    .where(eq(jobSpec.specHash, specHash))
+}
+
+/**
+ * Record the CI verdict on the WORKER'S credit ledger.
+ *
+ * `logPlatformEvent` only writes the cosmetic activity feed. The score comes
+ * from `agent_events`, and every other grader — pytest, vision, transcription,
+ * LLM review — inserts one there. Repo jobs did not, which meant the strongest
+ * grader we have (the buyer's own CI, run on GitHub's infrastructure, where the
+ * worker cannot reach it) contributed nothing to the credit score the whole
+ * platform is built on. A worker could pass CI forever and stay "no graded work
+ * yet".
+ *
+ * Idempotent: webhooks are re-delivered, and check_suite and check_run can both
+ * fire for one result, so the event id is derived from the job and skipped if
+ * already present.
+ */
+async function recordCiCreditEvent(
+  spec: typeof jobSpec.$inferSelect,
+  passed: boolean,
+  detail: Record<string, unknown>,
+): Promise<void> {
+  if (!spec.workerAgentId || spec.onchainJobId === null) return
+  try {
+    const { agentEvent } = await import('@/lib/db/schema')
+    const taskId = `job-${spec.onchainJobId}-ci`
+    const existing = await db.select({ id: agentEvent.id }).from(agentEvent).where(eq(agentEvent.taskId, taskId))
+    if (existing.length > 0) return
+
+    const { nanoid } = await import('nanoid')
+    await db.insert(agentEvent).values({
+      id: nanoid(),
+      agentId: spec.workerAgentId,
+      taskId,
+      eventType: passed ? 'JOB_TESTS_PASSED' : 'JOB_TESTS_FAILED',
+      success: passed,
+      executionTime: 0,
+      tokenCost: 0,
+      qualityScore: passed ? '1.000' : '0.000', // a graded fact, not self-assessment
+      detail,
+    })
+    const { recalculateCredit } = await import('@/lib/credit-engine')
+    await recalculateCredit(spec.workerAgentId)
+  } catch (error) {
+    console.error('[github/webhook] recording the CI credit event failed (non-fatal):', error)
+  }
 }
 
 async function handleCheck(event: string, payload: any) {
@@ -103,6 +152,13 @@ async function handleCheck(event: string, payload: any) {
         `✅ CI is green. Merging this pull request releases the escrowed bounty to the worker; closing it unmerged refunds it. ` +
           `— [Ledgermind](https://ai-agent-credit-dashboard.vercel.app) job #${spec.onchainJobId}`,
       )
+      await recordCiCreditEvent(spec, true, {
+        jobId: spec.onchainJobId,
+        repo: repoFullName,
+        prNumber: pr.number,
+        grader: 'repo-ci',
+        conclusion,
+      })
       const { logPlatformEvent } = await import('@/lib/platform-feed')
       await logPlatformEvent(
         'JOB_TESTS_PASSED',
@@ -122,6 +178,13 @@ async function handleCheck(event: string, payload: any) {
         },
         'failure',
       )
+      await recordCiCreditEvent(spec, false, {
+        jobId: spec.onchainJobId,
+        repo: repoFullName,
+        prNumber: pr.number,
+        grader: 'repo-ci',
+        conclusion,
+      })
       const { commentOnPr } = await import('@/lib/github-app')
       await commentOnPr(
         repoFullName,
@@ -159,7 +222,11 @@ async function handlePullRequest(payload: any) {
         output: `The requester merged ${repoFullName}#${prNumber} — the work was accepted into the repository.`,
         gradedAt: new Date().toISOString(),
       },
-      'merged',
+      // Deliberately null: the merge is already recorded in testResult and in
+      // the on-chain status. Writing 'merged' into ciStatus overwrote what CI
+      // actually said, so a merged job reported "no CI result yet" — the audit
+      // trail lost the verdict at the exact moment it mattered most.
+      null,
     )
     const fresh = await specForPr(repoFullName, prNumber)
     const { autoApprovePassedJob } = await import('@/lib/labor-settle')
