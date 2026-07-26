@@ -40,6 +40,13 @@ export async function POST(request: Request) {
 
   const auth = await resolveCallbackAuth(agentId)
   if (!auth.required || !callbackSecretMatches(auth, request.headers.get('x-runtime-secret'))) {
+    // Server-side only: name which precondition failed, never any secret
+    // material. A bare 401 across ID-vs-key-vs-stale-key is undiagnosable.
+    const presented = request.headers.get('x-runtime-secret')
+    console.warn(
+      `[worker/claim] auth failed for agent ${agentId}: ` +
+        (!auth.required ? 'agent has no key and no shared secret is configured' : presented ? 'presented key does not match the stored key' : 'no x-runtime-secret header presented'),
+    )
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
   if (!ag.smartAccountAddress) {
