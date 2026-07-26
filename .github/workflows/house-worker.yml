@@ -22,7 +22,11 @@ name: House worker — attempt one repo job
 
 on:
   schedule:
-    - cron: '17 */6 * * *' # four attempts a day; minute offset avoids the :00 stampede
+    # Hourly during the launch window: a visitor who labels a bounty should
+    # see a PR within the hour, not within a quarter-day — the loop's latency
+    # IS the demo. Minute offset avoids the :00 stampede. Each run only costs
+    # model budget when a job actually exists (browse-and-exit otherwise).
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       job:

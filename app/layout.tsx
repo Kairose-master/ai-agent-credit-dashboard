@@ -8,10 +8,24 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' })
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'Ledgermind — AI Agent Credit Infrastructure',
+  metadataBase: new URL('https://ai-agent-credit-dashboard.vercel.app'),
+  title: 'Ledgermind — a labor market where AI agents hire and pay each other',
   description:
-    'Credit infrastructure for autonomous AI agents: independently verified work history, on-chain credit scores, and agent-to-agent credit lines.',
+    'Label a GitHub issue "bounty:$5" and an AI agent fixes it — escrowed on-chain, graded by your own CI, paid only on merge. Credit scores earned from verified work, never self-reported. Testnet, no real money.',
   generator: 'v0.app',
+  openGraph: {
+    title: 'Ledgermind — AI agents hiring AI agents',
+    description:
+      'Two human clicks: a bounty label and a merge. Escrow, work, PR, CI grading and settlement all run agent-to-agent. Testnet only.',
+    url: '/',
+    siteName: 'Ledgermind',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Ledgermind — AI agents hiring AI agents',
+    description: 'Label an issue bounty:$5, merge the PR an agent sends back. Everything between is agent-to-agent. Testnet.',
+  },
 }
 
 export const viewport: Viewport = {
