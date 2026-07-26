@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, ShieldOff } from 'lucide-react'
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
+import { applyPassedI18nTranslations, getI18nJobsStatus, postI18nGapJobs } from '@/app/actions/i18n-jobs'
 import { getSuspendedAgents, suspendAgentMessaging, unsuspendAgentMessaging } from '@/app/actions/agent-messages'
 
 /**
@@ -70,6 +71,104 @@ function SeedJobsCard() {
         {seeding ? <Loader2 className="size-4 animate-spin" /> : <Briefcase className="size-4" />}
         Post seed jobs
       </button>
+      {result && <p className="mt-2 text-sm text-success">{result}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Dogfood demand: post the platform's REAL i18n backlog (untranslated UI
+ * keys per locale) as LLM-graded translation jobs, and apply passing results
+ * into the runtime overrides so the work actually ships. The honest way to
+ * keep the board alive — this demand exists because the repo needs it.
+ */
+function I18nJobsCard() {
+  const [status, setStatus] = useState<{ configured: boolean; backlog: { locale: string; missing: number }[]; openTitles: string[] } | null>(null)
+  const [busy, setBusy] = useState<'post' | 'apply' | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await getI18nJobsStatus())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const post = async () => {
+    setBusy('post')
+    setError(null)
+    setResult(null)
+    try {
+      const r = await postI18nGapJobs()
+      const failed = r.results.filter((x) => !x.ok)
+      setResult(`Posted ${r.posted} translation job(s).${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const apply = async () => {
+    setBusy('apply')
+    setError(null)
+    setResult(null)
+    try {
+      const r = await applyPassedI18nTranslations()
+      setResult(`Applied ${r.applied} translation(s) from ${r.jobsUsed} passed job(s) into the runtime overrides.`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const totalMissing = status?.backlog.reduce((s, b) => s + b.missing, 0) ?? 0
+
+  return (
+    <div className="rounded-lg border border-border p-6">
+      <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+        <Languages className="size-5" /> i18n backlog jobs
+      </h3>
+      <p className="text-sm text-muted-foreground mb-3">
+        Turns the real translation backlog into Labor Market jobs (LLM-graded, min score 0 — open to brand-new
+        workers), then applies passing submissions into the runtime translations. Idempotent: a locale with an
+        i18n job still Open is skipped.
+      </p>
+      {status && (
+        <p className="text-sm text-muted-foreground mb-3">
+          {status.configured
+            ? `Backlog: ${totalMissing} untranslated keys across ${status.backlog.length} locale(s) · ${status.openTitles.length} i18n job(s) currently Open.`
+            : 'Not configured — set X402_JOB_REQUESTER_AGENT_ID to a provisioned, funded agent.'}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={post}
+          disabled={busy !== null || status?.configured === false || totalMissing === 0}
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {busy === 'post' ? <Loader2 className="size-4 animate-spin" /> : <Languages className="size-4" />}
+          Post translation jobs
+        </button>
+        <button
+          onClick={apply}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {busy === 'apply' ? <Loader2 className="size-4 animate-spin" /> : <DatabaseZap className="size-4" />}
+          Apply passed translations
+        </button>
+      </div>
       {result && <p className="mt-2 text-sm text-success">{result}</p>}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
@@ -458,6 +557,7 @@ export default function AccessControlPage() {
       </div>
 
       <SeedJobsCard />
+      <I18nJobsCard />
 
       <TranslationsCard />
 
