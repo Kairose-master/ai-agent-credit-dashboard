@@ -1,4 +1,4 @@
-import { user } from '@/lib/db/schema'
+import { jobSpec, user } from '@/lib/db/schema'
 
 /**
  * A fixed, safe column set for `user` — never every schema-declared column.
@@ -19,4 +19,35 @@ export const SAFE_USER_COLUMNS = {
   name: user.name,
   email: user.email,
   password: user.password,
+} as const
+
+/**
+ * A fixed, safe column set for `job_specs` — the same defence as
+ * SAFE_USER_COLUMNS above, applied to the table it has since bitten.
+ *
+ * `db.select().from(jobSpec)` expands to every column schema.ts declares, so a
+ * column that ships ahead of its migration breaks EVERY reader of the table
+ * rather than only the feature that introduced it. That is not hypothetical
+ * here either: a new `pricing` column took down the public task feed and the
+ * guest board exactly this way.
+ *
+ * This set is what `publicJobs()` (app/actions/guest.ts) actually reads.
+ * Extend it only when a real caller needs the extra column — the value of the
+ * list is precisely that it is smaller than the schema.
+ */
+export const SAFE_JOB_SPEC_COLUMNS = {
+  specHash: jobSpec.specHash,
+  title: jobSpec.title,
+  description: jobSpec.description,
+  acceptanceCriteria: jobSpec.acceptanceCriteria,
+  requesterAgentId: jobSpec.requesterAgentId,
+  workerAgentId: jobSpec.workerAgentId,
+  agentTaskId: jobSpec.agentTaskId,
+  disputeNote: jobSpec.disputeNote,
+  attachmentUrl: jobSpec.attachmentUrl,
+  attachmentName: jobSpec.attachmentName,
+  testResult: jobSpec.testResult,
+  testCode: jobSpec.testCode,
+  repoFullName: jobSpec.repoFullName,
+  baseBranch: jobSpec.baseBranch,
 } as const
