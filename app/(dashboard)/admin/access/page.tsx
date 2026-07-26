@@ -1,11 +1,17 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, ShieldOff, GitPullRequest } from 'lucide-react'
+import { KeyRound, Plus, Trash2, Loader2, DatabaseZap, Languages, Briefcase, ShieldOff, GitPullRequest, Wallet } from 'lucide-react'
 import { getAccessMatrix, grantAccess, revokeAccess } from '@/app/actions/admin'
 import { getSeedJobsStatus, seedLaborMarketJobs } from '@/app/actions/seed-jobs'
 import { applyPassedI18nTranslations, getI18nJobsStatus, postI18nGapJobs } from '@/app/actions/i18n-jobs'
-import { cancelPracticeJobs, postDocsTranslationJobs, postTestSuiteJobs } from '@/app/actions/dogfood-jobs'
+import {
+  cancelPracticeJobs,
+  getHouseWalletStatus,
+  postDocsTranslationJobs,
+  postTestSuiteJobs,
+  topUpHouseWallet,
+} from '@/app/actions/dogfood-jobs'
 import { getSuspendedAgents, suspendAgentMessaging, unsuspendAgentMessaging } from '@/app/actions/agent-messages'
 
 /**
@@ -183,9 +189,37 @@ function I18nJobsCard() {
  * opt-in now (FAUCET_ENABLED), so cleared clutter doesn't grow back.
  */
 function BoardCurationCard() {
-  const [busy, setBusy] = useState<'docs' | 'tests' | 'cancel' | null>(null)
+  const [busy, setBusy] = useState<'docs' | 'tests' | 'cancel' | 'topup' | null>(null)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [wallet, setWallet] = useState<{ configured: boolean; address: string | null; balanceUsd: number | null } | null>(null)
+
+  const refreshWallet = useCallback(async () => {
+    try {
+      setWallet(await getHouseWalletStatus())
+    } catch {
+      /* the cards below still work; the balance line just stays hidden */
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshWallet()
+  }, [refreshWallet])
+
+  const topUp = async () => {
+    setBusy('topup')
+    setError(null)
+    setResult(null)
+    try {
+      const r = await topUpHouseWallet(100)
+      setResult(`Minted $${r.minted} test USDC — house wallet now holds $${r.balanceUsd?.toFixed(2) ?? '?'}.`)
+      await refreshWallet()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const run = async (which: 'docs' | 'tests' | 'cancel') => {
     setBusy(which)
@@ -195,11 +229,13 @@ function BoardCurationCard() {
       if (which === 'docs') {
         const r = await postDocsTranslationJobs()
         const failed = r.results.filter((x) => !x.ok)
-        setResult(`Posted ${r.posted} documentation job(s).${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+        setResult(`Posted ${r.posted} documentation job(s). ${r.funding}${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+        await refreshWallet()
       } else if (which === 'tests') {
         const r = await postTestSuiteJobs()
         const failed = r.results.filter((x) => !x.ok)
-        setResult(`Posted ${r.posted} test-suite job(s).${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+        setResult(`Posted ${r.posted} test-suite job(s). ${r.funding}${failed.length ? ` ${failed.length} failed: ${failed[0]?.error}` : ''}`)
+        await refreshWallet()
       } else {
         const r = await cancelPracticeJobs()
         setResult(`Cancelled ${r.cancelled}/${r.attempted} practice job(s) — escrow refunded on-chain.`)
@@ -222,6 +258,16 @@ function BoardCurationCard() {
         <strong>Clear practice jobs</strong> cancels every Open non-dogfood job owned by the house/faucet agents
         (escrow refunds on-chain) — the faucet is opt-in now, so the clutter stays gone.
       </p>
+      <p className="text-sm text-muted-foreground mb-3">
+        Every bounty here is escrowed from the house requester wallet.{' '}
+        {wallet?.configured
+          ? wallet.balanceUsd === null
+            ? 'Its balance could not be read right now.'
+            : `It holds $${wallet.balanceUsd.toFixed(2)} test USDC.`
+          : 'X402_JOB_REQUESTER_AGENT_ID is not set.'}{' '}
+        Posting tops it up automatically when short; the button is here for when you want headroom first.
+        Testnet MockUSDC is freely mintable, so this costs nothing.
+      </p>
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => run('docs')}
@@ -238,6 +284,14 @@ function BoardCurationCard() {
         >
           {busy === 'tests' ? <Loader2 className="size-4 animate-spin" /> : <DatabaseZap className="size-4" />}
           Post test-suite jobs
+        </button>
+        <button
+          onClick={topUp}
+          disabled={busy !== null || wallet?.configured === false}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          {busy === 'topup' ? <Loader2 className="size-4 animate-spin" /> : <Wallet className="size-4" />}
+          Top up house wallet ($100)
         </button>
         <button
           onClick={() => run('cancel')}

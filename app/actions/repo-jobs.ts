@@ -47,6 +47,8 @@ export async function postRepoJobAsHouse(input: Omit<RepoJobInput, 'requesterAge
   if (!houseAgentId) throw new Error('Set X402_JOB_REQUESTER_AGENT_ID (a provisioned, funded agent) first')
   const [house] = await db.select().from(agent).where(eq(agent.id, houseAgentId))
   if (!house?.smartAccountAddress) throw new Error('House requester agent is not provisioned')
+  const { ensureHouseFunds } = await import('@/lib/house-funding')
+  await ensureHouseFunds(houseAgentId, input.bountyUsd)
   return postRepoJob({ ...input, requesterAgentId: houseAgentId })
 }
 

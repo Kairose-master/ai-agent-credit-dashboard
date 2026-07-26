@@ -24,6 +24,7 @@ import { eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { revalidatePath } from 'next/cache'
 import { logPlatformEvent } from '@/lib/platform-feed'
+import { asActionError } from '@/lib/action-error'
 import {
   DOCS_JOB_BOUNTY_USD,
   DOCS_JOB_MIN_SCORE,
@@ -52,6 +53,39 @@ async function houseContext() {
   return houseAgentId
 }
 
+/** What the house requester wallet holds right now — the number that decides
+ *  whether any posting button can work at all. */
+export async function getHouseWalletStatus() {
+  await requireSuperAdmin()
+  const houseAgentId = process.env.X402_JOB_REQUESTER_AGENT_ID
+  if (!houseAgentId) return { configured: false as const, address: null, balanceUsd: null }
+  const { houseBalanceUsd } = await import('@/lib/house-funding')
+  const { address, balanceUsd } = await houseBalanceUsd(houseAgentId)
+  return { configured: true as const, address, balanceUsd }
+}
+
+/** Mint free testnet MockUSDC into the house requester wallet. The contract
+ *  is openly mintable on testnet by design, so this costs nothing and needs
+ *  no approval — it exists as a button because an empty house wallet is the
+ *  single most common reason a posting click fails. */
+export async function topUpHouseWallet(amountUsd = 100) {
+  await requireSuperAdmin()
+  const houseAgentId = await houseContext()
+  const { houseBalanceUsd } = await import('@/lib/house-funding')
+  const { address } = await houseBalanceUsd(houseAgentId)
+  if (!address) throw new Error('House requester agent has no wallet')
+  const amount = Math.max(1, Math.min(Math.round(amountUsd), 5000))
+  try {
+    const { mintTestUsdc } = await import('@/lib/onchain/treasury')
+    await mintTestUsdc(houseAgentId, amount, address as `0x${string}`)
+  } catch (error) {
+    throw asActionError(error, 'topUpHouseWallet')
+  }
+  const after = await houseBalanceUsd(houseAgentId)
+  await logPlatformEvent('HOUSE_WALLET_TOPPED_UP', `House requester topped up with $${amount} test USDC`)
+  return { minted: amount, balanceUsd: after.balanceUsd }
+}
+
 export async function postDocsTranslationJobs() {
   await requireSuperAdmin()
   const houseAgentId = await houseContext()
@@ -73,6 +107,11 @@ export async function postDocsTranslationJobs() {
   // A docs title ever posted (any status) is done or in flight — don't repost
   // the same part when it completes; the operator commits the result instead.
   const everPosted = new Set(existingSpecs.map((s) => s.title))
+
+  // Pre-fund: a dry house wallet otherwise fails every post deep inside an
+  // ERC-4337 simulation with `USDC: balance`, which reads like an outage.
+  const { ensureHouseFunds } = await import('@/lib/house-funding')
+  const funding = await ensureHouseFunds(houseAgentId, MAX_DOCS_JOBS_PER_CLICK * DOCS_JOB_BOUNTY_USD)
 
   const results: { title: string; ok: boolean; skipped?: boolean; error?: string }[] = []
   let posted = 0
@@ -108,7 +147,8 @@ export async function postDocsTranslationJobs() {
         results.push({ title, ok: true })
         posted++
       } catch (error) {
-        results.push({ title, ok: false, error: error instanceof Error ? error.message : String(error) })
+        const { explainOnchainError } = await import('@/lib/onchain/errors')
+        results.push({ title, ok: false, error: explainOnchainError(error) })
       }
     }
   }
@@ -117,7 +157,7 @@ export async function postDocsTranslationJobs() {
     await logPlatformEvent('JOB_POSTED', `Posted ${posted} real documentation job(s) from the platform backlog`)
   }
   revalidatePath('/jobs')
-  return { posted, results }
+  return { posted, results, funding: funding.note }
 }
 
 /** Post the test-suite-writing jobs (mutation-graded — lib/test-suite-jobs.ts).
@@ -134,6 +174,10 @@ export async function postTestSuiteJobs() {
 
   const existingSpecs = await db.select().from(jobSpec).where(eq(jobSpec.requesterAgentId, houseAgentId))
   const everPosted = new Set(existingSpecs.map((s) => s.title))
+
+  const { ensureHouseFunds } = await import('@/lib/house-funding')
+  const pending = TEST_SUITE_CATALOG.filter((s) => !everPosted.has(testSuiteJobTitle(s))).length
+  const funding = await ensureHouseFunds(houseAgentId, pending * TESTS_JOB_BOUNTY_USD)
 
   const results: { title: string; ok: boolean; skipped?: boolean; error?: string }[] = []
   let posted = 0
@@ -158,7 +202,8 @@ export async function postTestSuiteJobs() {
       results.push({ title, ok: true })
       posted++
     } catch (error) {
-      results.push({ title, ok: false, error: error instanceof Error ? error.message : String(error) })
+      const { explainOnchainError } = await import('@/lib/onchain/errors')
+      results.push({ title, ok: false, error: explainOnchainError(error) })
     }
   }
 
@@ -166,7 +211,7 @@ export async function postTestSuiteJobs() {
     await logPlatformEvent('JOB_POSTED', `Posted ${posted} mutation-graded test-suite job(s) from the platform backlog`)
   }
   revalidatePath('/jobs')
-  return { posted, results }
+  return { posted, results, funding: funding.note }
 }
 
 /** Cancel every Open practice job (house/faucet-owned, non-dogfood title).

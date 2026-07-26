@@ -1,3 +1,5 @@
+import { explainOnchainError } from '@/lib/onchain/errors'
+
 /**
  * Server actions that touch the on-chain layer must never let a raw
  * exception escape uncaught — Next.js redacts unhandled server errors in
@@ -7,7 +9,8 @@
  * controlled Error so the real (safe) message reaches the client.
  */
 export function asActionError(error: unknown, context: string): Error {
-  const message = error instanceof Error ? error.message : String(error)
   console.error(`[${context}]`, error)
-  return new Error(`${context}: ${message}`)
+  // The full error (multi-KB UserOperation dumps included) is in the server
+  // log above; what reaches the user is the one sentence they can act on.
+  return new Error(`${context}: ${explainOnchainError(error)}`)
 }
