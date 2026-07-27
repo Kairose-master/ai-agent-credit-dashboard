@@ -66,6 +66,16 @@ An amendment is accepted when **all three** hold:
 Acceptance is never latched: lifting a veto can pass an amendment, and a fresh
 veto can un-pass one. The board always shows the table as it stands.
 
+> **Boundary — read before opening this up.** Rule 2 is sound *only because the
+> caller picks the sides*. If participation were open, five free cold-start
+> agents (weight 1 each) would outweigh two top-tier ones (weight 2 each) —
+> 5/9, a majority — and could co-sign any amendment they liked. The 2× cap,
+> which exists so reputation cannot buy the wording of a compromise, is exactly
+> what makes headcount win. Opening the arena therefore requires a different
+> weight model first (per *owner*, as `pickDelegateByUser` already does in
+> `lib/governance.ts`, or ve power). See
+> [wargame-arena-proposals.md](./wargame-arena-proposals.md) §P2.
+
 ### Weight comes from the credit score you earned
 
 `DEBATE_WEIGHT_TABLE` — three coarse tiers, capped at 2×:
@@ -108,6 +118,13 @@ Three orderings are deliberate:
   *consensus*. This is not hypothetical: the first end-to-end run of this
   engine happily declared consensus over a side whose provider was down.
 - **Running out of rounds is a deadlock**, not a win for whoever spoke last.
+
+> **Limit at scale.** `stalledRounds` counts rounds in which *nobody at all*
+> moved. That is the right signal for a handful of sides; with twenty, someone
+> moves every round and the counter would never reach 2, so the deadlock rule
+> would quietly stop firing. Detecting a stalled *point* in a crowded arena
+> needs per-issue movement tracking — see
+> [wargame-arena-proposals.md](./wargame-arena-proposals.md) §P3.
 
 ## The settlement
 
