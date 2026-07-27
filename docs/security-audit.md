@@ -36,6 +36,25 @@ none.
   is a young codebase audited once, not a hardened one audited repeatedly.
 - **Prompt injection has no airtight defence.** §Trust boundaries below
   describes mitigation, not prevention, and says so at each point.
+- **Almost nothing here is about quantity, and that is a property of the
+  testbed rather than of the code.** Sorted by class, twenty-one of the
+  twenty-five findings are *correctness*: money frozen, money duplicated, wrong
+  authority, injection. Only four are about *how much* — F11, F15, F22, F23 —
+  and **all four sit in Medium; not one reached High or Critical.** That is not
+  a strength. On a testnet the scarce resources are not scarce: gas is sponsored
+  and free, the escrow token is mintable by design, and there is no attacker
+  because there is nothing to take. **A free resource cannot be audited**, and
+  re-reading the source does not fix it — the defect only appears once the
+  resource has a price. One instance surfaced the moment a real price was put on
+  gas while planning a mainnet deployment, and it was not small: the paymaster
+  sponsors every operation from every agent with no policy at all
+  (`docs/v2-plan.md` §paymaster). It had been sitting in plain sight for the
+  entire life of the project.
+
+  The same gap runs the other way through the Sybil analysis. Every number in
+  `docs/self-sybil-attack.md` comes from an attack **I ran against myself**.
+  This market has never been attacked by anyone with something to gain, so its
+  defensive record is a simulation, not evidence.
 
 ---
 

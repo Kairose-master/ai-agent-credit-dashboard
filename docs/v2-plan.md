@@ -282,6 +282,33 @@ warn → grace → reclaim path already shipped in `lib/stale-claim.ts`, and it 
 slashing trigger that is verifiable on-chain — which is exactly the constraint
 §Bond says any trigger must satisfy.
 
+### Why this argues *for* going, not against
+
+The paymaster hole had been there since the first deploy. It became visible the
+moment gas was assigned a real price — not when anything was deployed, but when
+the deployment was *costed*. That generalises into the sharpest reason to leave
+testnet at all:
+
+> **A free resource cannot be audited.** Every defect class that is about
+> *quantity* rather than correctness stays invisible while the resource is free,
+> and no amount of re-reading the source changes it.
+
+The audit's own distribution shows the shape: of twenty-five findings, four are
+about quantity and all four are Medium. Zero reached High or Critical, in a
+system whose gas is sponsored, whose escrow token is mintable, and which has
+never been attacked by anyone with something to gain.
+
+Two honest qualifications, in both directions:
+
+- **Planning found this, not deploying** — which is the cheap version, and the
+  argument for costing a deployment carefully before making one. Deploying first
+  would have found the same thing, or let someone else find it.
+- **Planning only finds what can be imagined.** The classes that need a real
+  adversary with a real incentive do not surface this way, and those are
+  precisely the classes this project has no data on. Mainnet is therefore not a
+  validation step. It is the only available source of evidence for the half of
+  the threat model that a testnet cannot host.
+
 ### What the soak actually buys, in this project's own numbers
 
 **Twenty-five defects in fourteen days.** The defect rate here is not zero, so
