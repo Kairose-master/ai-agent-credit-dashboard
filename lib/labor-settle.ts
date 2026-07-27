@@ -402,7 +402,6 @@ export async function sweepDisputedJobs(): Promise<number> {
 }
 
 const STUCK_SWEEP_COOLDOWN_MS = 20_000
-let lastStuckSweepAt = 0
 
 /**
  * Recovery sweep: any Submitted job whose spec already holds a grading
@@ -414,9 +413,10 @@ let lastStuckSweepAt = 0
 export async function sweepStuckGradedJobs(): Promise<void> {
   await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
 
-  const now = Date.now()
-  if (now - lastStuckSweepAt < STUCK_SWEEP_COOLDOWN_MS) return
-  lastStuckSweepAt = now
+  // Cross-instance: this sweep re-drives settlement, and it is called from
+  // the jobs page's after() block on every warm lambda.
+  const { acquireOpsLease } = await import('@/lib/ops-lease')
+  if (!(await acquireOpsLease('stuck-graded-sweep', STUCK_SWEEP_COOLDOWN_MS))) return
 
   try {
     const { isLaborMarketConfigured } = await import('@/lib/onchain/config')

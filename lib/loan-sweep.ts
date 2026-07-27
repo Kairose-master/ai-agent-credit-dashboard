@@ -15,11 +15,12 @@ import { nanoid } from 'nanoid'
 import { GRACE_DAYS, loanPhase, loanNoticeDue } from '@/lib/loan-terms'
 
 const SWEEP_COOLDOWN_MS = 60_000
-let lastSweepAt = 0
 
 export async function sweepDefaultedLoans(now = new Date()): Promise<number> {
-  if (now.getTime() - lastSweepAt < SWEEP_COOLDOWN_MS) return 0
-  lastSweepAt = now.getTime()
+  // Cross-instance: marking a loan defaulted writes credit history, and two
+  // lambdas doing it at once wrote it twice.
+  const { acquireOpsLease } = await import('@/lib/ops-lease')
+  if (!(await acquireOpsLease('loan-default-sweep', SWEEP_COOLDOWN_MS))) return 0
 
   let defaulted = 0
   try {
@@ -79,7 +80,6 @@ export async function sweepDefaultedLoans(now = new Date()): Promise<number> {
   return defaulted
 }
 
-let lastReminderSweepAt = 0
 
 /**
  * Loan lifecycle emails: due-soon → overdue → defaulted, one email per
@@ -91,8 +91,10 @@ let lastReminderSweepAt = 0
 export async function sweepLoanReminders(now = new Date()): Promise<number> {
   const { isEmailConfigured, sendLoanEmail } = await import('@/lib/email')
   if (!isEmailConfigured()) return 0
-  if (now.getTime() - lastReminderSweepAt < SWEEP_COOLDOWN_MS) return 0
-  lastReminderSweepAt = now.getTime()
+  // Cross-instance: remindedPhase is read, compared, then written, so two
+  // lambdas in the same window both saw the old phase and both emailed.
+  const { acquireOpsLease } = await import('@/lib/ops-lease')
+  if (!(await acquireOpsLease('loan-reminder-sweep', SWEEP_COOLDOWN_MS))) return 0
 
   let sent = 0
   try {

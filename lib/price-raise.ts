@@ -22,14 +22,13 @@
  */
 import { db } from '@/lib/db'
 import { jobSpec } from '@/lib/db/schema'
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { logPlatformEvent } from '@/lib/platform-feed'
 import { nextPriceRaise } from '@/lib/market-price'
 import { retry, retryRpc } from '@/lib/labor-settle'
 
 const RAISE_SWEEP_COOLDOWN_MS = 60_000
-let lastRaiseSweepAt = 0
 
 /**
  * Exactly the columns a raise copies into its replacement row — no more.
@@ -153,6 +152,31 @@ export function isOrphanedRaise(
 }
 
 /**
+ * The parent states in which a replacement is genuinely owed.
+ *
+ * `resumeOrphanedRaises` posts a job on the strength of a row saying one was
+ * intended. That is only safe if the ORIGINAL escrow actually came back:
+ *
+ * - `Cancelled` / `Refunded` — the refund landed, the market is short one
+ *   job, post the replacement. This is the case the recovery exists for.
+ * - `Open` / `Accepted` / `Submitted` — the cancel never happened (it
+ *   reverted, or a worker claimed the job first). The original is still
+ *   live and possibly being worked; posting the replacement escrows the
+ *   same task twice from the same wallet.
+ * - `Completed` — somebody already got paid for it. A replacement here buys
+ *   the work a second time.
+ * - Parent unknown to the chain — no evidence either way, so do nothing
+ *   (invariant 5).
+ *
+ * Pure, because this is the rule that decides whether money moves.
+ */
+export const RESUMABLE_PARENT_STATUSES = ['Cancelled', 'Refunded'] as const
+
+export function isRaiseResumable(parentStatus: string | undefined | null): boolean {
+  return typeof parentStatus === 'string' && (RESUMABLE_PARENT_STATUSES as readonly string[]).includes(parentStatus)
+}
+
+/**
  * Finish raises that died between the refund and the repost.
  *
  * The old escrow is already returned by that point, so the only thing
@@ -196,9 +220,25 @@ export async function resumeOrphanedRaises(now = new Date()): Promise<number> {
     const orphans = candidates.filter((s) => isOrphanedRaise(now, s))
     if (orphans.length === 0) return 0
 
-    const { readJobs, postJob } = await import('@/lib/onchain/labor')
-    const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
+    const { postJob } = await import('@/lib/onchain/labor')
+    const { readJobsOrUnknown } = await import('@/lib/onchain/labor-read')
+    const jobs = await readJobsOrUnknown({ maxAgeMs: 0 })
+    // Posting escrowed jobs on the strength of intent rows requires knowing
+    // what actually happened on-chain. Unknown ⇒ resume nothing.
+    if (jobs === null) return 0
     const byHash = new Map(jobs.map((j) => [j.specHash.toLowerCase(), j]))
+
+    // Parent lineage, so each orphan can be checked against the fate of the
+    // job it was meant to replace.
+    const parentHashes = [...new Set(orphans.map((o) => o.parentSpecHash!).filter(Boolean))]
+    const parentRows = parentHashes.length > 0
+      ? await db
+          .select({ specHash: jobSpec.specHash, onchainJobId: jobSpec.onchainJobId })
+          .from(jobSpec)
+          .where(inArray(jobSpec.specHash, parentHashes))
+      : []
+    const parentJobIdByHash = new Map(parentRows.map((p) => [p.specHash.toLowerCase(), p.onchainJobId]))
+    const statusById = new Map(jobs.map((j) => [j.id, j.status]))
 
     for (const orphan of orphans.slice(0, 3)) {
       try {
@@ -206,6 +246,20 @@ export async function resumeOrphanedRaises(now = new Date()): Promise<number> {
         const existing = byHash.get(orphan.specHash.toLowerCase())
         if (existing) {
           await db.update(jobSpec).set({ onchainJobId: existing.id }).where(eq(jobSpec.specHash, orphan.specHash))
+          continue
+        }
+
+        // The intent row proves a replacement was WANTED, not that the
+        // original escrow ever came back. If the cancel reverted — because a
+        // worker claimed the job in the same second, or two instances raced
+        // the same raise — the parent is still live, and posting here would
+        // escrow the same task twice from one wallet.
+        const parentJobId = parentJobIdByHash.get(orphan.parentSpecHash!.toLowerCase())
+        const parentStatus = parentJobId === null || parentJobId === undefined ? undefined : statusById.get(parentJobId)
+        if (!isRaiseResumable(parentStatus)) {
+          console.warn(
+            `[price-raise] orphan ${orphan.specHash} left alone — parent job ${parentJobId ?? '(unlinked)'} is ${parentStatus ?? 'unknown'}, so its escrow was never returned`,
+          )
           continue
         }
         const plan = orphan.pricing as { raises?: number; pendingUsd?: number; pendingMinScore?: number } | null
@@ -234,9 +288,15 @@ export async function resumeOrphanedRaises(now = new Date()): Promise<number> {
 export async function sweepPriceRaises(): Promise<number> {
   await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
 
+  // A CROSS-INSTANCE lease, not a module-level timestamp. This sweep is
+  // called straight from the jobs page's after() block, so on a warm fleet
+  // several lambdas reach it at once, each with its own clock and each
+  // convinced it is due. Two of them raising the same job is the double-
+  // escrow race described in lib/ops-lease.ts.
+  const { acquireOpsLease } = await import('@/lib/ops-lease')
+  if (!(await acquireOpsLease('price-raise-sweep', RAISE_SWEEP_COOLDOWN_MS))) return 0
+
   const now = Date.now()
-  if (now - lastRaiseSweepAt < RAISE_SWEEP_COOLDOWN_MS) return 0
-  lastRaiseSweepAt = now
 
   let raised = 0
   try {

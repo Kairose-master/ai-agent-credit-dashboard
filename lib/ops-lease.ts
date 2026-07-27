@@ -5,9 +5,19 @@
  * which is per-lambda-instance — fine when one scheduler calls one
  * endpoint, useless the moment background work is driven by traffic,
  * because each concurrent instance has its own clock and they all think
- * they are due. The sweeps are individually idempotent, so the failure is
- * wasted on-chain calls and duplicate reverts rather than lost money, but
- * it is still the wrong shape.
+ * they are due.
+ *
+ * This file used to claim the damage was only "wasted on-chain calls and
+ * duplicate reverts rather than lost money." That was wrong once the money
+ * paths started writing their intent down first. Two instances sweeping
+ * price raises at the same moment both see the job Open, both insert a
+ * replacement row, and only one cancel can win — the loser's row survives
+ * as an orphan that `resumeOrphanedRaises` later posts, so the requester
+ * ends up escrowing the same work twice. Idempotence per call does not
+ * compose into idempotence under concurrency.
+ *
+ * So the sweeps that move money take a lease here instead of trusting a
+ * timestamp that only one lambda can see.
  *
  * This is one atomic statement in Postgres: insert the lease, or steal it
  * only if the existing one has expired. Exactly one caller gets a row back.

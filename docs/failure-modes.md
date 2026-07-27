@@ -165,6 +165,12 @@ twice.
 Ordering stays cancel-then-post so a requester never needs headroom for two
 escrows at once; the orphan row is what makes that ordering safe to choose.
 
+**This fix created §13.** Writing intent first means an orphan row exists
+whenever the cancel does *not* land — including when it reverts because the
+job was claimed a second earlier, or because another instance won the same
+raise. Resuming such a row posts a second escrow for work that was never
+refunded. Read §13 before touching either half.
+
 ---
 
 ## 5. Limbo by euphemism: "leaving for manual review"
@@ -426,6 +432,69 @@ rather than opens), and every sweep whose empty result means "nothing to do".
 
 ---
 
+## 13. Idempotent-per-call is not idempotent under concurrency
+
+**Symptom.** None observed. Found by asking of every background sweep: *what
+happens if two lambdas run this in the same second?*
+
+**Root cause.** Seven sweeps throttled with a module-level timestamp:
+
+```ts
+let lastRaiseSweepAt = 0
+if (now - lastRaiseSweepAt < COOLDOWN) return
+```
+
+That is per-lambda-instance. `sweepStuckGradedJobs`, `sweepPriceRaises` and
+`tickJobFaucet` are called straight from the jobs page's `after()` block, so
+on a warm fleet each instance has its own clock and all of them believe they
+are due. `lib/ops-lease.ts` was written for exactly this and only the traffic
+tick used it.
+
+The comment in that file said the damage was "wasted on-chain calls and
+duplicate reverts rather than lost money." **That stopped being true when the
+money paths started writing intent first (§4).** Two instances raising the
+same job:
+
+1. both read the job `Open`;
+2. both insert a replacement spec row (different `specHash`, no collision);
+3. one `cancelJob` wins, the other reverts and throws;
+4. the loser's row survives as an orphan;
+5. `resumeOrphanedRaises` later finds it and posts it — **a second escrowed
+   job for one piece of work.**
+
+Step 5 is a bug on its own, without any concurrency: the orphan row proves a
+replacement was *wanted*, never that the original escrow came back. A cancel
+that reverts because a worker claimed the job a moment earlier leaves the same
+orphan, and posting it escrows work that is already being done.
+
+**Fix.** Two independent layers, because they fail differently.
+
+- Every money-moving sweep takes a **cross-instance lease** (`price-raise-sweep`,
+  `faucet-tick`, `stuck-graded-sweep`, `loan-default-sweep`,
+  `loan-reminder-sweep`). The faucet's `force` shortens the window to 60s
+  rather than removing it — forcing means "ignore the interval", not "run
+  concurrently with yourself".
+- `resumeOrphanedRaises` checks the **parent's** on-chain fate before posting.
+  Pure rule, `isRaiseResumable`: resume on `Cancelled`/`Refunded` only. Still
+  live ⇒ the cancel never happened. `Completed` ⇒ somebody was already paid.
+  Parent unknown ⇒ no evidence, do nothing.
+
+Separately, `creditWorkerForJob` guarded double-credit with SELECT-then-INSERT
+— two statements, so at READ COMMITTED two callers both find nothing and both
+insert. There is a partial unique index now
+(`agent_events (task_id) WHERE event_type = 'JOB_COMPLETED'`) and the insert
+uses `ON CONFLICT DO NOTHING`; the loser stands down before recalculating the
+score, writing the feed entry, or sending the payout email. If the index
+cannot be created (pre-existing duplicates) that is **logged loudly** rather
+than passing silently — the app-level guard alone must not read as protected.
+
+Checked and left alone: `claimJobSpec` is already a single atomic
+`UPDATE … WHERE unclaimed-or-stale RETURNING`, which is the correct shape, and
+`tickCloudAutoMineAgents` only dispatches — its work-unit claim goes through
+that same atomic path, so over-ticking is genuinely harmless there.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -462,7 +531,11 @@ Keep these true, and this class of bug stays dead:
    difference (`null` = unknown, `[]` = empty) anywhere absence authorizes a
    spend — and when in doubt, forgo the platform's revenue rather than take a
    user's money on a guess (§12).
-10. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+10. **Idempotent per call is not idempotent under concurrency.** A
+   module-level `lastRunAt` throttles one lambda, not a fleet. Anything that
+   moves money takes a cross-instance lease, and uniqueness that matters is
+   enforced by the database, not by a SELECT before an INSERT (§13).
+11. **Ask for the rows and columns you need.** A read with no `WHERE` and no
    column list is a bug that has not surfaced yet — it silently grows, and it
    breaks the whole table's readers the day a column ships ahead of its
    migration (§11).

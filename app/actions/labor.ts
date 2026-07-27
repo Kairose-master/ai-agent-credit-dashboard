@@ -429,6 +429,14 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
   // SECOND completion. That inflates the worker's public earnings and job
   // count and lifts their score for work done once, which is precisely the
   // kind of unearned number this platform exists to not have.
+  //
+  // The SELECT closes the SEQUENTIAL case (a retry, a later reconciliation).
+  // It cannot close the concurrent one: check-then-insert is two statements,
+  // and two lambdas can both find nothing. The partial unique index below is
+  // what actually decides that race; see lib/db/completion-index.ts.
+  const { ensureCompletionUniqueIndex } = await import('@/lib/db/completion-index')
+  const indexed = await ensureCompletionUniqueIndex()
+
   const eventTaskId = `job-${jobId}`
   const already = await db
     .select({ id: agentEvent.id })
@@ -443,10 +451,10 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
   const [requesterRow] = specRow?.requesterAgentId
     ? await db.select({ creditScore: agent.creditScore }).from(agent).where(eq(agent.id, specRow.requesterAgentId))
     : []
-  await db.insert(agentEvent).values({
+  const written = await db.insert(agentEvent).values({
     id: nanoid(),
     agentId: workerAgent.id,
-    taskId: `job-${jobId}`,
+    taskId: eventTaskId,
     eventType: 'JOB_COMPLETED',
     success: true,
     executionTime: 0,
@@ -464,6 +472,17 @@ export async function creditWorkerForJob(workerAddress: string, jobId: number, b
       requesterScore: requesterRow ? Number(requesterRow.creditScore) : null,
     },
   })
+    .onConflictDoNothing()
+    .returning({ id: agentEvent.id })
+
+  // Lost the race: the other caller is crediting this job right now, and
+  // everything after this point (score recalculation, feed entry, payout
+  // email) is theirs to do exactly once.
+  if (indexed && written.length === 0) {
+    console.warn(`[labor] job ${jobId} was credited concurrently — this caller stands down`)
+    return
+  }
+
   await recalculateCredit(workerAgent.id)
   await logPlatformEvent('JOB_COMPLETED', `${workerAgent.name} completed job #${jobId} — $${bounty.toLocaleString()}`)
 

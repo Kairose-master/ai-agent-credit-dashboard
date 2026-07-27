@@ -572,11 +572,13 @@ export async function postHouseAudioJobs(count = 3): Promise<ImagePostReport> {
   return report
 }
 
-// In-memory throttle, per warm instance — same best-effort pattern as
-// tickCloudAutoMineAgents. Over-ticking across cold starts is harmless:
-// the open-count check makes the tick idempotent.
-let lastFaucetTickAt = 0
+// A cross-instance lease, not a per-lambda timestamp. The faucet posts real
+// escrowed jobs, and it is called from the jobs page's after() block, so on a
+// warm fleet every instance thought it was due at once. The daily cap bounded
+// that; it did not stop a burst.
 const FAUCET_TICK_COOLDOWN_MS = 10 * 60 * 1000
+/** `force` still serializes — it shortens the window, it does not remove it. */
+const FAUCET_FORCE_LEASE_MS = 60_000
 
 export interface FaucetReport {
   posted: number
@@ -595,11 +597,11 @@ export async function tickJobFaucet(opts?: { force?: boolean }): Promise<FaucetR
   if (process.env.FAUCET_ENABLED !== 'true') return { posted: 0, openBefore: 0, skipped: 'disabled (opt-in: set FAUCET_ENABLED=true)' }
   if (process.env.FAUCET_DISABLED === 'true') return { posted: 0, openBefore: 0, skipped: 'disabled' }
 
-  const now = Date.now()
-  if (!opts?.force && now - lastFaucetTickAt < FAUCET_TICK_COOLDOWN_MS) {
+  const { acquireOpsLease } = await import('@/lib/ops-lease')
+  const leaseMs = opts?.force ? FAUCET_FORCE_LEASE_MS : FAUCET_TICK_COOLDOWN_MS
+  if (!(await acquireOpsLease('faucet-tick', leaseMs))) {
     return { posted: 0, openBefore: 0, skipped: 'throttled' }
   }
-  lastFaucetTickAt = now
 
   const { isLaborMarketConfigured, isAgentAccountConfigured } = await import('@/lib/onchain/config')
   if (!isLaborMarketConfigured() || !isAgentAccountConfigured()) {
