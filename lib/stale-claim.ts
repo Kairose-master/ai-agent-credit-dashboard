@@ -144,15 +144,37 @@ export async function abandonedResultHash(): Promise<`0x${string}`> {
   return keccak256(toHex('ledgermind:claim-abandoned'))
 }
 
+/**
+ * Why a frozen job could not be processed. Every one of these was a bare
+ * `continue` at some point, and every one of them means escrow stays locked.
+ *
+ * The first version of this instrumentation only covered the address lookups
+ * and left `no-spec` silent — the same defect one line earlier, which is why
+ * the counter read 0 while seven jobs were being skipped. Reasons are tagged
+ * now so the ops line says *which* wall the sweep hit, not just that it hit one.
+ */
+export type BlockedReason =
+  | 'no-spec' // no job_specs row for this on-chain specHash
+  | 'no-requester-on-spec' // spec exists but carries no requesterAgentId
+  | 'unresolvable-worker'
+  | 'unresolvable-requester'
+
 export type ReclaimReport = {
   reclaimed: number
   warned: number
-  /** Accepted jobs whose worker or requester could not be resolved to an agent
-   *  row. These are frozen and this sweep cannot free them — surfaced rather
-   *  than skipped in silence. */
-  unresolvable: number
+  /** Accepted jobs this sweep cannot free, counted by reason. Frozen escrow
+   *  that is invisible is the failure mode; a number with a name is the fix. */
+  blocked: Partial<Record<BlockedReason, number>>
   examined: number
   skipped?: string
+}
+
+/** Compact, greppable rendering for the ops-cycle line. Pure. */
+export function formatBlocked(blocked: Partial<Record<BlockedReason, number>>): string {
+  const parts = Object.entries(blocked)
+    .filter(([, n]) => (n ?? 0) > 0)
+    .map(([reason, n]) => `${reason}=${n}`)
+  return parts.length === 0 ? '' : `, BLOCKED ${parts.join(' ')}`
 }
 
 /** The event row that records a warning was issued. Durable and idempotent
@@ -162,24 +184,35 @@ const warnTaskId = (jobId: number) => `claim-warn-${jobId}`
 
 export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimReport> {
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
-  if (!isLaborMarketConfigured()) return { reclaimed: 0, warned: 0, unresolvable: 0, examined: 0, skipped: 'labor market not configured' }
+  if (!isLaborMarketConfigured()) return { reclaimed: 0, warned: 0, blocked: {}, examined: 0, skipped: 'labor market not configured' }
 
   const { readJobs, submitWork, raiseDispute, resolveDispute } = await import('@/lib/onchain/labor')
   const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
   const accepted = jobs.filter((j) => j.status === 'Accepted')
-  if (accepted.length === 0) return { reclaimed: 0, warned: 0, unresolvable: 0, examined: 0 }
+  if (accepted.length === 0) return { reclaimed: 0, warned: 0, blocked: {}, examined: 0 }
 
   let reclaimed = 0
   let warned = 0
-  let unresolvable = 0
   let examined = 0
+  const blocked: Partial<Record<BlockedReason, number>> = {}
+  const block = (jobId: number, reason: BlockedReason, detail: string) => {
+    blocked[reason] = (blocked[reason] ?? 0) + 1
+    console.warn(`[stale-claim] job ${jobId} is frozen and unrecoverable by this sweep — ${reason}: ${detail}`)
+  }
 
   for (const job of accepted) {
     if (reclaimed >= MAX_PER_PASS && warned >= MAX_WARNINGS_PER_PASS) break
     examined++
     try {
       const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
-      if (!spec?.requesterAgentId) continue
+      if (!spec) {
+        block(job.id, 'no-spec', `specHash ${job.specHash} has no job_specs row`)
+        continue
+      }
+      if (!spec.requesterAgentId) {
+        block(job.id, 'no-requester-on-spec', `spec ${job.specHash} carries no requesterAgentId`)
+        continue
+      }
 
       // Last sign of life: the claim itself, or the worker's task row if a
       // long-running job has been reporting progress.
@@ -207,18 +240,12 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
       const { agentByAddress } = await import('@/lib/agent-by-address')
       const workerLookup = await agentByAddress(job.worker)
       const requesterLookup = await agentByAddress(job.requester)
-      if (!workerLookup.found || !requesterLookup.found) {
-        // A silent `continue` here is invisible limbo: the escrow stays frozen
-        // and nothing anywhere says why. Name the side that could not be
-        // resolved — an unresolvable party means this job can never be walked
-        // out of `Accepted` by this sweep, which is worth knowing loudly.
-        const why = !workerLookup.found
-          ? `worker ${job.worker} (${workerLookup.reason})`
-          : !requesterLookup.found
-            ? `requester ${job.requester} (${requesterLookup.reason})`
-            : 'unknown'
-        console.warn(`[stale-claim] job ${job.id} cannot be recovered — unresolvable ${why}`)
-        unresolvable++
+      if (!workerLookup.found) {
+        block(job.id, 'unresolvable-worker', `${job.worker} (${workerLookup.reason})`)
+        continue
+      }
+      if (!requesterLookup.found) {
+        block(job.id, 'unresolvable-requester', `${job.requester} (${requesterLookup.reason})`)
         continue
       }
       const workerAgent = workerLookup.agent
@@ -347,5 +374,5 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
     }
   }
 
-  return { reclaimed, warned, unresolvable, examined }
+  return { reclaimed, warned, blocked, examined }
 }

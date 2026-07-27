@@ -745,13 +745,36 @@ reason for each, and the ops-cycle line prints `, N UNRESOLVABLE` when any
 exist. An escrow this sweep cannot free is exactly the thing that must not be
 invisible — §5's lesson, applied to a `continue` instead of a log message.
 
-**Honest limit.** Whether case was actually the cause of any of those seven is
-**still unproven** — an agent row genuinely can be missing (a deleted agent, a
-house-fronted x402 job). The fix is right either way, and the point of the
-`unresolvable` counter is that the next occurrence is answerable from a log
-line instead of by inference. Re-measure after the deploy: if the skip count
-drops, case was the cause; if it holds at seven, those jobs need a different
-recovery and now say so out loud.
+**Re-measured, and the answer was no.** The next tick reported
+`0/15 reclaimed, 0 warned` with **no** blocked count at all — because the
+instrumentation was half-finished. I had tagged the *address* lookups and left
+the skip one line above them silent:
+
+```ts
+const [spec] = await db.select()...
+if (!spec?.requesterAgentId) continue   // ← still bare
+```
+
+All seven exit there. So case was **not** the cause of any of them; they are
+jobs with no `job_specs` row (or a spec carrying no `requesterAgentId`) — old
+enough to predate spec tracking, or written by a path that never linked one.
+The address fix above is still correct and still worth having, but it fixed a
+latent bug rather than the observed one.
+
+Fixing the same defect twice in twenty minutes is the actual lesson here: I
+instrumented the `continue` I was *thinking about* instead of all of them.
+There is now a single `block(jobId, reason, detail)` funnel and four named
+reasons — `no-spec`, `no-requester-on-spec`, `unresolvable-worker`,
+`unresolvable-requester` — counted into `report.blocked` and rendered by
+`formatBlocked` as `, BLOCKED no-spec=7`. The test asserts the **count** of
+`block()` call sites rather than the presence of any one of them, precisely so
+the next added `continue` fails a test instead of quietly reading zero.
+
+**Still open.** Seven jobs hold escrow that this sweep structurally cannot
+free, because it needs a spec row to find the parties. They are now visible
+with a reason, which is the difference between a known problem and a silent
+one; the recovery for them is a separate job (resolve parties from the chain
+alone, without the spec) and is not built.
 
 **What made this findable.** Writing the prediction down. "`Accepted` should
 fall" was cheap to state and cheap to check, and it was wrong in a way that

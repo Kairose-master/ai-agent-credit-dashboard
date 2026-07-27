@@ -57,16 +57,47 @@ describe('address comparisons on money paths', () => {
  * The sweep used to `continue` past an unresolvable job with no trace, which
  * is the same invisible limbo as §5: escrow frozen and nothing saying why.
  */
-describe('unresolvable jobs are surfaced, not skipped', () => {
-  it('stale-claim counts and logs them', () => {
-    const src = read('lib/stale-claim.ts')
-    expect(src).toContain('unresolvable++')
-    expect(src).toMatch(/cannot be recovered — unresolvable/)
-    expect(src).toContain('unresolvable: number')
+describe('blocked jobs are surfaced by reason, not skipped', () => {
+  const src = read('lib/stale-claim.ts')
+
+  it('EVERY continue that means frozen escrow goes through block()', () => {
+    // The first version of this instrumentation covered the address lookups
+    // and left `!spec?.requesterAgentId` silent — the same defect one line
+    // earlier, which is why the counter read 0 while seven jobs were skipped.
+    // So assert on the count of reasons, not on any single one.
+    for (const reason of ['no-spec', 'no-requester-on-spec', 'unresolvable-worker', 'unresolvable-requester']) {
+      expect(src, reason).toContain(`'${reason}'`)
+    }
+    // Four block() calls, one per reason.
+    expect(src.match(/block\(job\.id, '/g)?.length).toBe(4)
   })
 
-  it('the ops-cycle line shouts when any exist', () => {
-    // A count that only appears in a report nobody greps is not surfaced.
-    expect(read('lib/ops-cycle.ts')).toContain('UNRESOLVABLE')
+  it('a bare continue no longer precedes the first block()', () => {
+    const loop = src.indexOf('for (const job of accepted)')
+    const firstBlock = src.indexOf('block(job.id,', loop)
+    const between = src.slice(loop, firstBlock)
+    // `examined++` and the try{ are fine; a naked `continue` is not.
+    expect(between).not.toMatch(/^\s*continue$/m)
+  })
+
+  it('the ops-cycle line names the reasons, not just a total', () => {
+    // A count with no name tells you a wall was hit, not which wall.
+    expect(read('lib/ops-cycle.ts')).toContain('formatBlocked')
+  })
+})
+
+describe('formatBlocked', () => {
+  it('is empty when nothing is blocked, so a healthy line stays quiet', async () => {
+    const { formatBlocked } = await import('@/lib/stale-claim')
+    expect(formatBlocked({})).toBe('')
+    expect(formatBlocked({ 'no-spec': 0 })).toBe('')
+  })
+
+  it('names each reason with its count', async () => {
+    const { formatBlocked } = await import('@/lib/stale-claim')
+    expect(formatBlocked({ 'no-spec': 7 })).toBe(', BLOCKED no-spec=7')
+    expect(formatBlocked({ 'no-spec': 7, 'unresolvable-worker': 2 })).toBe(
+      ', BLOCKED no-spec=7 unresolvable-worker=2',
+    )
   })
 })
