@@ -42,14 +42,89 @@ export function claimDeadlineMs(): number {
 /** At most this many jobs recovered per pass — each costs three UserOps. */
 const MAX_PER_PASS = 3
 
+/** And at most this many warnings, so a backlog of stuck claims doesn't
+ *  arrive as a burst of identical emails. */
+const MAX_WARNINGS_PER_PASS = 5
+
 /**
- * Is this claim abandoned? Pure, so the policy is testable without a chain.
+ * Warn before taking the claim away.
  *
- * `lastActivityAt` is the worker's most recent sign of life (a long-running
- * job's progress heartbeat touches its task row): a job that is genuinely
- * still being worked must never be reclaimed out from under it. An unknown
- * claim time is treated as NOT abandoned — never destroy a position on
- * missing evidence.
+ * This sweep does two things at once: it unfreezes the requester's escrow, and
+ * it writes a permanent graded failure onto the worker's record. The first is
+ * urgent. The second is a punishment, and it was landing with **no notice at
+ * all** — a desktop miner whose laptop slept, or an MCP session that dropped,
+ * came back six hours later to a `VERIFIED_TASK_FAILED` it was never told was
+ * coming. For a platform whose entire claim is that reputation means
+ * something, handing out a permanent mark unannounced is the wrong way round.
+ *
+ * So: warn at 70% of the deadline, then leave a grace window, then reclaim.
+ * A worker that comes back inside the window finishes the job and nothing
+ * happens; one that does not has at least been told.
+ *
+ * `reclaimDecision` below deliberately refuses to reclaim a job that has
+ * never been warned — but it warns it *on that pass* and recovers it on the
+ * next, so no job stays frozen because a notice was missed. The guarantee is
+ * "nobody is marked without notice", not "nothing is ever recovered".
+ */
+export const CLAIM_WARN_AT = 0.7
+
+/** Grace between the warning and the reclaim, as a fraction of the deadline.
+ *  With the 6h default that is ~54 minutes to finish or say something. */
+export const CLAIM_WARN_GRACE = 0.15
+
+export type ClaimPhase = 'working' | 'warn' | 'expired'
+
+/**
+ * Where this claim sits against its deadline. Pure.
+ *
+ * Same evidence rule as `isClaimAbandoned`: `lastActivityAt` is the worker's
+ * most recent sign of life, and no evidence at all means `working` — never
+ * escalate against a claim we cannot see.
+ */
+export function claimPhase(
+  now: Date,
+  claimedAt: Date | null,
+  lastActivityAt: Date | null,
+  deadlineMs: number = claimDeadlineMs(),
+): ClaimPhase {
+  const last = Math.max(claimedAt?.getTime() ?? 0, lastActivityAt?.getTime() ?? 0)
+  if (last === 0) return 'working'
+  const elapsed = now.getTime() - last
+  if (elapsed > deadlineMs) return 'expired'
+  if (elapsed > deadlineMs * CLAIM_WARN_AT) return 'warn'
+  return 'working'
+}
+
+export type ClaimAction = 'wait' | 'warn' | 'reclaim'
+
+/**
+ * What to do about one claim this pass. Pure, because this is the rule that
+ * decides whether a worker takes a permanent mark.
+ *
+ * `warnedAt` is when this job's warning was recorded (null if never). Note
+ * that an already-expired, never-warned claim returns `warn`, not `reclaim`:
+ * that is the whole point, and it costs one ops cycle.
+ */
+export function reclaimDecision(
+  now: Date,
+  phase: ClaimPhase,
+  warnedAt: Date | null,
+  deadlineMs: number = claimDeadlineMs(),
+): ClaimAction {
+  if (phase === 'working') return 'wait'
+  if (!warnedAt) return 'warn'
+  if (phase === 'warn') return 'wait' // already warned, still inside the deadline
+  return now.getTime() - warnedAt.getTime() >= deadlineMs * CLAIM_WARN_GRACE ? 'reclaim' : 'wait'
+}
+
+/**
+ * Is this claim past its deadline? A view over `claimPhase`, not a second
+ * implementation — the boundary rule ("deadline measured from the last sign
+ * of life; no evidence means not abandoned") now exists in exactly one place,
+ * and the tests written against this signature keep guarding it.
+ *
+ * Note that past the deadline is no longer sufficient to reclaim: see
+ * `reclaimDecision`.
  */
 export function isClaimAbandoned(
   now: Date,
@@ -57,10 +132,7 @@ export function isClaimAbandoned(
   lastActivityAt: Date | null,
   deadlineMs: number = claimDeadlineMs(),
 ): boolean {
-  if (!claimedAt && !lastActivityAt) return false
-  const last = Math.max(claimedAt?.getTime() ?? 0, lastActivityAt?.getTime() ?? 0)
-  if (last === 0) return false
-  return now.getTime() - last > deadlineMs
+  return claimPhase(now, claimedAt, lastActivityAt, deadlineMs) === 'expired'
 }
 
 /** Marker result hash recorded on-chain for a reclaimed job, so the chain
@@ -72,22 +144,28 @@ export async function abandonedResultHash(): Promise<`0x${string}`> {
   return keccak256(toHex('ledgermind:claim-abandoned'))
 }
 
-export type ReclaimReport = { reclaimed: number; examined: number; skipped?: string }
+export type ReclaimReport = { reclaimed: number; warned: number; examined: number; skipped?: string }
+
+/** The event row that records a warning was issued. Durable and idempotent
+ *  on the job, the same shape as the `abandoned-${id}` failure marker — no
+ *  new table, and a warning survives the lambda that sent it. */
+const warnTaskId = (jobId: number) => `claim-warn-${jobId}`
 
 export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimReport> {
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
-  if (!isLaborMarketConfigured()) return { reclaimed: 0, examined: 0, skipped: 'labor market not configured' }
+  if (!isLaborMarketConfigured()) return { reclaimed: 0, warned: 0, examined: 0, skipped: 'labor market not configured' }
 
   const { readJobs, submitWork, raiseDispute, resolveDispute } = await import('@/lib/onchain/labor')
   const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
   const accepted = jobs.filter((j) => j.status === 'Accepted')
-  if (accepted.length === 0) return { reclaimed: 0, examined: 0 }
+  if (accepted.length === 0) return { reclaimed: 0, warned: 0, examined: 0 }
 
   let reclaimed = 0
+  let warned = 0
   let examined = 0
 
   for (const job of accepted) {
-    if (reclaimed >= MAX_PER_PASS) break
+    if (reclaimed >= MAX_PER_PASS && warned >= MAX_WARNINGS_PER_PASS) break
     examined++
     try {
       const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
@@ -100,7 +178,16 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
         const [task] = await db.select({ updatedAt: agentTask.updatedAt }).from(agentTask).where(eq(agentTask.id, spec.agentTaskId))
         lastActivityAt = task?.updatedAt ?? null
       }
-      if (!isClaimAbandoned(now, spec.claimedAt, lastActivityAt)) continue
+      const phase = claimPhase(now, spec.claimedAt, lastActivityAt)
+      if (phase === 'working') continue
+
+      // Has this claim already been warned, and when?
+      const [warnRow] = await db
+        .select({ createdAt: agentEvent.createdAt })
+        .from(agentEvent)
+        .where(eq(agentEvent.taskId, warnTaskId(job.id)))
+      const action = reclaimDecision(now, phase, warnRow?.createdAt ?? null)
+      if (action === 'wait') continue
 
       // Addresses on the chain are the authority for BOTH sides: the
       // off-chain claim lock may already have been TTL'd away, and
@@ -118,6 +205,58 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
         .from(agent)
         .where(eq(agent.smartAccountAddress, job.requester))
       if (!requesterAgent) continue
+
+      if (action === 'warn') {
+        if (warned >= MAX_WARNINGS_PER_PASS) continue
+        // The row is what makes the warning real, so it is written FIRST and
+        // unconditionally: delivery is best-effort (email may be unconfigured,
+        // the provider may be down), but a notice that isn't recorded would
+        // either warn forever or reclaim as if it never warned.
+        await db.insert(agentEvent).values({
+          id: nanoid(),
+          agentId: workerAgent.id,
+          taskId: warnTaskId(job.id),
+          eventType: 'CLAIM_DEADLINE_WARNED',
+          success: true,
+          executionTime: 0,
+          tokenCost: 0,
+          qualityScore: null,
+          detail: { jobId: job.id, bounty: job.bounty, deadlineHours: claimDeadlineMs() / 3_600_000 },
+        })
+
+        const { logPlatformEvent } = await import('@/lib/platform-feed')
+        await logPlatformEvent(
+          'CLAIM_DEADLINE_WARNED',
+          `${workerAgent.name} is close to the delivery deadline on job #${job.id} — deliver or the claim is released`,
+        ).catch(() => {})
+
+        try {
+          const { user } = await import('@/lib/db/schema')
+          const [owner] = await db.select({ email: user.email }).from(user).where(eq(user.id, workerAgent.userId))
+          if (owner?.email) {
+            const { sendEmail } = await import('@/lib/email')
+            await sendEmail({
+              to: owner.email,
+              subject: `Deliver job #${job.id} soon — ${workerAgent.name}'s claim is about to be released`,
+              title: 'A claimed job is close to its deadline',
+              bodyLines: [
+                `<strong>${workerAgent.name}</strong> claimed job #${job.id} ($${job.bounty}) and has not delivered yet.`,
+                'If nothing is submitted shortly, the claim is released, the escrow returns to the requester, and the job is recorded as a failed delivery on this agent&rsquo;s record.',
+                'A job that is still running only needs to report progress — the deadline measures from the last sign of life, not from the claim.',
+              ],
+              ctaLabel: 'Open the worker console',
+              ctaUrl: 'https://ai-agent-credit-dashboard.vercel.app/worker',
+            })
+          }
+        } catch (error) {
+          console.error(`[stale-claim] deadline warning email for job ${job.id} failed (non-fatal):`, error)
+        }
+
+        warned++
+        continue
+      }
+
+      if (reclaimed >= MAX_PER_PASS) continue
 
       // Walk the state machine, re-reading status before each transition so a
       // half-finished previous pass resumes rather than repeating a step.
@@ -190,5 +329,5 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
     }
   }
 
-  return { reclaimed, examined }
+  return { reclaimed, warned, examined }
 }

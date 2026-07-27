@@ -52,7 +52,9 @@ export const OPS_STEPS: OpsStep[] = [
     run: async () => {
       const { reclaimAbandonedJobs } = await import('@/lib/stale-claim')
       const r = await reclaimAbandonedJobs()
-      return r.skipped ?? `${r.reclaimed}/${r.examined} reclaimed`
+      // Warnings are reported separately: a tick that warns 3 and reclaims 0
+      // is the escalation working, not the sweep failing to find anything.
+      return r.skipped ?? `${r.reclaimed}/${r.examined} reclaimed, ${r.warned} warned`
     },
   },
   {

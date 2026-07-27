@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { isClaimAbandoned, claimDeadlineMs } from '@/lib/stale-claim'
+import {
+  CLAIM_WARN_AT,
+  CLAIM_WARN_GRACE,
+  claimDeadlineMs,
+  claimPhase,
+  isClaimAbandoned,
+  reclaimDecision,
+} from '@/lib/stale-claim'
 
 const HOUR = 60 * 60 * 1000
 const now = new Date('2026-07-26T12:00:00Z')
@@ -54,5 +61,78 @@ describe('claimDeadlineMs', () => {
     expect(claimDeadlineMs()).toBe(2 * HOUR)
     if (original === undefined) delete process.env.CLAIM_DEADLINE_HOURS
     else process.env.CLAIM_DEADLINE_HOURS = original
+  })
+})
+
+/**
+ * Warn before taking the claim away.
+ *
+ * This sweep does two things: unfreeze the requester's escrow (urgent) and
+ * write a permanent graded failure onto the worker (a punishment). The second
+ * was landing with no notice — a desktop miner whose laptop slept came back to
+ * a VERIFIED_TASK_FAILED it was never told was coming.
+ */
+describe('claimPhase', () => {
+  const deadline = 6 * 60 * 60 * 1000
+  const at = (h: number) => new Date(now.getTime() - h * 3_600_000)
+
+  it('a fresh claim is working', () => {
+    expect(claimPhase(now, at(1), null, deadline)).toBe('working')
+  })
+
+  it('warns at 70% of the deadline, not before', () => {
+    expect(claimPhase(now, at(4), null, deadline)).toBe('working') // 4/6 = 67%
+    expect(claimPhase(now, at(4.5), null, deadline)).toBe('warn') // 4.5/6 = 75%
+  })
+
+  it('is expired past the deadline', () => {
+    expect(claimPhase(now, at(7), null, deadline)).toBe('expired')
+  })
+
+  it('measures from the last sign of life, so a reporting job never escalates', () => {
+    // Claimed two days ago but reported progress a minute ago.
+    expect(claimPhase(now, at(48), new Date(now.getTime() - 60_000), deadline)).toBe('working')
+  })
+
+  it('no evidence at all is working — never escalate against what we cannot see', () => {
+    expect(claimPhase(now, null, null, deadline)).toBe('working')
+  })
+})
+
+describe('reclaimDecision', () => {
+  const deadline = 6 * 60 * 60 * 1000
+  const grace = deadline * CLAIM_WARN_GRACE
+  const ago = (ms: number) => new Date(now.getTime() - ms)
+
+  it('does nothing while the claim is being worked', () => {
+    expect(reclaimDecision(now, 'working', null, deadline)).toBe('wait')
+  })
+
+  it('warns once inside the warning window, then waits', () => {
+    expect(reclaimDecision(now, 'warn', null, deadline)).toBe('warn')
+    expect(reclaimDecision(now, 'warn', ago(60_000), deadline)).toBe('wait')
+  })
+
+  it('NEVER reclaims a claim that was never warned — it warns instead', () => {
+    // The whole point. An expired-but-unwarned claim costs one more ops cycle.
+    expect(reclaimDecision(now, 'expired', null, deadline)).toBe('warn')
+  })
+
+  it('waits out the grace window after warning, then reclaims', () => {
+    expect(reclaimDecision(now, 'expired', ago(grace - 1000), deadline)).toBe('wait')
+    expect(reclaimDecision(now, 'expired', ago(grace), deadline)).toBe('reclaim')
+    expect(reclaimDecision(now, 'expired', ago(grace + 60_000), deadline)).toBe('reclaim')
+  })
+
+  it('a warned worker that comes back is never reclaimed', () => {
+    // Activity moves the phase back to working; the stale warning is inert.
+    expect(reclaimDecision(now, 'working', ago(grace * 10), deadline)).toBe('wait')
+  })
+
+  it('the warning fires with real time left to act on it', () => {
+    // 30% of the deadline to notice, plus 15% of grace after it expires.
+    expect(CLAIM_WARN_AT).toBeLessThan(1)
+    expect(CLAIM_WARN_GRACE).toBeGreaterThan(0)
+    expect((1 - CLAIM_WARN_AT) * deadline).toBeGreaterThan(30 * 60_000)
   })
 })

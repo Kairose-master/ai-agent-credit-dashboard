@@ -84,8 +84,28 @@ delivering nothing stays free.
   with `NotRequester` for house-fronted x402 jobs whose spec requester differs
   from the on-chain one.
 
+**Warn before marking (added later, borrowed from UbiquityOS).** This sweep
+does two things at once, and only one of them is urgent. Unfreezing the
+requester's escrow is urgent. Writing a permanent `VERIFIED_TASK_FAILED` onto
+the worker is a *punishment*, and it was landing with **no notice at all** — a
+desktop miner whose laptop slept, or an MCP session that dropped, came back
+six hours later to a mark it was never told was coming. For a platform whose
+whole claim is that reputation means something, that is the wrong way round.
+
+`claimPhase` now returns `working | warn | expired` (warn at 70% of the
+deadline), and `reclaimDecision` refuses to reclaim a claim that has never
+been warned — it warns on that pass and recovers on the next, so no escrow
+stays frozen because a notice was missed. The guarantee is *"nobody is marked
+without notice"*, not *"nothing is ever recovered"*. The warning is a durable
+`claim-warn-${jobId}` event row written **before** the email, because delivery
+is best-effort and an unrecorded notice would either fire forever or reclaim
+as if it never happened. `isClaimAbandoned` is now a view over `claimPhase`,
+so the boundary rule exists in one place.
+
 **Verify.** `Accepted` should trend down while `Refunded` rises by the same
-amount. Observed: 28 → 13 with `Refunded` 47 → 69 over a few passes.
+amount. Observed: 28 → 13 with `Refunded` 47 → 69 over a few passes. After the
+warning stage shipped, a tick that reports `0/15 reclaimed, 5 warned` is the
+escalation working, not the sweep failing.
 
 **Long-term.** A contract-level `reclaimJob(jobId)` with an on-chain deadline
 is the right end state. It needs a redeploy plus a migration of every live
