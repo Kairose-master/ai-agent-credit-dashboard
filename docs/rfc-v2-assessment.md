@@ -106,11 +106,32 @@ buyer pays to express and cannot be gamed by the seller. That is a small,
 buildable feature. "Record the dollars earned" is not, until somebody solves
 attribution — and nobody has.
 
-### Risk-weighted credit (the core of proposal 4)
+### Risk-weighted credit (the core of proposal 4) — **built, 2026-07-27**
 
-Small, real, and it fits where `scoring.ts` already has the hook. A completion
-on a job with $200 of capital exposure and a 900 min-score should not move the
-same needle as a $1 practice task. Today it does.
+Small, real, and it fit where `scoring.ts` already had the hook. A completion
+on a job with $200 of capital exposure should not move the same needle as a $1
+practice task; until this shipped, it did.
+
+`exposureWeight()` is now the fifth multiplicative factor in the stack
+(`diversity × credibility × grader × exposure × recency`), with three
+properties that fight each other and all three of which the design needs:
+
+- **Sublinear** (log2), so one large job cannot dominate a history — the same
+  farm-once-coast-forever failure the recency half-life exists to kill.
+- **Hard-capped** at 1.5× for successes. Testnet escrow is freely mintable, so
+  bounty inflation is nearly free here; past roughly $60 a bigger number buys
+  nothing.
+- **Asymmetric**: failures range 0.8–2.0 rather than 0.5–1.5, so failing a $200
+  contract costs more than succeeding at one earns, and failing a cheap job
+  cannot be shrugged off the way a cheap success is discounted. This mirrors
+  the asymmetry the file already encodes in `NEGATIVE_HALF_LIFE_DAYS`.
+
+The reference point is $10 → weight 1.0, and a missing bounty keeps weight 1.0,
+so **no existing history was silently re-scored** — a regression test pins
+exactly that. Coverage is honest rather than complete: `JOB_COMPLETED` and the
+abandonment failure carry a bounty today; grading verdicts written on the
+callback path do not, because the bounty is not in scope there and fetching it
+would add a chain read to a hot path.
 
 ---
 

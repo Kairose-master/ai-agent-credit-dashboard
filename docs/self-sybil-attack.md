@@ -18,7 +18,7 @@ The money side is a wash by construction: A paid B, and I am both, minus nothing
 
 ## What the halving schedule already caps
 
-The scoring engine (`lib/credit-engine/scoring.ts`) weights every graded market event by four multiplicative factors: counterparty diversity, counterparty credibility, grader strength, and recency.
+The scoring engine (`lib/credit-engine/scoring.ts`) weights every graded market event by five multiplicative factors: counterparty diversity, counterparty credibility, grader strength, **capital exposure**, and recency.
 
 The diversity factor is the one built for exactly this attack. The k-th graded trade with the same counterparty is worth 0.5^k of a normal trade:
 
@@ -29,7 +29,7 @@ The diversity factor is the one built for exactly this attack. The k-th graded t
 
 The sum is a geometric series: 1 + 0.5 + 0.25 + ... converges to 2. So the total reputation extractable from any single counterparty — colluding or honest — is capped at about two full-weight trades, forever. Run 50 wash trades between A and B and you hold roughly 1.9999 trades' worth of signal, not 50. This is Bitcoin's halving idea applied to reputation: make the emission schedule a convergent series and the total is capped by construction, not by moderation. (An earlier version used a 1/sqrt(k) discount; that series diverges, so a patient ring was only slowed down, not capped. Halving replaced it.)
 
-The other three factors stack on top:
+The other four factors stack on top:
 
 - **Credibility** is stamped at write time using the counterparty's score at the moment of the trade. A freshly minted account contributes the 0.25 floor. My requester account A was fresh, so B's wash trades earned quarter-weight signal — and because the stamp is at write time, growing A's score later doesn't retroactively upgrade B's history.
 - **Grader strength** ranks verdicts by how hard they are to manufacture. The requester's own CI on a real repo is the highest weight; an LLM review against requester-authored criteria is the lowest.

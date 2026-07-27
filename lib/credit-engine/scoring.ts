@@ -39,6 +39,13 @@ export type AgentEventInput = {
    *  from an established counterparty counts more than reputation earned
    *  from a freshly minted score-300 account. */
   counterpartyScore?: number | null
+  /** Capital at stake on this graded fact, in USD — the job's bounty. Null
+   *  for events that never carried one (legacy rows, grading verdicts written
+   *  on the callback path where the bounty isn't in scope). Null keeps FULL
+   *  weight, the same no-retroactive-penalty convention the fields above use.
+   *  Drives the exposure weight: delivering a $200 contract and fixing a $1
+   *  typo are not the same evidence about an agent. */
+  exposureUsd?: number | null
 }
 
 export type CreditAssessment = {
@@ -247,7 +254,7 @@ export function assessCredit(
 // design literature (Agent Bazaar arXiv:2605.17698, Diagon arXiv:2604.06688)
 // plus the wash-trading attack neither paper tested:
 //
-//   diversity × credibility × grader × recency
+//   diversity × credibility × grader × exposure × recency
 //
 // The design borrows Bitcoin's halving insight twice over: make the emission
 // schedule a CONVERGENT series, and total extractable value is capped by
@@ -298,6 +305,56 @@ export const GRADER_WEIGHTS: Record<string, number> = {
 export function graderWeight(grader: string | null | undefined): number {
   if (!grader) return 0.8
   return GRADER_WEIGHTS[grader] ?? 0.8
+}
+
+/**
+ * Capital exposure — the fifth weight, and the one the others don't cover.
+ *
+ * Until now a completion counted the same whether the agent delivered a $1
+ * practice task or a $200 contract. Every real credit system disagrees: the
+ * amount at stake IS information about how much a counterparty trusted you,
+ * and about how much was destroyed when you failed.
+ *
+ * Three properties this has to have, and they fight each other:
+ *
+ * 1. **Sublinear.** Linear weighting would let one large job dominate a
+ *    history, which is the same "farm once, coast" failure the recency
+ *    half-life exists to kill.
+ * 2. **Capped, hard.** On testnet the escrow token is freely mintable, so
+ *    bounty inflation is nearly free here; on mainnet it is merely expensive.
+ *    Either way the weight must stop rewarding size well before the numbers
+ *    get silly. Past ~$60 a bigger bounty buys nothing.
+ * 3. **Asymmetric.** Failing a $200 job is worse than succeeding at one is
+ *    good — real credit reporting has this asymmetry and so does this file
+ *    already (NEGATIVE_HALF_LIFE_DAYS: bad news lingers longer). Negatives
+ *    get a higher ceiling AND a higher floor, so failure on a cheap job
+ *    cannot be shrugged off the way a cheap success can be discounted.
+ *
+ * Reference point is $10 → weight 1.0, so the existing curve is unchanged for
+ * a typical job and this is not a silent re-scoring of everyone's history.
+ */
+export const EXPOSURE_REFERENCE_USD = 10
+export const EXPOSURE_SLOPE = 0.25
+export const EXPOSURE_MIN_POSITIVE = 0.5
+export const EXPOSURE_MAX_POSITIVE = 1.5
+/** A failure on a cheap job is still a failure — floor it higher. */
+export const EXPOSURE_MIN_NEGATIVE = 0.8
+export const EXPOSURE_MAX_NEGATIVE = 2.0
+
+export function exposureWeight(usd: number | null | undefined, opts?: { negative?: boolean }): number {
+  if (usd === null || usd === undefined || !Number.isFinite(usd) || usd <= 0) return 1
+  const lo = opts?.negative ? EXPOSURE_MIN_NEGATIVE : EXPOSURE_MIN_POSITIVE
+  const hi = opts?.negative ? EXPOSURE_MAX_NEGATIVE : EXPOSURE_MAX_POSITIVE
+  const raw = 1 + Math.log2(usd / EXPOSURE_REFERENCE_USD) * EXPOSURE_SLOPE
+  return Math.min(hi, Math.max(lo, raw))
+}
+
+/** Event types where a bigger number is worse news, not better. Derived from
+ *  the type rather than passed in, so a caller cannot wire it backwards. */
+const NEGATIVE_SIGNALS = new Set(['JOB_TESTS_FAILED', 'VERIFIED_TASK_FAILED', 'TASK_FAILED', 'REPAYMENT_DEFAULTED'])
+
+export function isNegativeSignal(eventType: string): boolean {
+  return NEGATIVE_SIGNALS.has(eventType)
 }
 
 /** Reputation is a flow, not a stock: a graded fact loses half its weight
@@ -366,7 +423,8 @@ export function collateralizedCreditLimit(scoreLimit: number, trades: SettledTra
 }
 
 /** Weighted count of a market signal: each event discounted by counterparty
- *  repetition (halving), counterparty credibility, grader strength, and age.
+ *  repetition (halving), counterparty credibility, grader strength, capital
+ *  exposure, and age.
  *  Chronological order matters — the FIRST trades with a counterparty keep
  *  the most weight — and the result is order-independent w.r.t. input array
  *  order because events are sorted first. */
@@ -388,7 +446,12 @@ export function weightedMarketSignal(
       diversity = collusionWeight(prior)
       seen.set(e.counterparty, prior + 1)
     }
-    total += diversity * credibilityWeight(e.counterpartyScore) * graderWeight(e.grader) * recencyWeight(e.createdAt, now, halfLifeDays)
+    total +=
+      diversity *
+      credibilityWeight(e.counterpartyScore) *
+      graderWeight(e.grader) *
+      exposureWeight(e.exposureUsd, { negative: isNegativeSignal(eventType) }) *
+      recencyWeight(e.createdAt, now, halfLifeDays)
   }
   return total
 }

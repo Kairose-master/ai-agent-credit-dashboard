@@ -118,6 +118,10 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
         counterparty: typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null,
         grader: typeof d.grader === 'string' ? d.grader : null,
         counterpartyScore: typeof d.requesterScore === 'number' ? d.requesterScore : null,
+        // Present on JOB_COMPLETED (stamped by creditWorkerForJob) and on the
+        // abandonment failure (stale-claim). Absent elsewhere, which keeps
+        // those events at weight 1.0 rather than penalising them.
+        exposureUsd: typeof d.bounty === 'number' ? d.bounty : null,
       }
     }),
     { rating: rules.rating, risk: rules.risk },
