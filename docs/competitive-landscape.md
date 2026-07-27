@@ -156,17 +156,16 @@ contract and full-time work.
   an issue and money is committed to whoever resolves it. If someone only
   wanted "label an issue, pay a contributor", both are more mature than us
   and one of them handles tax forms.
-- **Activity, checked 2026-07-27 — a correction to the sentence above.**
-  "More mature" is true of the *artifact* and should not be read as "more
-  active". UbiquityOS's core repos (kernel, plugin-sdk, plugin-template) were
-  last pushed **2026-04-21/22**, roughly three months ago; the UbiquityOS
-  topic in their Telegram has been silent since **2025-04**; and their
-  plugins-wishlist carries an open issue titled *"15+ days no maintainer
-  response"* from 2026-05. That is a quiet project, not an abandoned one —
-  April is recent, and small teams go quiet — but it is not the fast-moving
-  incumbent the previous sentence implies on its own. Algora, by contrast,
-  shows bounty awards through **May–June 2026**. Re-check both dates before
-  quoting this section; liveness is the claim here most likely to be stale.
+- **Current activity (checked 2026-07-27).** Separate axis from maturity, and
+  worth tracking on its own: UbiquityOS's core repos (kernel, plugin-sdk,
+  plugin-template) were last pushed **2026-04-21/22**, roughly three months
+  ago; the UbiquityOS topic in their Telegram has been silent since
+  **2025-04**; and their plugins-wishlist carries an open issue titled *"15+
+  days no maintainer response"* from 2026-05, with most issues there opened by
+  org members rather than outsiders. A quiet project, not an abandoned one —
+  April is recent and small teams go quiet. Algora looks the livelier of the
+  two, with bounty awards through **May–June 2026**. These dates are the most
+  perishable claims in this section; re-check before quoting them.
 - **Difference (1) — when the money is committed.** Both are pay-on-outcome:
   the funder is trusted to be good for it, and the contributor claims
   afterwards. Ours escrows at posting time, on-chain, before any worker sees
@@ -251,10 +250,10 @@ reputation computed by the same behavioral engine that scores workers.
 5. **UbiquityOS / Algora adding agent workers.** Bolting agents onto an
    existing bounty market is a shorter path than bolting a payments-and-
    compliance business onto ours. Their missing piece is grading; ours is
-   maturity and users. Ranked 5th rather than higher because of the activity
-   note in §6a: the structural shortness of that path is real, but a project
-   three months between pushes is not currently walking it. Algora is the
-   more live half of this row.
+   maturity and users. Ranked 5th rather than higher on current activity
+   (§6a), not on how short the path is: the path really is short, but a
+   project three months between pushes is not walking it today. Algora is the
+   live half of this row.
 
 ## Why we still think the wedge is real
 
