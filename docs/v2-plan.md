@@ -159,6 +159,54 @@ So mainnet does not fail on cost. **It fails on emptiness.** An empty mainnet
 board is worse evidence than a busy testnet one, and it is worse in exactly the
 place — a funding conversation — where "mainnet" was supposed to help.
 
+### Sizing: bound the total, not the unit
+
+The obvious way to keep mainnet exposure small is to shrink the bounty — cent-
+scale jobs, so a hundred of them risk a dollar. It does not work, and the reason
+it does not work is the same reason mainnet was worth doing.
+
+Three floors sit above a $0.01 bounty, and the first two are paid by the
+operator rather than by anyone in the market:
+
+**Gas.** A job's lifecycle is `postJob → acceptJob → submitWork → approveJob` —
+**four ERC-4337 UserOperations minimum**, each carrying validation and bundler
+overhead well above a plain transfer, and all of them **sponsored by the
+paymaster**. At cent-scale bounties the operator's gas per job meets or exceeds
+what the worker earns: the market looks cheap and is entirely subsidised. The
+exact figure has to be *measured* on the target chain rather than guessed, and
+doing so is one of the first v2 tasks — a single job cycle on Base, four UserOps,
+receipts totalled.
+
+**Grading.** `llm-review` spends real model tokens per deliverable, also paid by
+the operator. That cost is comfortably above $0.01 for anything non-trivial, so
+at cent scale the **verification layer — which is the actual product — runs at a
+100% subsidy.** A market where judging the work costs more than the work is not
+a market.
+
+**Deterrence, and this is the one that matters.** The posting fee is
+`DEFAULT_FEE_BPS = 200`, so 2% of $0.01 is **$0.0002**. The fee stops being a
+fee. A bond cannot be meaningfully sized against it. `EXPOSURE_REFERENCE_USD`
+is 10 with a floor of 0.5, so a cent-scale job sits at the reputation floor
+regardless of outcome.
+
+> **The stake is the mechanism.** Shrinking it for safety shrinks the deterrent
+> to nothing, and the result is real USDC with unreal economics — the same
+> unfalsifiability that made testnet insufficient, reached by a different route.
+> Sepolia with extra steps.
+
+It also does not touch custody. A frozen $0.01 is still an escrow only the
+operator can free; **amount does not change a structural claim.**
+
+**So bound the total instead.** Escrow can only lock what has been funded, so
+the exposure ceiling is simply how much USDC goes into the mainnet wallet.
+Fund $200 and $200 is the maximum loss, with bounties left at a size where every
+mechanism still works — `MIN_SUBTASK_BOUNTY_USD = 1` is already the floor in
+code, and $1–$5 keeps gas under a few percent, grading affordable, and the 2%
+fee a number someone notices.
+
+$5 × 100 jobs is $500; $1 × 200 is $200. Identical safety to the cent-scale
+version, with the economics intact.
+
 ### What the soak actually buys, in this project's own numbers
 
 **Twenty-five defects in fourteen days.** The defect rate here is not zero, so
@@ -318,6 +366,10 @@ video.
    This is the thesis test; if it fails, stop and fix the thesis, not the code.
 6. Deploy the contracts to **both** Sepolia and Base. Real traffic and the
    faucet on testnet; operator funds only, no faucet, on mainnet.
+   **Measure one full job cycle on Base first** — four sponsored UserOps plus
+   the grading call — and set the minimum bounty from that number rather than
+   from taste. Fund the mainnet wallet once, to the intended exposure ceiling,
+   and treat topping it up as a decision rather than a reflex.
 7. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
 8. Open mainnet participation when the soak has run. External contract review
    before that, if it can be got — a recommendation now, not a gate.
