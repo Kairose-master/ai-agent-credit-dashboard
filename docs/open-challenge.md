@@ -165,5 +165,13 @@ the on-chain reads exist.
   enough to be reachable inside the window — the settled-volume ceiling in
   `collateralizedCreditLimit` is a reasonable place to calibrate from.
 - Tax and reporting treatment of paying a stranger a bounty.
-- Whether to run it at all before the demo video, or after. After is the safer
-  order: a challenge running during a recording adds a variable nobody needs.
+- ~~Whether to run it before the demo video, or after.~~ **Decided: the
+  challenge comes first and the video is last** (`v2-plan.md` §Sequence). The
+  earlier reasoning — that a live challenge during a recording adds a variable
+  nobody needs — had it backwards. A challenge that has been running for a while
+  is not a variable, it is the **ending**: a video that closes on "there is real
+  money on the table and the instructions for taking it are public" is a
+  stronger three minutes than one that closes on a falling settlement rate.
+  The remaining question is only *how long* it should run before filming —
+  long enough for the page to say something, and the answer depends on whether
+  anyone shows up.

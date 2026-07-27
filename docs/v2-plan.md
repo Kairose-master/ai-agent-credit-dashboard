@@ -458,29 +458,62 @@ Nothing here should start before the demo video is recorded: v1 is the thing
 with a track record, and a half-migrated system on camera is worse than no
 video.
 
-1. Record the demo against v1. *(blocking)*
-2. Fork repo → new Vercel project + new Neon DB.
-3. Schema: `(contractAddress, jobId)` everywhere. Cheap now, expensive later —
+**The demo video used to be step 1 and is now last.** The reason it was first —
+that v1 is the thing with a track record, and a half-migrated system on camera
+is worse than no video — is still true, and is answered by v1 continuing to run
+rather than by filming quickly. Against that, a video shot after this work is a
+*different* video: real USDC instead of mintable testnet tokens, and an ending
+that is a challenge rather than a confession. There is no deadline forcing the
+earlier date (the funds it is for take rolling applications), so the later cut
+wins on merit.
+
+**The condition that makes the reorder safe: v1 must not rot.** The whole reason
+v1 keeps running is that the ledger is the asset, and a month of attention spent
+entirely on v2 would let the thing being protected decay — settlement rate
+drifting, jobs freezing, board emptying. So for the duration: **v1 gets zero new
+features and stays alive.** Faucet running, sweeps running, breakage fixed. With
+25 findings closed and the suite green it should hold, but "left alone" and "not
+looked at" are different things.
+
+1. Fork repo → new Vercel project + new Neon DB.
+2. Schema: `(contractAddress, jobId)` everywhere. Cheap now, expensive later —
    and it is what lets one deployment address two chains at all.
-4. Contracts: **`reclaimJob` first**, then `assignPayee`. Bond deferred pending
+3. Contracts: **`reclaimJob` first**, then `assignPayee`. Bond deferred pending
    the slashing question. `reclaimJob` is the gate: until it exists, recovery
    requires operator custody, and mainnet is off the table for that reason
    alone.
-5. **Proof import from v1 by signature only, v1's DB treated as untrusted.**
+4. **Proof import from v1 by signature only, v1's DB treated as untrusted.**
    This is the thesis test; if it fails, stop and fix the thesis, not the code.
-6. **Meter the paymaster before anything on mainnet can be triggered by a
+5. **Meter the paymaster before anything on mainnet can be triggered by a
    stranger.** Project and per-address caps at minimum; decide which operations
    are sponsored at all.
-7. Deploy the contracts to **both** Sepolia and Base. Real traffic and the
+6. Deploy the contracts to **both** Sepolia and Base. Real traffic and the
    faucet on testnet; operator funds only, no faucet, on mainnet.
    **Measure one full job cycle on Base first** — four sponsored UserOps plus
    the grading call — and set the minimum bounty from
    `(gas + grading) / fee_rate` rather than from taste. Fund the mainnet wallet
    once, to the intended exposure ceiling, and treat topping it up as a decision
    rather than a reflex.
-8. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
-9. Open mainnet participation when the soak has run. External contract review
+7. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
+8. Open mainnet participation when the soak has run. External contract review
    before that, if it can be got — a recommendation now, not a gate.
+9. **Open the challenge** (`docs/open-challenge.md`). Its three prerequisites
+   are steps 3, 5 and 6, so this is where it lands and not earlier.
+10. **Record the demo**, once the challenge has run long enough to say something
+    on camera.
+
+**Honest estimate.** Steps 1–6 are on the order of one to two focused weeks for
+one person. Step 7 is calendar time rather than work, and step 10 waits on step
+9 having produced a result worth showing — so the video is realistically **five
+to seven weeks out, not four.** No deadline forces it (the funds take rolling
+applications); this is written down so the date is chosen rather than
+discovered.
+
+**One cheap hedge, not a recommendation.** The shooting script
+(`docs/demo-video-script.md`) already separates the screen pass from the
+voice-over, so v1's on-chain cycle could be filmed now as raw footage and held
+as insurance against v2 slipping. It costs an afternoon and is wasted if the
+story changes — which, if this plan works, it will.
 
 ---
 
