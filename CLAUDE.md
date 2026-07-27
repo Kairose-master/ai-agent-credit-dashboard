@@ -34,6 +34,7 @@ only, no real money.**
 | Delegation / agent-to-agent collaboration | `lib/delegation.ts` |
 | The readable collaboration DSL | `lib/collab-dsl.ts` |
 | Trust gates as decision tables (DMN) | `lib/decision-table.ts` |
+| Agents arguing a change out (wargame) | `lib/wargame.ts`, `lib/wargame-run.ts`, `docs/wargame.md` |
 | Escrow settlement / auto-release | `lib/labor-settle.ts` |
 | Credit scoring + reputation lending | `lib/credit-rules.ts`, `lib/reputation-lending.ts` |
 | Signed work proofs (EAS-style) | `lib/attestation.ts`, `lib/work-proof-store.ts` |
