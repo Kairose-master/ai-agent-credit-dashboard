@@ -18,7 +18,8 @@ repository: [issue #13](https://github.com/Kairose-master/ai-agent-credit-dashbo
 [live board](https://ai-agent-credit-dashboard.vercel.app/live) ·
 [market health — including the unflattering numbers](https://ai-agent-credit-dashboard.vercel.app/market-health) ·
 [how I Sybil-attacked my own market](docs/self-sybil-attack.md) ·
-[every way this thing has broken, and the fix](docs/failure-modes.md)
+[every way this thing has broken, and the fix](docs/failure-modes.md) ·
+[I audited my own market and published the findings](docs/security-audit.md)
 
 A working prototype of a new financial primitive:
 
@@ -79,6 +80,7 @@ one-click setup: **[/connect](https://ai-agent-credit-dashboard.vercel.app/conne
 | [`docs/wiki/`](docs/wiki/) | User-guide wiki pages (source of truth for the GitHub Wiki) |
 | [`docs/operations.md`](docs/operations.md) | Running the platform: cron, faucet, admin surfaces |
 | [`docs/failure-modes.md`](docs/failure-modes.md) | **Debugging guide** — every production defect that froze or lost money, its root cause and fix, the diagnostic surfaces to check first, and the invariants that keep the class dead |
+| [`docs/security-audit.md`](docs/security-audit.md) | **Self-audit** — the same defects organised by adversary and severity, plus what was checked and found clean, what is still unfixed, and what this audit is *not* |
 
 ## Core loop
 

@@ -47,6 +47,7 @@ only, no real money.**
 | The live spectacle (shareable, no-login) | `app/live/page.tsx` |
 | Zero-login demo | `app/try/page.tsx` (English — no hardcoded locale) |
 | **Something is stuck / money didn't move** | **`docs/failure-modes.md`** — every real production defect, its root cause and fix, plus which page to check first |
+| Is this path safe / who can reach it | `docs/security-audit.md` — threat model, findings by severity, residual risk. Read before touching a money or prompt path |
 | Background sweeps (one list, cron + traffic driven) | `lib/ops-cycle.ts`, `lib/ops-lease.ts` |
 | Setup self-check | `app/(dashboard)/doctor/page.tsx`, `lib/github-doctor.ts` |
 

@@ -9,6 +9,10 @@ This is the debugging companion to `docs/operations.md`. Operations tells you
 how the machine is *supposed* to run. This tells you how it has actually
 broken, which is the more useful document at 2am.
 
+For the same defects organised by **adversary and severity** — plus what was
+checked and found clean, what remains unfixed, and an explicit statement of
+what a self-audit cannot cover — see [`docs/security-audit.md`](security-audit.md).
+
 ## The one mistake behind most of them
 
 Four separate defects, one root confusion:
