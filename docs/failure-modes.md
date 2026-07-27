@@ -770,54 +770,55 @@ reasons — `no-spec`, `no-requester-on-spec`, `unresolvable-worker`,
 `block()` call sites rather than the presence of any one of them, precisely so
 the next added `continue` fails a test instead of quietly reading zero.
 
-**Re-measured again, and it was not that either.** The next tick still read
-`0/15 reclaimed, 0 warned` with **no** blocked count — so the seven were not
-hitting the spec check either. This time the arithmetic forced the answer
-rather than leaving room to guess: `examined` counts every job, so all 15
-entered the loop; no `block()` fired, so every spec exists; no error line
-appeared, so nothing threw. The only remaining exits are `phase === 'working'`
-and `action === 'wait'`, and eight were legitimately waiting out their grace
-window. The other seven were being classified **`working`**.
+**Re-measured a third time, and the premise was the thing that was wrong.**
 
-Not from elapsed time — they had been `Accepted` for days. From this:
+The `unknown` phase deployed and reported `blocked: {}` — **zero** jobs with
+`no-claim-record`. So that hypothesis was wrong too. But the same tick showed
+`examined` had gone **15 → 16** and `boardRestock: open 0 → +2`: the board had
+drained to nothing because workers were actively claiming, and restock refilled
+it.
 
-```ts
-const last = Math.max(claimedAt?.getTime() ?? 0, lastActivityAt?.getTime() ?? 0)
-if (last === 0) return 'working'   // no evidence ⇒ don't touch it
-```
+Which means the arithmetic underneath all three hypotheses was invalid. I had
+been treating `Accepted: 15` as a **fixed cohort** and subtracting counts
+sampled thirty minutes apart. It was never a cohort — jobs enter and leave
+`Accepted` continuously. "Seven unexplained jobs" was a phantom produced by
+differencing two numbers from two different populations, and I asserted it three
+times with rising confidence while the set moved underneath.
 
-Seven jobs have **no claim timestamp and no task activity** — precisely the
-situation §1's own safety notes describe, where the off-chain claim lock has
-been TTL'd away. Invariant 5 says never act on missing evidence, and that rule
-is correct and stays. **Calling it `working` is what was wrong.** For a job
-`Accepted` on-chain for days with no claim record, "still working" is a false
-statement, and it made the sweep report a healthy `0 warned` while escrow
-stayed locked. §5's limbo, third form in one session, and this time produced by
-my own guard.
+Nothing was blocked. Nothing needed the chain's accept timestamp. The six or
+seven that looked unexplained at any instant were, most likely, claims that had
+just been made and were correctly `working`.
 
-**Fix.** A fourth phase, `unknown`. It still never escalates —
-`reclaimDecision` returns `wait` for it whether or not a warning exists — but
-it is counted as `blocked: { 'no-claim-record': 7 }` and logged per job. The
-safety rule keeps its behaviour and loses its disguise.
+**What the chase produced anyway**, none of it wasted, all of it now verified
+by the live report rather than by argument:
 
-**Still open, and now actually named.** Recovering these needs the accept
-timestamp from the chain (the `AcceptedJob` event's block), which `readJobs`
-does not expose. Until that exists, seven jobs hold escrow that no sweep can
-free — visible, counted, and not silently reported as fine.
+- **Case-insensitive address resolution** (`lib/agent-by-address.ts`). A real
+  latent bug — three money paths compared checksummed against lowercased — and
+  it fixed *nothing observed*, which is the honest description.
+- **Five named block reasons behind one `block()` funnel**, so the next real
+  occurrence is a log line instead of a deduction. `blocked: {}` is now a
+  meaningful statement rather than an absence of instrumentation.
+- **The `unknown` phase.** Still never escalates (invariant 5 holds), but a job
+  with no claim record no longer *reports itself* as `working`.
+- **A guard test that derives its expected count from the type union**, so
+  adding a `continue` without a reason fails the build.
 
-**Three wrong hypotheses in one session**, each disproved by re-measuring
-rather than by reasoning harder: address casing, then a missing spec row, then
-the phase classifier. The thing that worked every time was writing down a
-number the next tick would either produce or not. The guard test now derives
-its expected `block()` count from the `BlockedReason` union instead of a
-hardcoded `4`, because the hardcoded version's first act was to fail when a
-fifth reason arrived — which would have made the test the thing you edit to
-get green.
+**The actual lesson, and it is not about escrow.** Every one of the three wrong
+hypotheses came from doing arithmetic on a live system as though it were a
+snapshot. The measurement that finally worked was not a better inference — it
+was making the code *say* what it was doing (`blocked` by reason) so no
+inference was required. **Instrument the decision; don't reverse-engineer it
+from aggregates.**
 
-**What made this findable.** Writing the prediction down. "`Accepted` should
-fall" was cheap to state and cheap to check, and it was wrong in a way that
-pointed at a real defect two layers below it. A vaguer claim — "the sweep now
-works better" — would have been unfalsifiable and this would still be here.
+**Still genuinely unverified:** the original prediction — `Accepted` down and
+`Refunded` up from a completed warn → grace → reclaim cycle. Warnings are
+demonstrably going out (5, then 3, then 2 across ticks). Reclaims have not been
+observed yet, and the honest reason is operational rather than a defect: this
+sweep is traffic-driven, the tick holds a five-minute cross-instance lease, I am
+currently the only traffic, and each grace window has expired a few seconds
+*after* a tick rather than before one. In a market with no visitors, a
+traffic-driven sweep has latency that is indistinguishable from a bug — which is
+§6 in a milder form and worth remembering before diagnosing the next silence.
 
 ---
 
