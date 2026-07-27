@@ -154,7 +154,7 @@ blur past, then stop on one.
 **Screen:** `docs/security-audit.md`, scrolled to **"What this is not"**.
 
 **Say, as the last line:**
-> "I audited it myself and published the findings — twenty-four defects — along
+> "I audited it myself and published the findings — twenty-five defects — along
 > with a section on everything a self-audit cannot cover. It's fourteen days
 > old, it's testnet, and it's one person. I'd rather you see the real numbers."
 

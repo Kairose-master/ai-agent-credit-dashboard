@@ -88,4 +88,34 @@ describe('callbackSecretMatches — the per-agent key gate', () => {
   it('open dev mode (no secret configured) accepts anything', () => {
     expect(callbackSecretMatches({ required: false }, null)).toBe(true)
   })
+
+  // The comparison is constant-time via SHA-256 digests. timingSafeEqual THROWS
+  // on unequal buffer lengths, so the cases that would have thrown had the raw
+  // strings been passed are the ones worth pinning: a guess is any length, and
+  // alsoAccept is a second key of unrelated length.
+  it('rejects guesses of every length without throwing', () => {
+    const auth = { required: true as const, secret: 'per-agent' }
+    for (const guess of ['', 'x', 'per-agen', 'per-agentt', 'x'.repeat(4096)]) {
+      expect(callbackSecretMatches(auth, guess)).toBe(false)
+    }
+  })
+
+  it('compares against a legacy secret of a different length without throwing', () => {
+    const auth = { required: true as const, secret: 'a'.repeat(64), alsoAccept: 'short' }
+    expect(callbackSecretMatches(auth, 'short')).toBe(true)
+    expect(callbackSecretMatches(auth, 'a'.repeat(64))).toBe(true)
+    expect(callbackSecretMatches(auth, 'a'.repeat(63))).toBe(false)
+  })
+
+  it('still forgives the trailing newline a pasted CI secret carries', () => {
+    const auth = { required: true as const, secret: 'per-agent' }
+    expect(callbackSecretMatches(auth, ' per-agent\n')).toBe(true)
+  })
+
+  it('does not accept an empty presented secret against an empty configured one', () => {
+    // resolveCallbackAuth can hand back secret:'' if RUNTIME_SHARED_SECRET is
+    // set to a blank string; digest equality would say those match, and a
+    // callback presenting nothing would authenticate.
+    expect(callbackSecretMatches({ required: true, secret: '' }, '')).toBe(false)
+  })
 })

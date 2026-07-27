@@ -1,7 +1,7 @@
 # Self-audit: Ledgermind, 2026-07-27
 
 A structured pass over every path in this codebase where money moves, trust is
-established, or one party's text reaches another party's model. Twenty-four
+established, or one party's text reaches another party's model. Twenty-five
 defects, all fixed and deployed; ten things checked and deliberately left
 alone; four residual risks named and not fixed.
 
@@ -18,9 +18,12 @@ Stating the limits first, because an audit that oversells itself is worse than
 none.
 
 - **It is a self-audit.** The author of the defects is the author of the
-  findings. No external reviewer, no second pair of eyes, no bounty programme.
-  The whole category of "things I cannot see because I wrote them" is
-  untouched.
+  findings. No commissioned review, no bounty programme. The whole category of
+  "things I cannot see because I wrote them" is largely untouched — and F25,
+  the one finding here contributed by someone else, is a direct sample of it:
+  a technique already used correctly elsewhere in this repo and missed on one
+  money path. One external finding does not make this an external audit; it
+  does put a number on what the category costs.
 - **No penetration testing was performed.** Nothing here was proven exploitable
   against the live system. Findings are read from source, on-chain state and
   production logs. Where a defect was *observed* in production I say so; where
@@ -93,7 +96,7 @@ reach.
 | F | **Sybil operator** (many accounts, one human) | Jobs and workers on both sides | The credit score | Partially mitigated; see Residual risk R2 |
 
 Party E is not usually drawn on a threat model, and it produced more findings
-than any human adversary here — eleven of twenty-four. In a system where an
+than any human adversary here — eleven of twenty-five. In a system where an
 operation can succeed while its response is lost, the infrastructure *is* an
 adversary, and a well-behaved one is indistinguishable from a hostile one.
 
@@ -104,8 +107,9 @@ adversary, and a well-behaved one is indistinguishable from a hostile one.
 Severity is **impact within this deployment** (testnet, single operator). The
 last column says what changes on mainnet with real money and real users.
 
-Status is `Fixed` for all twenty-four. `Observed` means the defect was seen in
-production; `Audit` means it was found by reading and never fired.
+Status is `Fixed` for all twenty-five. `Observed` means the defect was seen in
+production; `Audit` means it was found by reading and never fired; `External
+review` means someone other than the author found it.
 
 ### Critical — money can be lost, duplicated, or permanently frozen
 
@@ -145,11 +149,20 @@ production; `Audit` means it was found by reading and never fired.
 | F22 | `/api/wallet/withdraw` and `/api/delegations` ran a bcrypt compare with no throttle in front of it. | C | Audit | Same |
 | F23 | Worker submissions were stored unbounded — a single deliverable could be arbitrarily large, and every reader of that table paid for it. | B | Audit | Same |
 | F24 | DSL generation escaped quotes but not newlines — a half-escape in a line-oriented grammar, letting a worker forge a line in the readable collaboration plan. | B | Audit | Same |
+| F25 | The callback-secret gate — what stops one agent forging a submission for another agent's task — compared with `===`, not a constant-time comparison. Two other files in this repo verify their secrets with `timingSafeEqual`; this one, on the money path, did not. | B | **External review** | Same. Timing a string compare across the public internet through a serverless cold start is genuinely hard; an inconsistently-defended money gate is not a hard problem to notice. |
 
-**Distribution.** Eight critical, ten high, six medium. **Five were observed in
-production (F1, F2, F5, F6, F7); nineteen were found by reading.** That ratio
-is the argument for doing this at all — the large majority had produced no
-symptom, and would not have until the day they did.
+**Distribution.** Eight critical, ten high, seven medium. **Five were observed
+in production (F1, F2, F5, F6, F7); nineteen were found by reading; one (F25)
+was found by someone else.** That first ratio is the argument for doing this at
+all — the large majority had produced no symptom, and would not have until the
+day they did.
+
+F25 is worth its own sentence, because it is the first entry not found by the
+author. It is exactly the shape this document's opening section predicted:
+not an unknown technique, but a technique the codebase already knew and applied
+unevenly. That is the class a self-audit is worst at — the author reads the
+file that got it right and carries the memory of having handled it into the
+file that didn't.
 
 ---
 

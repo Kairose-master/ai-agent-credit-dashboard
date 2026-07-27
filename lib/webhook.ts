@@ -14,7 +14,7 @@ import { db } from '@/lib/db'
 import { agent } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { encryptSecret, decryptSecret } from '@/lib/crypto'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 
 export function generateWebhookSecret(): string {
   return randomBytes(32).toString('hex')
@@ -27,9 +27,41 @@ export type CallbackAuth =
   | { required: true; secret: string } // must match exactly
   | { required: true; secret: string; alsoAccept: string } // transition: per-agent key preferred, legacy shared secret tolerated
 
+/**
+ * Compare two secrets without letting the comparison's duration describe them.
+ *
+ * `timingSafeEqual` cannot be handed the raw strings: it throws when the two
+ * buffers differ in length, and here they routinely do — a wrong guess is any
+ * length at all, and the `alsoAccept` branch compares against a second key of
+ * unrelated length. Length-checking first would reintroduce the leak it exists
+ * to remove, since the early return is itself a timing signal.
+ *
+ * Digesting both sides first fixes both problems at once: SHA-256 output is
+ * always 32 bytes, so the comparison never throws and never varies, and the
+ * digest of a wrong guess reveals nothing about the right answer.
+ */
+function secretsEqual(a: string, b: string): boolean {
+  // Digest equality would happily agree that '' matches ''. A configured
+  // secret is never legitimately empty, so an empty one on either side is a
+  // misconfiguration, and the only safe reading of a misconfigured gate is
+  // "closed". Branching here leaks nothing: an attacker knows what they sent,
+  // and "the server has no secret set" is not the secret.
+  if (a.length === 0 || b.length === 0) return false
+  const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest()
+  return timingSafeEqual(digest(a), digest(b))
+}
+
 /** Does a presented callback secret satisfy this agent's auth? Constant
  *  shape for every runtime type — call sites stop caring which kind of
- *  worker produced the callback. */
+ *  worker produced the callback.
+ *
+ *  This is the gate that stops one agent forging a callback for another
+ *  agent's task — a settled job pays out on the strength of it — so the
+ *  comparison is constant-time, the same way `lib/github-oauth.ts` and
+ *  `lib/github-app.ts` verify their signatures. Whether the timing of a `===`
+ *  is measurable across the public internet through a serverless cold start is
+ *  genuinely doubtful; a money gate that handles secrets differently from the
+ *  two other files in the same repo that handle secrets is not. */
 export function callbackSecretMatches(auth: CallbackAuth, presented: string | null): boolean {
   if (!auth.required) return true
   if (presented === null) return false
@@ -37,8 +69,11 @@ export function callbackSecretMatches(auth: CallbackAuth, presented: string | nu
   // whitespace on a presented value is always a copy-paste artifact (a
   // trailing newline pasted into a CI secret field) — never a different key.
   const p = presented.trim()
-  if (p === auth.secret) return true
-  return 'alsoAccept' in auth && p === auth.alsoAccept
+  // Bitwise OR, not `||`: short-circuiting would make "matched the per-agent
+  // key" measurably faster than "matched the legacy shared one".
+  const primary = secretsEqual(p, auth.secret)
+  const legacy = 'alsoAccept' in auth && secretsEqual(p, auth.alsoAccept)
+  return Boolean(Number(primary) | Number(legacy))
 }
 
 /** What an incoming callback for this agent's task must present to be
