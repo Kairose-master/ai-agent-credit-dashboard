@@ -1,0 +1,270 @@
+# v2 — the contract rewrite, and where it should live
+
+*Plan, 2026-07-27. Written before any of it is built, so it can be argued with
+rather than justified afterwards. Reads on from `docs/product-thesis.md`
+(what the product actually claims) and `docs/security-audit.md` §Residual risk.*
+
+---
+
+## Why a second deployment at all
+
+Three contract changes are wanted, and all three are impossible to ship into
+the running system without a migration that costs more than the changes:
+
+1. **An exit from `Accepted`** (audit R1) — the contract has no timeout, so a
+   worker who claims and never delivers freezes the requester's funds forever.
+   Recovery today is a platform-side walk through `submitWork → raiseDispute →
+   resolveDispute(false)` using operator authority over every agent's smart
+   account. It works and it is the wrong answer.
+2. **An assignable escrow release** — required by the narrow product
+   (`product-thesis.md`). Today `lib/reputation-lending.ts` is explicitly
+   *undercollateralized* and nothing attaches to the parent bounty: a lender can
+   **see** the collateral and cannot **seize** it.
+3. **A participation bond** — see §Bond below. The posting fee is a toll; a bond
+   is capital at risk. Different sign, different deterrent.
+
+The migration cost is not the deploy. `lib/db/schema.ts:369` stores
+`onchainJobId` as a bare `integer` with **no contract address beside it**. A new
+LaborMarket restarts its counter, so the moment `ONCHAIN_*` points elsewhere,
+every stored id is ambiguous — old #245 and new #245 are different jobs and the
+database cannot tell them apart. Add 11 live jobs holding $50 of escrow in the
+old contract that the new one cannot see, and the work is "deploy + schema
+change + walk out and repost every live job", not "deploy".
+
+**A fresh deployment removes the migration by not having one.** That is the
+whole appeal, and it is also the trap.
+
+---
+
+## The trap, stated first
+
+The asset of this project is the **ledger** — the record of graded facts. Not
+the score (an editable policy), not the code (small), not the UI.
+
+A fork with a fresh database has **zero history**. Every agent at score 0, no
+settled jobs, no counterparty graph. It relaunches the thing whose entire claim
+is "fourteen days of real behaviour" with zero days of real behaviour.
+
+So the fork is cheapest exactly where it is worthless: it avoids the migration
+by discarding the thing worth migrating.
+
+### Therefore
+
+**v2 is not a replacement. v1 keeps running.** It keeps accumulating the asset
+while v2 exists to get the contracts right. Folding back, or promoting v2, is a
+later decision made on evidence rather than now.
+
+### And this makes the fork worth more than it costs
+
+v2 does not need to *inherit* v1's history. It can *reference* it. Work proofs
+are signed (`lib/attestation.ts`, `lib/work-proof-store.ts`): content hash,
+grader, verdict, signature.
+
+> If v2 can accept v1's signed record **without trusting v1's database**, the
+> verifiability claim in `product-thesis.md` is true. If it cannot, that claim
+> was marketing.
+
+The third party who "can check the provenance without trusting me" is, in this
+case, **me**. If I cannot do it with full access to both sides, nobody can. The
+fork is the first real test of the central thesis, and a passing test is
+demonstrable on camera in about fifteen seconds.
+
+**This is a v2 requirement, not a nice-to-have:** import v1 proofs by signature
+verification only, with v1's database treated as untrusted input.
+
+---
+
+## Which chain
+
+The temptation is "a cheap mainnet". Cheap is the least important of the four
+requirements.
+
+| Requirement | Why it is not optional |
+|---|---|
+| **ERC-4337 bundler + paymaster** | The entire stack is gas-sponsored smart accounts (`lib/onchain/`). No bundler, no product — not a degraded product, none. |
+| **Real USDC with real liquidity** | The *only* reason to leave testnet is that the money means something. Deploying a token I can mint gives mainnet's risk with testnet's economics — strictly worse than staying on Sepolia. |
+| **Mainnet actually live** | — |
+| Low fees | Matters, but every L2 candidate clears this. |
+
+**Default recommendation: Base.** Same OP Stack (so porting cost is identical to
+any other OP chain), native USDC, mature 4337 infrastructure, fees low enough
+that a $15 bounty is not absurd. It clears all four today.
+
+**GIWA:** an OP Stack L2 built by Dunamu (Upbit) with the Optimism Foundation,
+testnet live and busy, **mainnet expected but with no confirmed date**, primary
+sequencer operated by Upbit. Its advantage is not technical — it is a Korean
+ecosystem where a Korean solo builder is visible, which is a real and
+non-trivial reason. But an unlaunched mainnet is not a deployment target, and
+OP-Stack-to-OP-Stack redeployment is cheap, so this is a *later switch*, not a
+now decision.
+
+One thing to write down rather than let a reviewer find: a project whose thesis
+is "remove the trusted third party with reversal power" deploying onto a chain
+with a single exchange-operated sequencer has a tension in it. True of most L2s
+in 2026, and still better said than discovered.
+
+---
+
+## Mainnet is gated, and the gate is already written
+
+From `security-audit.md`, unchanged:
+
+> R1 is "the single largest item standing between testnet and real money, and
+> it is where an external audit should start."
+
+So the sequence is forced:
+
+```
+fork → new contracts (R1 closed, assignable release, bond)
+     → run on TESTNET long enough to observe
+     → external review of the contract
+     → mainnet
+```
+
+"Forked, therefore mainnet" is not available. The fork removes a migration
+problem; it does not remove the reason the contract is not trusted with real
+money — which is that it is unaudited and written by one person in a fortnight.
+
+---
+
+## Contract changes
+
+### 1. Exit from `Accepted` — `reclaimJob(uint256 jobId)`
+
+An on-chain deadline set at accept time. After it passes with no `submitWork`,
+the requester (or anyone, permissionlessly) may reclaim, refunding escrow and
+returning the job to `Open` or `Refunded`.
+
+Requirements learned from v1's incidents:
+
+- **Permissionless if possible.** Every recovery path that requires the operator
+  is a path where the operator is the availability risk. `docs/failure-modes.md`
+  §6 is exactly that story at the sweep layer.
+- **The deadline must be readable on-chain**, so the off-chain warner
+  (`lib/stale-claim.ts`, which now warns before reclaiming) derives from the
+  contract rather than keeping a second opinion. Two clocks disagreeing is how
+  §1 happened.
+- **A delivery that lands late must not double-pay.** This is the question put
+  to Olas in [mech#470](https://github.com/valory-xyz/mech/issues/470): if
+  reclaim fires at T and the original `submitWork` lands at T+ε, the contract
+  must reject one of them, and the rejection must be the *later* one by block
+  order, not by whoever the platform noticed first.
+
+### 2. Assignable escrow release — the lien
+
+The product needs a lender to be paid **before** the prime, out of the same
+release, without trusting the prime to forward it.
+
+Sketch:
+
+```
+assignPayee(uint256 jobId, address payee)   // callable by the worker/prime only
+```
+
+with three properties that are the entire point:
+
+- **Irrevocable once set.** A revocable assignment is not collateral; it is a
+  promise, and the prime already had one of those. This is the single property
+  that turns "observable" into "perfected".
+- **Set before submission, not after.** An assignment made after delivery is a
+  payment instruction, not security — the lender needs it at the moment it
+  advances.
+- **The assignment is visible on-chain**, so a second lender can see the first
+  lender's claim. Otherwise the same collateral is borrowed against twice, which
+  is the oldest fraud in secured lending.
+
+Open question, not solved: **partial assignment.** A prime that borrows 50% of
+collateral needs the release split between lender and prime. Splitting on-chain
+is simple; deciding what happens when the release amount differs from the
+expected bounty (a price raise, a partial refund) is not. v2 should probably
+support a single full-or-nothing payee first and treat partial assignment as a
+later version, because a wrong split is a money bug and money bugs are what this
+whole document is downstream of.
+
+### 3. Participation bond — capital at risk, not capital spent
+
+The 2% posting fee is a **toll**: paid, gone, and it prices attack linearly. A
+farm of N accomplices costs N fees and nothing more.
+
+A bond is different in sign. Visa's actual Sybil defence is not cryptography —
+it is that a member must be a bank with capital requirements and posted
+settlement collateral. Membership is expensive to hold, not merely to buy.
+
+Applied here: participation requires a bond, slashable on published conditions.
+That makes identity *cost to maintain* rather than cost to create, which is the
+only local answer to the ring topology that `docs/self-sybil-attack.md` leaves
+open — a ring must keep N bonds funded simultaneously, forever, instead of
+paying 2N fees once.
+
+**The unsolved part, and it is the important part: who slashes.** If the
+operator decides, the whole thing collapses back into discretionary reversal
+power — the exact pattern this document is trying to remove, and the reason
+chargebacks are on the "do not build" list. Slashing has to fire on conditions
+that are verifiable on-chain: a resolved dispute, an expired deadline, a
+reclaim. Anything requiring judgment cannot be a slashing trigger in v2.
+
+Until that is answered, the bond is designed and not built. **Shipping a
+slashable bond with an operator-controlled slash would be strictly worse than
+the current fee**, because it would look like a trustless mechanism and be a
+discretionary one.
+
+### 4. Schema, not contract — store the contract address
+
+`onchainJobId` becomes `(contractAddress, jobId)` everywhere. This is the change
+that makes any *future* redeploy cheap, and not making it now guarantees this
+same document gets written again.
+
+---
+
+## Operational cost, which is not zero
+
+Two Vercel projects, two Neon databases, two sets of secrets, two deploy
+pipelines, two sets of background sweeps — for one operator. Today's defect hunt
+found several bugs caused by concurrency *within a single deployment*
+(`failure-modes.md` §13, §14). Doubling the deployments doubles the surface on
+which "which instance did that" is a question.
+
+Mitigations that should be decided before the fork, not after:
+
+- v2 starts with **the sweeps that v1 needed and none of the features it did
+  not** — no Minecraft plugin, no desktop miner lane, no governance. Port those
+  back only if v2 becomes primary.
+- Secrets are **separate values**, not copies. A shared `CRON_SECRET` across two
+  deployments means rotating one rotates neither properly. (`CRON_SECRET` is
+  already pending rotation — audit R4.)
+- The two deployments must be **visibly distinguishable in the UI**. A screenshot
+  that could be either one is a support burden and, in a funding conversation, a
+  credibility burden.
+
+---
+
+## Sequence
+
+Nothing here should start before the demo video is recorded: v1 is the thing
+with a track record, and a half-migrated system on camera is worse than no
+video.
+
+1. Record the demo against v1. *(blocking)*
+2. Fork repo → new Vercel project + new Neon DB, still **Sepolia**.
+3. Schema: `(contractAddress, jobId)` everywhere. Cheap now, expensive later.
+4. Contracts: `reclaimJob` + `assignPayee`. Bond deferred pending the slashing
+   question.
+5. **Proof import from v1 by signature only, v1's DB treated as untrusted.**
+   This is the thesis test; if it fails, stop and fix the thesis, not the code.
+6. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
+7. Only then: external contract review, then a mainnet decision, then a chain.
+
+---
+
+## What would make me abandon this plan
+
+Written down now so it is not rationalised away later:
+
+- **If step 5 fails** — if v1's signed proofs cannot be verified by v2 without
+  trusting v1's database — then the portability/verifiability claim is false,
+  and the right response is to fix the attestation design, not to import the
+  rows directly and call it done.
+- **If v2's board is as empty as v1's.** v1's demand is a house faucet I fund
+  myself (`product-thesis.md` §demand). A second empty market is not progress;
+  it is the same market with more infrastructure, and the honest conclusion
+  would be that the contract work was never the bottleneck.
