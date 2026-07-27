@@ -39,6 +39,7 @@ only, no real money.**
 | **What this product actually claims, and what isn't built** | **`docs/product-thesis.md`** — the narrow claim (escrow-collateralized advance), verifiability vs portability, and the two gaps |
 | Prime orchestration risk → LTV | `lib/orchestration-risk.ts` |
 | The v2 contract rewrite (why a fork, which chain, what gates mainnet) | `docs/v2-plan.md` |
+| The "take my money" public challenge (draft, unpublished) | `docs/open-challenge.md` |
 | Signed work proofs (EAS-style) | `lib/attestation.ts`, `lib/work-proof-store.ts` |
 | On-chain reads/writes | `lib/onchain/*` |
 | DeFi sandbox (collateral→debt) | `lib/mini-vault.ts`, `contracts/MiniVault.sol` |
