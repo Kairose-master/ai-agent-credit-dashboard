@@ -1024,9 +1024,62 @@ export async function tickDelegation(
       })
       .where(eq(delegation.id, row.id))
     const integFailed = integration?.failed ? ' (integration check FAILED)' : ''
-    await logPlatformEvent('DELEGATION_COMPLETED', `Delegated task finished — ${workSubtasks.filter((s) => !s.failed).length}/${workSubtasks.length} parts delivered${integFailed}`)
+    const delivered = workSubtasks.filter((s) => !s.failed).length
+    await logPlatformEvent('DELEGATION_COMPLETED', `Delegated task finished — ${delivered}/${workSubtasks.length} parts delivered${integFailed}`)
+    await recordOrchestrationOutcome(row, delivered, workSubtasks.length, Boolean(integration?.failed))
   } else if (changed) {
     await db.update(delegation).set({ subtasks, updatedAt: new Date() }).where(eq(delegation.id, row.id))
+  }
+}
+
+/**
+ * Write the prime's orchestration outcome to the credit ledger.
+ *
+ * Until now a finished delegation produced only a platform FEED entry — a line
+ * in a UI list, invisible to scoring. That left the prime's ability to
+ * coordinate N subcontractors to a finished whole entirely unmeasured, which
+ * is the exact risk an escrow-collateralized advance carries (see
+ * docs/product-thesis.md and lib/orchestration-risk.ts).
+ *
+ * Success is stricter than the row's own `status`: 'completed' means every
+ * subtask reached SOME terminal state, delivered or failed. For a lender,
+ * eight parts out of ten means the parent escrow did not release, which is the
+ * same outcome as zero.
+ *
+ * Never throws. This runs at the end of a tick that has already moved real
+ * money; a bookkeeping failure must not roll that back or stop the delegation
+ * from being marked done. It is logged instead, because the alternative — a
+ * silently missing risk record — is the shape of failure-modes §8.
+ */
+async function recordOrchestrationOutcome(
+  row: { id: string; primeAgentId: string; budgetUsd: string | number },
+  delivered: number,
+  total: number,
+  integrationFailed: boolean,
+): Promise<void> {
+  try {
+    const { delegationSucceeded, DELEGATION_COMPLETED, DELEGATION_FAILED } = await import('@/lib/orchestration-risk')
+    const { agentEvent } = await import('@/lib/db/schema')
+    const budgetUsd = Number(row.budgetUsd)
+    const success = delegationSucceeded({ delivered, total, integrationFailed })
+    await db.insert(agentEvent).values({
+      id: nanoid(),
+      agentId: row.primeAgentId,
+      taskId: `delegation:${row.id}`,
+      eventType: success ? DELEGATION_COMPLETED : DELEGATION_FAILED,
+      success,
+      executionTime: 0,
+      tokenCost: 0,
+      detail: {
+        delegationId: row.id,
+        delivered,
+        total,
+        integrationFailed,
+        budgetUsd: Number.isFinite(budgetUsd) ? budgetUsd : 0,
+      },
+    })
+  } catch (error) {
+    console.error('[delegation] failed to record orchestration outcome for', row.id, error)
   }
 }
 
