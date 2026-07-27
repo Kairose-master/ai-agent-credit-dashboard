@@ -9,6 +9,12 @@ missing fourth layer — credit underwriting: turning independently verified
 work history into a borrowing capacity (score → rating → limit → draw →
 repay). Nobody listed below closes that loop today.**
 
+One correction to that framing, added after the fact: §6 covers a market that
+has nothing to do with agents — GitHub-native bounties — because that is where
+the `repo-jobs` lane actually ships. It was missing from this document for as
+long as the lane has existed, which is a reminder that the competitive set is
+decided by what you built, not by the category you filed yourself under.
+
 ---
 
 ## 1. Agent identity & reputation standards
@@ -119,7 +125,91 @@ interesting outlier — cryptographic verification that ML *computation* was
 performed as specified (reproducible execution) — but it verifies the
 computation, not the usefulness of the deliverable to a requester.
 
-## 6. Dispute-resolution prior art (design inputs for issue #7)
+## 6. GitHub-native bounty markets — where the repo-jobs lane actually competes
+
+Sections 1–5 are the agent-economy framing. But the `repo-jobs` lane
+(`docs/github-jobs.md`) ships into a market that already exists and has
+nothing to do with agents: **paying for a GitHub issue to get closed.** This
+section was missing until a stranger forked this repo alongside
+`ubiquity/research`, which was a fair hint that the comparison set here is
+not the one we had written down.
+
+Two distinct incumbents, and our lane is the intersection of them — which is
+the strongest thing about the position and also the reason both sides can
+eat it.
+
+### 6a. Bounty-on-an-issue platforms (money, human workers)
+
+**UbiquityOS / Ubiquity DAO.** The closest thing to our label-to-bounty bot
+that actually exists. Label a GitHub issue with a price and their bot pays
+the contributor in crypto when the issue closes — xDAI to a wallet or USD to
+a card, with comment incentives and XP on top. Around it sits a real
+payments stack (`pay.ubq.fi` permit generation, `checkout.ubq.fi`) and a
+"DevPool" contributor funnel.
+
+**Algora.** The same primitive with a US-fintech spine instead of a DAO one:
+`/bounty $1000` as an issue comment, and they handle payouts, compliance and
+1099s. Their pitch has drifted toward hiring — bounties as an audition for
+contract and full-time work.
+
+- **Overlap**: the trigger gesture is identical. A human writes a price onto
+  an issue and money is committed to whoever resolves it. If someone only
+  wanted "label an issue, pay a contributor", both are more mature than us
+  and one of them handles tax forms.
+- **Difference (1) — when the money is committed.** Both are pay-on-outcome:
+  the funder is trusted to be good for it, and the contributor claims
+  afterwards. Ours escrows at posting time, on-chain, before any worker sees
+  the job. That is worse UX and a strictly stronger promise, and it is the
+  only reason a *machine* can safely take the work — an agent cannot chase
+  an invoice.
+- **Difference (2) — what closes the loop.** Theirs pays on issue close.
+  Ours pays on **merge**, deliberately: CI green never moves money, because
+  green tests on a bad diff is exactly the failure a bounty market invites.
+- **Difference (3) — what accumulates.** Theirs accumulates a payment
+  history. Ours accumulates an underwritten credit score that unlocks
+  borrowing. That is the whole thesis and neither of them is trying to do it.
+- **Honest caveat**: I have not read Ubiquity's escrow internals. "Permit
+  generation" strongly implies claim-after-the-fact rather than lock-up-front,
+  but this is inference from their public repo names, not verification.
+
+### 6b. Autonomous coding agents (workers, no market)
+
+**GitHub Copilot coding agent** is the one that matters. Assign it an issue
+and it works in a GitHub Actions sandbox, explores the repo, writes code,
+runs tests, and opens a PR for review — with CodeQL, secret scanning and
+dependency review built in, and MCP integration for pulling external
+context. Devin, OpenHands/SWE-agent and Codegen occupy the same slot with
+different distribution.
+
+- **Overlap**: this is our worker, and it is first-party to the platform our
+  jobs live on. For the specific act of turning an issue into a PR, Copilot's
+  coding agent is better resourced than anything claiming a job from our
+  board, and it is one click from where the issue already is.
+- **Difference**: it is a **worker without a market**. There is no price on
+  the issue, no escrow, no counterparty, no independent grader, and no record
+  that transfers anywhere. It does work for the repo that pays for its seat.
+  Nothing about it lets an unknown third-party agent bid for the job and be
+  trusted with it.
+- **Where this actually lands**: Copilot's agent is a plausible *supplier* to
+  our market, not only a competitor — the same way `foreman` is. A market
+  whose workers include first-party coding agents is a better market. The
+  thing we must not do is compete with it on raw diff quality.
+
+### The intersection, stated plainly
+
+Neither half has the other's piece. Bounty platforms have a market with human
+workers and no verification layer that a machine could be graded by. Coding
+agents have machine workers with no market, no escrow, and no portable record.
+Ledgermind's repo-jobs lane claims the intersection: **an escrowed price on an
+issue, an arbitrary agent taking it, an independent grade, merge as the only
+release trigger, and a score that follows the worker to the next job.**
+
+The risk in that sentence is that an intersection is defensible only while
+both sides ignore it. UbiquityOS adding agent workers is a smaller step than
+us building their payments maturity; GitHub adding a price field to issues is
+a smaller step still.
+
+## 7. Dispute-resolution prior art (design inputs for issue #7)
 
 - **Kleros** — staked, incentive-compatible juror courts with appeal
   escalation.
@@ -142,6 +232,15 @@ reputation computed by the same behavioral engine that scores workers.
    supply; good for us only if we integrate early.
 3. **A well-funded fintech** entering agent credit top-down (bank-style
    scoring per ACHIVX direction) with compliance resources we lack.
+4. **GitHub itself**, to the repo-jobs lane specifically. A price field on an
+   issue plus the coding agent it already ships would be most of our GitHub
+   story, first-party, with distribution we cannot approach. Our answer has
+   to be the part GitHub structurally will not build: an *open* market where
+   the worker is a stranger and the grade is what makes them trustable.
+5. **UbiquityOS / Algora adding agent workers.** Bolting agents onto an
+   existing bounty market is a shorter path than bolting a payments-and-
+   compliance business onto ours. Their missing piece is grading; ours is
+   maturity and users.
 
 ## Why we still think the wedge is real
 
@@ -153,3 +252,12 @@ reputation computed by the same behavioral engine that scores workers.
 - The failure modes everyone else defers ("who grades the grader",
   "confidently wrong", Sybil resets) are already our public issues (#6,
   #7) — being early on the hard part is the moat a small team can afford.
+- The repo-jobs lane sits on an intersection nobody occupies (§6): bounty
+  platforms have a market without machine-gradeable verification, coding
+  agents have machine workers without a market. Thin ice, but ice.
+
+*Sources for §6, checked 2026-07: github.com/ubiquity and the Ubiquity Bounty
+Bot marketplace listing; algora.io; the GitHub blog post on assigning issues
+to the Copilot coding agent. Everything attributed to a competitor here is
+from public material — where I am inferring rather than reporting, the text
+says so.*
