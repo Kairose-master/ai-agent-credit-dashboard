@@ -495,6 +495,82 @@ that same atomic path, so over-ticking is genuinely harmless there.
 
 ---
 
+## 14. The check and the act, with a slow operation in between
+
+**Symptom.** None observed. Found by asking what happens when an external
+system **redelivers** while we are still working on the first delivery.
+
+**Root cause.** The bounty-label webhook checks "is a job already live for
+this issue?" and then escrows. Escrowing a repo job is a **~30 second**
+ERC-4337 round trip. GitHub allows a webhook **ten seconds** and redelivers
+when it doesn't hear back. So:
+
+```
+t=0    delivery 1: check → nothing live → start posting
+t=10   GitHub gives up waiting, redelivers
+t=10   delivery 2: check → still nothing live (the post hasn't landed)
+t=10   delivery 2: start posting
+t=30   two bounties escrowed for one issue
+```
+
+Neither check is wrong. They both ran inside one gap. **A fresher chain read
+would not have helped** — there was nothing to read yet, which is why this is
+a different bug from §12 even though the symptom is identical.
+
+**Fix.** A cross-instance mutex on the issue (`bounty-issue:<repo>#<n>`,
+120s) taken *before* the check and held across the post. Two subtleties that
+matter more than the lock itself:
+
+- **Release on every path that does not escrow.** Most of the early exits are
+  "you haven't linked your GitHub account yet" — and a user who reads that
+  fixes it and re-labels within seconds, which a two-minute lock would
+  silently swallow. `releaseOpsLease` exists for that; a recurring sweep
+  should still just let its lease expire, since the expiry *is* the interval.
+- **Do not release on a pending post.** The escrow was accepted by the
+  bundler and probably lands. Releasing there is precisely how one label
+  becomes two bounties.
+
+**And the same shape, paid for.** `POST /api/jobs/external` returned 500 when
+its escrow was merely unconfirmed — but the caller's retry carries a **new
+x402 payment**, so they are charged twice and the house escrows $50 for one
+job. It answers 202 with an explicit "do NOT retry" now.
+
+---
+
+## 15. A paywall is a price, not a rate limit
+
+**Symptom.** None observed. Found while reading §14's endpoint.
+
+**Root cause.** `POST /api/jobs/external` is behind an x402 paywall, which
+felt like protection — and I had written it as protection ("without the
+paywall this endpoint would be a free-spam hole"). But the endpoint's whole
+purpose is that **$0.10 buys a $25 house-escrowed bounty**. The economics run
+backwards: spending more is exactly what an abuser wants to do, and there was
+no cap of any kind.
+
+On testnet the mUSDC is free to mint, so the escrow isn't the real loss. A
+few dollars of spend actually buys:
+
+- a sponsored UserOperation per post, against a **real** paymaster budget;
+- a house wallet drained to zero, so the legitimate dogfood postings that
+  share it start failing with `USDC: balance`;
+- a board of junk that real workers must dig through — the one asset a labor
+  market cannot rebuild quickly.
+
+**Fix.** Two buckets in `lib/external-post-limits.ts`, because they fail
+differently: **5 per payer per day** stops one client monopolising the board,
+**40 globally per day** keeps the house solvent no matter how many payers
+turn up. Both reset at 00:00 UTC, the boundary the faucet cap already uses.
+Payers whose address can't be read from the x402 header share a single
+`unattributed` bucket — an unattributable post is the last one that should
+get its own allowance — and the spec row is written with that same key so it
+counts.
+
+The refusal is **429, not 402**: paying again would not help, and saying so
+is the difference between a client backing off and a client retrying forever.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -535,7 +611,12 @@ Keep these true, and this class of bug stays dead:
    module-level `lastRunAt` throttles one lambda, not a fleet. Anything that
    moves money takes a cross-instance lease, and uniqueness that matters is
    enforced by the database, not by a SELECT before an INSERT (§13).
-11. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+11. **A check only holds as long as nothing slow happens after it.** If the
+   act takes thirty seconds and the caller redelivers in ten, hold a lock
+   across both — and hand it back on the paths that decided not to act (§14).
+12. **A price is not a rate limit.** Especially when paying buys something
+   worth more than the payment (§15).
+13. **Ask for the rows and columns you need.** A read with no `WHERE` and no
    column list is a bug that has not surfaced yet — it silently grows, and it
    breaks the whole table's readers the day a column ships ahead of its
    migration (§11).

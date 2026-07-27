@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { agent, jobSpec } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, count, eq, gte, isNotNull } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { logPlatformEvent } from '@/lib/platform-feed'
 
@@ -85,9 +85,43 @@ export async function POST(request: Request) {
     return Response.json({ error: 'description or test_code too long' }, { status: 400 })
   }
 
-  const [house] = await db.select().from(agent).where(eq(agent.id, houseAgentId))
+  const [house] = await db
+    .select({ smartAccountAddress: agent.smartAccountAddress })
+    .from(agent)
+    .where(eq(agent.id, houseAgentId))
   if (!house?.smartAccountAddress) {
     return Response.json({ error: 'House requester agent is not provisioned' }, { status: 503 })
+  }
+
+  // The paywall is a PRICE, not a rate limit — and here the price is inverted,
+  // because $0.10 buys $25 of house-escrowed bounty. Cap it. See
+  // lib/external-post-limits.ts for what a few dollars of spend actually buys.
+  const externalPoster = payerFromHeader(request)
+  const {
+    externalPostAllowed,
+    utcDayStart,
+    UNATTRIBUTED_PAYER,
+  } = await import('@/lib/external-post-limits')
+  const dayStart = utcDayStart()
+  const payerKey = externalPoster ?? UNATTRIBUTED_PAYER
+  const [[payerRow], [globalRow]] = await Promise.all([
+    db
+      .select({ n: count() })
+      .from(jobSpec)
+      .where(and(eq(jobSpec.externalPoster, payerKey), gte(jobSpec.createdAt, dayStart))),
+    db
+      .select({ n: count() })
+      .from(jobSpec)
+      .where(and(isNotNull(jobSpec.externalPoster), gte(jobSpec.createdAt, dayStart))),
+  ])
+  const allowance = externalPostAllowed({
+    payerToday: Number(payerRow?.n ?? 0),
+    globalToday: Number(globalRow?.n ?? 0),
+  })
+  if (!allowance.ok) {
+    // 429, not 402: paying again would not help, and saying so plainly is the
+    // difference between a client backing off and a client retrying forever.
+    return Response.json({ error: allowance.reason, scope: allowance.scope, docs: DOCS_URL }, { status: 429 })
   }
 
   try {
@@ -97,7 +131,6 @@ export async function POST(request: Request) {
     }
 
     const { keccak256, toHex } = await import('viem')
-    const externalPoster = payerFromHeader(request)
     const specHash = keccak256(
       toHex(JSON.stringify({ title, agent: houseAgentId, nonce: nanoid() })),
     )
@@ -114,7 +147,9 @@ export async function POST(request: Request) {
       requesterAgentId: houseAgentId,
       testCode: testCode || null,
       deliverableKind: inferDeliverableKind(title, description, acceptanceCriteria),
-      externalPoster,
+      // Always attributed, even when the header could not be parsed — an
+      // unattributable post still has to count against a bucket.
+      externalPoster: payerKey,
       autoApprove: true, // the house agent has no owner who'll ever click Approve
     })
 
@@ -135,6 +170,23 @@ export async function POST(request: Request) {
       watch: 'https://ai-agent-credit-dashboard.vercel.app/guest',
     })
   } catch (error) {
+    // A pending escrow was accepted by the bundler and usually lands. A 500
+    // tells the caller to retry, and their retry carries a NEW x402 payment,
+    // so they would be charged twice and the house would escrow $50 for one
+    // job. 202 with an explicit "do not retry" instead.
+    const { isUserOpPending } = await import('@/lib/onchain/account')
+    if (isUserOpPending(error)) {
+      console.warn('[jobs/external] escrow pending confirmation — answering 202')
+      return Response.json(
+        {
+          status: 'pending',
+          bounty_usd: FIXED_BOUNTY_USD,
+          message: 'Escrow submitted and confirming on-chain. Do NOT retry — a retry posts a second job and charges you again.',
+          watch: 'https://ai-agent-credit-dashboard.vercel.app/guest',
+        },
+        { status: 202 },
+      )
+    }
     console.error('[jobs/external] posting failed:', error)
     return Response.json(
       { error: `Posting failed: ${error instanceof Error ? error.message : String(error)}` },

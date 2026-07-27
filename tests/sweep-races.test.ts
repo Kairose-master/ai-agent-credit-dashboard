@@ -101,3 +101,41 @@ describe('one completion event per job, decided by the database', () => {
     expect(src).toContain('indexReady = null')
   })
 })
+
+/**
+ * The bounty-label webhook's check and its escrow are separated by a ~30s
+ * ERC-4337 round trip. GitHub allows ten seconds and redelivers, so two
+ * deliveries can both check ("nothing live"), both be right, and both post.
+ * A fresher chain read cannot fix that — nothing is there to read yet. The
+ * only thing that closes it is holding the issue across the whole post.
+ */
+describe('one bounty per issue, held across the escrow', () => {
+  const src = read('app/api/github/webhook/route.ts')
+
+  it('locks the issue before checking, not just before posting', () => {
+    const lock = src.indexOf('bounty-issue:')
+    const check = src.indexOf('specsForIssue(repoFullName, issueNumber)', src.indexOf("action === 'labeled'"))
+    expect(lock).toBeGreaterThan(-1)
+    expect(lock).toBeLessThan(check)
+  })
+
+  it('hands the lock back on every path that does not escrow', () => {
+    // Otherwise "you are not linked yet" locks the issue for two minutes —
+    // and linking then re-labelling takes about ten seconds.
+    expect(src).toContain('const unlock =')
+    const labeled = src.indexOf("action === 'labeled'")
+    const posted = src.indexOf('BOUNTY_LABELED')
+    const section = src.slice(labeled, posted)
+    // one release per non-posting exit: unknown chain, already live, not
+    // linked, no funded agent
+    expect(section.match(/await unlock\(\)/g)?.length).toBe(4)
+  })
+
+  it('keeps the lock when the escrow is merely unconfirmed', () => {
+    // Releasing on a pending post is how one label becomes two bounties.
+    const pending = src.indexOf('isUserOpPending(error)')
+    const holding = src.indexOf('holding the issue lock')
+    expect(pending).toBeGreaterThan(-1)
+    expect(holding).toBeGreaterThan(pending)
+  })
+})

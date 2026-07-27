@@ -152,15 +152,40 @@ async function handleIssue(payload: any): Promise<Response> {
       return Response.json({ status: 'rejected', reason: check.reason })
     }
 
-    // Idempotency: one open job per (repo, issue).
+    // Idempotency: one open job per (repo, issue) — and the check has to hold
+    // for as long as the ESCROW takes, not just for the instant it runs.
+    //
+    // Posting a repo job is a ~30s ERC-4337 round trip. GitHub gives a webhook
+    // ten seconds and redelivers when it doesn't hear back, so the natural
+    // sequence is: delivery 1 checks (nothing live) → starts posting → GitHub
+    // times out → delivery 2 arrives while the post is still in flight →
+    // checks (still nothing live, because it hasn't landed) → posts a second
+    // bounty. Neither check is wrong; they just both ran inside one gap. The
+    // chain read being fresh would not have helped — nothing was there to
+    // read yet.
+    //
+    // So hold a cross-instance lock on the issue across the whole post. Two
+    // minutes covers the on-chain round trip with room to spare, and expires
+    // on its own if this invocation dies mid-flight.
+    const { acquireOpsLease, releaseOpsLease } = await import('@/lib/ops-lease')
+    const issueLock = `bounty-issue:${repoFullName}#${issueNumber}`
+    if (!(await acquireOpsLease(issueLock, 120_000))) {
+      return Response.json({ status: 'ignored', reason: 'a bounty for this issue is already being escrowed' })
+    }
+    // Hand the lock back on every path that does NOT escrow. Most of them end
+    // in "here is how to fix this" — and a user who fixes it re-labels within
+    // seconds, which a two-minute lock would silently swallow.
+    const unlock = async () => releaseOpsLease(issueLock)
+
     await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
     const existing = await specsForIssue(repoFullName, issueNumber)
     if (existing.length > 0) {
       const { readJobsOrUnknown } = await import('@/lib/onchain/labor-read')
-      const jobs = await readJobsOrUnknown()
+      const jobs = await readJobsOrUnknown({ maxAgeMs: 0 })
       // An RPC hiccup here used to read as "nothing live for this issue" and
       // escrow a SECOND bounty. Unknown chain state is not permission to spend.
       if (jobs === null) {
+        await unlock()
         await commentOnPr(repoFullName, issueNumber, `⚠️ Could not read the chain to check for an existing bounty — nothing was escrowed. Re-add the label to retry.`)
         return Response.json({ status: 'deferred', reason: 'chain state unknown' })
       }
@@ -170,6 +195,7 @@ async function handleIssue(payload: any): Promise<Response> {
       const { pickIssueJob } = await import('@/lib/bounty-label')
       const live = pickIssueJob(existing, (id) => statusById.get(id))
       if (live) {
+        await unlock()
         return Response.json({ status: 'ignored', reason: `job #${live.jobId} already live for this issue` })
       }
     }
@@ -179,6 +205,7 @@ async function handleIssue(payload: any): Promise<Response> {
     const { userIdForGithubUser } = await import('@/lib/github-identity')
     const userId = senderGithubId ? await userIdForGithubUser(senderGithubId) : null
     if (!userId) {
+      await unlock()
       await commentOnPr(repoFullName, issueNumber, notLinkedComment(origin))
       return Response.json({ status: 'rejected', reason: 'labeler not linked' })
     }
@@ -186,6 +213,7 @@ async function handleIssue(payload: any): Promise<Response> {
     const agents = await db.select().from(agent).where(eq(agent.userId, userId))
     const requester = agents.find((a) => a.smartAccountAddress)
     if (!requester) {
+      await unlock()
       await commentOnPr(repoFullName, issueNumber, `Your Ledgermind account has no provisioned agent to escrow from — create one at ${origin}/agents and re-add the label.`)
       return Response.json({ status: 'rejected', reason: 'no funded agent' })
     }
@@ -215,6 +243,17 @@ async function handleIssue(payload: any): Promise<Response> {
       await logPlatformEvent('BOUNTY_LABELED', `A bounty label minted a $${bountyUsd} job from ${repoFullName}#${issueNumber}`).catch(() => {})
       return Response.json({ status: 'ok', posted: res.specHash })
     } catch (error) {
+      // A PENDING post keeps the lock: the escrow was accepted by the bundler
+      // and probably lands, so releasing here is how one label becomes two
+      // bounties. A genuine failure releases, because the user will read the
+      // comment and re-label within seconds.
+      const { isUserOpPending } = await import('@/lib/onchain/account')
+      if (isUserOpPending(error)) {
+        console.warn(`[github/webhook] bounty post for ${repoFullName}#${issueNumber} is pending confirmation — holding the issue lock`)
+        await commentOnPr(repoFullName, issueNumber, `⏳ Bounty escrow submitted — confirming on-chain. The job will appear on the board shortly.`)
+        return Response.json({ status: 'pending' }, { status: 200 })
+      }
+      await unlock()
       const reason = error instanceof Error ? error.message : String(error)
       await commentOnPr(repoFullName, issueNumber, `⚠️ Could not escrow the bounty: ${reason.slice(0, 300)}`)
       return Response.json({ status: 'error', reason }, { status: 200 }) // 200: GitHub should not retry a semantic failure

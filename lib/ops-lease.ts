@@ -45,6 +45,29 @@ function ensureTable(): Promise<void> {
  * fails OPEN would let every instance run at once, which is the situation
  * it exists to prevent.
  */
+/**
+ * Give a lease back early.
+ *
+ * A recurring sweep should just let its lease expire — that expiry *is* the
+ * interval. This exists for the other use: a lease taken as a **mutex** around
+ * one operation, where holding it after deciding not to act would block a
+ * legitimate retry for the rest of the TTL. The bounty-label webhook needs
+ * exactly that: it locks the issue before checking, and several of its checks
+ * end in "tell the user how to fix this and stop" — which the user then fixes
+ * and re-labels within seconds.
+ *
+ * Best-effort by design: a failed release is harmless (the lease expires), so
+ * it must never fail the operation it is unwinding.
+ */
+export async function releaseOpsLease(name: string): Promise<void> {
+  try {
+    await ensureTable()
+    await pool.query('DELETE FROM ops_leases WHERE name = $1', [name])
+  } catch (error) {
+    console.warn('[ops-lease] releasing', name, 'failed (it will expire):', error)
+  }
+}
+
 export async function acquireOpsLease(name: string, ttlMs: number): Promise<boolean> {
   try {
     await ensureTable()
