@@ -105,25 +105,87 @@ in 2026, and still better said than discovered.
 
 ---
 
-## Mainnet is gated, and the gate is already written
+## Mainnet — revised, and the first version of this section was wrong
 
-From `security-audit.md`, unchanged:
+The first draft gated mainnet behind a long testnet soak *and* an external
+contract review, on the reasoning that an unaudited fortnight-old contract
+should not hold real funds. Challenged on cost, that gate did not survive.
 
-> R1 is "the single largest item standing between testnet and real money, and
-> it is where an external audit should start."
+**The financial exposure is small and I had been pricing the word "mainnet"
+rather than the position.** Base gas is fractions of a cent. Total escrow across
+the live system is $50; ten times that is $500. The R1 incident — the worst
+money defect this project has had — froze **$140 across 28 jobs**. Those are
+real numbers and none of them is a number that ends a solo project.
 
-So the sequence is forced:
+### The argument *for* going, which is stronger than "it's cheap"
 
-```
-fork → new contracts (R1 closed, assignable release, bond)
-     → run on TESTNET long enough to observe
-     → external review of the contract
-     → mainnet
-```
+The entire economic case here is denominated in **a token I can mint**. The 2%
+posting fee, and the slashable bond in §Bond below, are deterrents only if the
+collateral is scarce. On Sepolia MockUSDC an attacker mints their own bond, so
+slashing is theatre.
 
-"Forked, therefore mainnet" is not available. The fork removes a migration
-problem; it does not remove the reason the contract is not trusted with real
-money — which is that it is unaudited and written by one person in a fortnight.
+That is not a weakness of the demo. It is a **hole in the argument**: as long as
+the money is mintable, the Sybil economics in `docs/self-sybil-attack.md` are
+unfalsifiable. Real USDC is what makes them capable of being wrong, and a claim
+that cannot be wrong is not evidence.
+
+### The two things that actually block it — neither is cost
+
+**1. The current architecture is custodial, and R1 is why.**
+The platform operates every agent's smart account. That is precisely how R1
+recovery works: the walk through `submitWork → raiseDispute →
+resolveDispute(false)` is the operator driving somebody else's account. On
+testnet that reads as a design convenience. With real money it reads as:
+
+> A frozen escrow can only be freed by me, so a user must trust me to get their
+> funds back.
+
+That is the exact inverse of this project's thesis — the trusted third party
+with reversal power, reintroduced, wearing my name. It is a code fact, not a
+legal opinion, and it is not a question of amount.
+
+**This makes R1 a narrow, concrete gate rather than general caution.** A
+permissionless `reclaimJob` removes the need for operator custody in recovery,
+and with it this entire objection. Nothing else on the list has that property.
+
+**2. Removing the faucet empties the market.**
+Junk work should obviously not run on a real chain. But the faucet is currently
+**almost all of the demand** (`product-thesis.md` §demand). Remove it and what
+remains is three open jobs from a single requester, in a market that this
+project's own counterparty-independence metric classifies as a star centred on
+its operator.
+
+So mainnet does not fail on cost. **It fails on emptiness.** An empty mainnet
+board is worse evidence than a busy testnet one, and it is worse in exactly the
+place — a funding conversation — where "mainnet" was supposed to help.
+
+### What the soak actually buys, in this project's own numbers
+
+**Twenty-five defects in fourteen days.** The defect rate here is not zero, so
+the new contract will have defects too. A soak period is not timidity; it is the
+base rate applied to oneself. That argument comes from the published audit, not
+from a principle invented for this section.
+
+### Revised position
+
+Deploy v2 contracts to **mainnet and testnet at once** — same code, different
+`ONCHAIN_*` env, which the codebase already supports — and split what runs where:
+
+| | Testnet | Mainnet |
+|---|---|---|
+| Traffic | Real load: workers, sweeps, delegations | Operator-funded only |
+| Participants | Anyone | Me and invited testers |
+| Faucet | Keep | **None** |
+| Purpose | Soak the new contract | Make the fee and bond economics *true* |
+
+This makes "it runs on mainnet with real USDC" an honest sentence while keeping
+an R1-class defect away from anyone else's money. Open mainnet participation
+when the soak has run, not before.
+
+**The one non-negotiable is R1 first.** The external-review gate and the long
+soak were over-cautious and are now recommendations. Taking other people's money
+before `reclaimJob` exists means shipping a custodial system while describing a
+non-custodial one, and that is a claim problem rather than a risk problem.
 
 ---
 
@@ -245,14 +307,20 @@ with a track record, and a half-migrated system on camera is worse than no
 video.
 
 1. Record the demo against v1. *(blocking)*
-2. Fork repo → new Vercel project + new Neon DB, still **Sepolia**.
-3. Schema: `(contractAddress, jobId)` everywhere. Cheap now, expensive later.
-4. Contracts: `reclaimJob` + `assignPayee`. Bond deferred pending the slashing
-   question.
+2. Fork repo → new Vercel project + new Neon DB.
+3. Schema: `(contractAddress, jobId)` everywhere. Cheap now, expensive later —
+   and it is what lets one deployment address two chains at all.
+4. Contracts: **`reclaimJob` first**, then `assignPayee`. Bond deferred pending
+   the slashing question. `reclaimJob` is the gate: until it exists, recovery
+   requires operator custody, and mainnet is off the table for that reason
+   alone.
 5. **Proof import from v1 by signature only, v1's DB treated as untrusted.**
    This is the thesis test; if it fails, stop and fix the thesis, not the code.
-6. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
-7. Only then: external contract review, then a mainnet decision, then a chain.
+6. Deploy the contracts to **both** Sepolia and Base. Real traffic and the
+   faucet on testnet; operator funds only, no faucet, on mainnet.
+7. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
+8. Open mainnet participation when the soak has run. External contract review
+   before that, if it can be got — a recommendation now, not a gate.
 
 ---
 
@@ -268,3 +336,8 @@ Written down now so it is not rationalised away later:
   myself (`product-thesis.md` §demand). A second empty market is not progress;
   it is the same market with more infrastructure, and the honest conclusion
   would be that the contract work was never the bottleneck.
+- **If the mainnet side stays operator-funded indefinitely.** The point of real
+  USDC is that the fee and bond economics become falsifiable. Money that only
+  ever moves between my own accounts does not falsify anything, so a mainnet
+  deployment with no third party in it after a reasonable period is a more
+  expensive Sepolia and should be said to be one.
