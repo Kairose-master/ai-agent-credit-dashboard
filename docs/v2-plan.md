@@ -207,6 +207,81 @@ fee a number someone notices.
 $5 × 100 jobs is $500; $1 × 200 is $200. Identical safety to the cent-scale
 version, with the economics intact.
 
+### Whose budget is whose
+
+Bounty sizing arguments go wrong by mixing three budgets that belong to
+different parties:
+
+| Cost | Borne by |
+|---|---|
+| The worker's inference tokens | **The worker** — BYOK (`lib/user-keys.ts`), local Ollama on the desktop miner, or its own connected model |
+| **Four sponsored UserOps + the grading model call** | **The operator**, on every job, including the ones that fail |
+| Bounty + the 2% fee | The requester |
+
+The worker's side self-regulates: price a job below what the work costs and
+nobody claims it. That is the market functioning, and it is the requester's
+problem. For scale, a 30k-token job is on the order of **$0.15** at current
+frontier pricing and less on a small model, so a $1 bounty leaves a worker most
+of it — the worker's margin is not where this binds.
+
+What does *not* self-regulate is the operator's gas and grading, which are paid
+whether or not the job was worth doing. So:
+
+```
+min_bounty  =  (gas per job + grading per job) / fee_rate
+```
+
+At the current 2% fee, a $0.05 per-job cost implies a **$2.50** floor and a
+$0.10 cost implies **$5.00**. That is the same $1–$5 band as above, arrived at
+by arithmetic instead of taste — and it becomes a real number the moment one job
+cycle is measured on the target chain.
+
+### The paymaster is a mainnet blocker of the same class as R1
+
+`lib/onchain/account.ts:116` builds the ZeroDev paymaster client with **no
+policy**: every UserOperation from every agent is sponsored, and the only limit
+is whatever is configured in the ZeroDev project.
+
+On testnet that is free and therefore invisible. On mainnet:
+
+> **Sponsored gas is the operator's money, spendable by anyone who can cause a
+> UserOperation.**
+
+And causing one is cheap — register an agent, accept a job, submit work. This is
+audit finding F15 ("a paywall is a price, not a rate limit") with one difference
+that makes it worse: F15 required an attacker to spend $0.10 to drain $25. Here
+the attacker spends **nothing**. It also differs from R1 in likelihood: R1 needs
+a defect to fire, while this needs only for someone to notice.
+
+It connects directly to the abandonment work in `lib/stale-claim.ts`. A claimed
+and abandoned job still costs the operator gas — the claim, and then the
+reclaim. The 28 frozen jobs of `failure-modes.md` §1 are, on mainnet, a wallet
+being drained rather than a board being untidy.
+
+**Options, in the order they should happen:**
+
+1. **Project-level caps now.** ZeroDev per-project and per-address gas limits
+   and rate limits. Necessary and blunt — and worth writing down that a global
+   cap converts a spend attack into an **availability** attack, since exhausting
+   the budget fails everyone's operations, not just the attacker's.
+2. **Stop sponsoring everything.** The "no wallet, no gas" onboarding story is
+   really about the *worker* side (`acceptJob`, `submitWork`) — a worker should
+   not need ETH before it can earn. A requester already holds USDC to fund a
+   bounty, so asking it to hold a little gas breaks much less.
+3. **Sponsorship as a credit product** — the on-thesis answer. Gas allowance
+   tied to settled volume, exactly like the lending ceiling: a cold-start agent
+   gets enough for a first job, and more is earned. It reuses
+   `collateralizedVolume` directly and puts gas abuse under the same convergent
+   bound as everything else. It needs programmatic policy or a self-hosted
+   verifying paymaster, so it is real work rather than a setting.
+
+**And this makes the bond concrete rather than abstract.** Require a bond to
+*claim* a job and slash it on abandonment: claiming and walking away then burns
+the attacker's capital instead of the operator's gas. That attaches to the
+warn → grace → reclaim path already shipped in `lib/stale-claim.ts`, and it is a
+slashing trigger that is verifiable on-chain — which is exactly the constraint
+§Bond says any trigger must satisfy.
+
 ### What the soak actually buys, in this project's own numbers
 
 **Twenty-five defects in fourteen days.** The defect rate here is not zero, so
@@ -230,10 +305,12 @@ This makes "it runs on mainnet with real USDC" an honest sentence while keeping
 an R1-class defect away from anyone else's money. Open mainnet participation
 when the soak has run, not before.
 
-**The one non-negotiable is R1 first.** The external-review gate and the long
-soak were over-cautious and are now recommendations. Taking other people's money
-before `reclaimJob` exists means shipping a custodial system while describing a
-non-custodial one, and that is a claim problem rather than a risk problem.
+**Two non-negotiables: R1, and a metered paymaster.** The external-review gate
+and the long soak were over-cautious and are now recommendations. These two are
+not. Taking other people's money before `reclaimJob` exists means shipping a
+custodial system while describing a non-custodial one — a claim problem rather
+than a risk problem. And an unmetered paymaster on a chain where gas costs real
+money is an open tap with the operator's name on it.
 
 ---
 
@@ -364,14 +441,18 @@ video.
    alone.
 5. **Proof import from v1 by signature only, v1's DB treated as untrusted.**
    This is the thesis test; if it fails, stop and fix the thesis, not the code.
-6. Deploy the contracts to **both** Sepolia and Base. Real traffic and the
+6. **Meter the paymaster before anything on mainnet can be triggered by a
+   stranger.** Project and per-address caps at minimum; decide which operations
+   are sponsored at all.
+7. Deploy the contracts to **both** Sepolia and Base. Real traffic and the
    faucet on testnet; operator funds only, no faucet, on mainnet.
    **Measure one full job cycle on Base first** — four sponsored UserOps plus
-   the grading call — and set the minimum bounty from that number rather than
-   from taste. Fund the mainnet wallet once, to the intended exposure ceiling,
-   and treat topping it up as a decision rather than a reflex.
-7. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
-8. Open mainnet participation when the soak has run. External contract review
+   the grading call — and set the minimum bounty from
+   `(gas + grading) / fee_rate` rather than from taste. Fund the mainnet wallet
+   once, to the intended exposure ceiling, and treat topping it up as a decision
+   rather than a reflex.
+8. Run. Observe. Publish what broke, in the same form as `failure-modes.md`.
+9. Open mainnet participation when the soak has run. External contract review
    before that, if it can be got — a recommendation now, not a gate.
 
 ---
