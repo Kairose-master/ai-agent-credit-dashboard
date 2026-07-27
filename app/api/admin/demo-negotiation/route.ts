@@ -16,12 +16,11 @@ import { runDemoNegotiation } from '@/lib/demo-negotiation'
 export const dynamic = 'force-dynamic'
 
 async function handle(request: Request): Promise<Response> {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return Response.json({ error: 'CRON_SECRET is not configured' }, { status: 503 })
-  const url = new URL(request.url)
-  const given = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? url.searchParams.get('secret') ?? ''
-  if (given !== secret) return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  const { requireOperator } = await import('@/lib/admin-route')
+  const auth = requireOperator(request, { mutating: true })
+  if (!auth.ok) return auth.response
 
+  const url = new URL(request.url)
   const agentId = url.searchParams.get('agent_id') ?? undefined
   const email = url.searchParams.get('email') ?? undefined
   try {

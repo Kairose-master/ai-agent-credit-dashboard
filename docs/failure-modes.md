@@ -571,6 +571,53 @@ is the difference between a client backing off and a client retrying forever.
 
 ---
 
+## 16. A GET that spends money fires when its URL is merely *seen*
+
+**Symptom.** None observed. Found by listing which HTTP methods the operator
+endpoints answer.
+
+**Root cause.** Two of them accepted `GET`, with a comment saying so
+deliberately:
+
+```ts
+// POST is the real entrypoint; GET is allowed too so it can be fired from a
+// browser address bar with ?secret= during testing.
+export const GET = handle
+```
+
+`/api/admin/post-image-jobs?secret=…&count=12` escrows twelve bounties.
+`/api/admin/demo-negotiation?secret=…` creates accounts and messages. A GET
+with a side effect runs whenever **anything fetches the URL** — and URLs
+carrying secrets travel: they get pasted into chat, and Slack, Discord,
+iMessage and the rest unfurl links by fetching them. **I have pasted admin
+URLs into chat in this project.** No attacker required; a link preview is
+enough.
+
+The same URLs carry a second, quieter problem: Vercel logs the full request
+path, so every `?secret=…` call writes the operator secret into log storage,
+where it stays.
+
+**Fix.** `lib/admin-route.ts` is now the single guard.
+
+- State-changing operator endpoints are **POST-only**. A `GET` answers 405
+  with the exact `curl` to run, so the browser-paste workflow keeps its
+  discoverability and loses its ability to act by accident. The method is
+  checked **before** the secret, so a stale saved URL is told the real
+  problem instead of sending its owner chasing a 401.
+- The query-string secret still works — breaking every saved command would
+  be worse than the exposure — but using it now logs a warning naming the
+  log-retention problem and pointing at `Authorization: Bearer`.
+- The 405 hint strips `secret` from the echoed URL. An error page that
+  repeats the credential back would be its own small version of this bug.
+
+`/api/cron/settle` stays on GET because Vercel Cron issues GET. That is safe
+now for a reason worth stating: every step inside `runOpsCycle` takes a
+cross-instance lease (§13), so an accidental extra call is a no-op rather
+than a duplicate spend. Read-only diagnostics (`/api/admin/health`,
+`job-diag`) stay on GET too — nothing happens when they're prefetched.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -616,7 +663,10 @@ Keep these true, and this class of bug stays dead:
    across both — and hand it back on the paths that decided not to act (§14).
 12. **A price is not a rate limit.** Especially when paying buys something
    worth more than the payment (§15).
-13. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+13. **A side effect on GET is a side effect on prefetch.** Anything that
+   spends is POST-only; a secret in a URL is a secret in the logs and in
+   every link preview that URL passes through (§16).
+14. **Ask for the rows and columns you need.** A read with no `WHERE` and no
    column list is a bug that has not surfaced yet — it silently grows, and it
    breaks the whole table's readers the day a column ships ahead of its
    migration (§11).

@@ -1,4 +1,5 @@
 import { postHouseImageJobs, postHouseAudioJobs, postHouseCodeJobs } from '@/lib/job-faucet'
+import { requireOperator } from '@/lib/admin-route'
 
 /**
  * Post a handful of vision-graded image jobs from the house faucet wallet,
@@ -10,23 +11,20 @@ import { postHouseImageJobs, postHouseAudioJobs, postHouseCodeJobs } from '@/lib
  * With CRON_SECRET unset the endpoint refuses, so it can never post money
  * moves from an unauthenticated call.
  *
+ * POST only — this escrows real bounties, and a GET side effect fires on any
+ * prefetch (see lib/admin-route.ts). A GET answers 405 with the curl to run.
+ *
  * Usage:
- *   curl -X POST "https://<host>/api/admin/post-image-jobs?secret=$CRON_SECRET&count=3"
+ *   curl -X POST -H "Authorization: Bearer $CRON_SECRET" "https://<host>/api/admin/post-image-jobs?count=3"
  */
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 async function handle(request: Request): Promise<Response> {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    return Response.json({ error: 'CRON_SECRET is not configured' }, { status: 503 })
-  }
-  const url = new URL(request.url)
-  const given = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? url.searchParams.get('secret') ?? ''
-  if (given !== secret) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const auth = requireOperator(request, { mutating: true })
+  if (!auth.ok) return auth.response
 
+  const url = new URL(request.url)
   const count = Math.max(1, Math.min(Number(url.searchParams.get('count') ?? 3) || 3, 12))
   const kind = (url.searchParams.get('kind') ?? 'image').toLowerCase()
   try {
@@ -39,7 +37,7 @@ async function handle(request: Request): Promise<Response> {
   }
 }
 
-// POST is the real entrypoint; GET is allowed too so it can be fired from a
-// browser address bar with ?secret= during testing.
 export const POST = handle
+// GET stays routed so a browser paste gets the 405 + curl hint rather than a
+// bare 404 — the guard is what refuses to act, not the absence of a route.
 export const GET = handle

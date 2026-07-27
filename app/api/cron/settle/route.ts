@@ -25,15 +25,16 @@ export const maxDuration = 300 // settlement = several on-chain txs, LLM verify 
  * run — never deploy an open settlement trigger.
  */
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    return Response.json({ error: 'CRON_SECRET is not configured' }, { status: 503 })
-  }
+  // GET, and it does move money — but this one has to stay GET because it is
+  // the Vercel Cron entrypoint and cron issues GET. It is safe to fire twice:
+  // every step inside runOpsCycle now takes a cross-instance lease, which is
+  // exactly the property that makes an accidental extra call a no-op rather
+  // than a duplicate spend. `mutating: false` here means "GET is expected",
+  // not "nothing happens".
+  const { requireOperator } = await import('@/lib/admin-route')
+  const auth = requireOperator(request, { mutating: false })
+  if (!auth.ok) return auth.response
   const url = new URL(request.url)
-  const given = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? url.searchParams.get('secret') ?? ''
-  if (given !== secret) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
 
   const proto = request.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
   const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? url.host

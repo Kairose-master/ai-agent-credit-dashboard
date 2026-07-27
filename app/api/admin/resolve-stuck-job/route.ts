@@ -16,11 +16,10 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 export async function POST(request: Request): Promise<Response> {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return Response.json({ error: 'CRON_SECRET not configured' }, { status: 503 })
+  const { requireOperator } = await import('@/lib/admin-route')
+  const auth = requireOperator(request, { mutating: true })
+  if (!auth.ok) return auth.response
   const url = new URL(request.url)
-  const given = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? url.searchParams.get('secret') ?? ''
-  if (given !== secret) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   const jobId = Number(url.searchParams.get('job_id'))
   const action = (url.searchParams.get('action') ?? 'refund').toLowerCase()

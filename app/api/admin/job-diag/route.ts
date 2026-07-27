@@ -13,11 +13,10 @@ import { eq } from 'drizzle-orm'
 export const dynamic = 'force-dynamic'
 
 async function handle(request: Request): Promise<Response> {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return Response.json({ error: 'CRON_SECRET not configured' }, { status: 503 })
+  const { requireOperator } = await import('@/lib/admin-route')
+  const auth = requireOperator(request, { mutating: false })
+  if (!auth.ok) return auth.response
   const url = new URL(request.url)
-  const given = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? url.searchParams.get('secret') ?? ''
-  if (given !== secret) return Response.json({ error: 'Unauthorized' }, { status: 401 })
 
   // List mode: recent specs (title/kind/onchainJobId/verdict) + open on-chain
   // jobs, to spot linkage gaps (a subtask posted but jobSpec.onchainJobId null).
