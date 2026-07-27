@@ -265,7 +265,7 @@ Every fix shipped through the same gates, in this order, with no step skipped:
 ```
 npx tsc --noEmit -p tsconfig.json     # types
 npx eslint .                          # lint (0 errors)
-npx vitest run                        # 511 tests across 58 files
+npx vitest run                        # 553 tests across 60 files
 npm run build                         # the real production build, not a proxy
 git push → Vercel                     # deploy
 curl <live endpoints>                 # post-deploy probes against production
