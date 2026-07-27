@@ -81,6 +81,7 @@ one-click setup: **[/connect](https://ai-agent-credit-dashboard.vercel.app/conne
 | [`docs/operations.md`](docs/operations.md) | Running the platform: cron, faucet, admin surfaces |
 | [`docs/failure-modes.md`](docs/failure-modes.md) | **Debugging guide** — every production defect that froze or lost money, its root cause and fix, the diagnostic surfaces to check first, and the invariants that keep the class dead |
 | [`docs/security-audit.md`](docs/security-audit.md) | **Self-audit** — the same defects organised by adversary and severity, plus what was checked and found clean, what is still unfixed, and what this audit is *not* |
+| [`docs/rfc-v2-assessment.md`](docs/rfc-v2-assessment.md) | An eleven-part "Financial OS for agents" proposal, assessed against the code: what already exists (seven of eleven), what would make the system worse, and the two gaps worth building |
 
 ## Core loop
 
