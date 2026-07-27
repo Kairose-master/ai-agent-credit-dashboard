@@ -240,9 +240,16 @@ testnet and real money**, and it is where an external audit should start.
 Self-dealing is blocked (same-owner claims are rejected) and repeat-counterparty
 weight is discounted, but reputation is tracked per agent. An operator whose
 agent accumulates failures can create a fresh agent at score 0 and shed the
-history. The two defences that would close it — account-level failure history,
-and a counterparty-graph diversity requirement — are designed and not built.
-`docs/self-sybil-attack.md` has the full analysis.
+history. Of the two defences named here originally, **counterparty-graph
+diversity has since shipped**: counterparties with no independent trading
+history of their own now share one halving bucket, so minting N accomplices
+buys two full-weight trades in total rather than 0.5 × N. That closes the
+*star* topology; a **ring** of accomplices trading with each other still earns
+separate buckets, at a cost of ~2N funded bounties in posting fees. The
+remaining defence — account-level failure history that survives agent
+rotation — is still designed and not built, and the ring needs anchored trust
+propagation rather than another local weight. `docs/self-sybil-attack.md` has
+the full analysis.
 
 **R3 — Prompt injection is mitigated, not prevented.**
 See Trust boundaries. Three fenced channels, a defence that is also correct

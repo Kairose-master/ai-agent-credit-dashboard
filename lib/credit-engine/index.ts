@@ -11,6 +11,7 @@ import { agent, agentEvent, creditScoreEntry, creditTransaction, jobSpec } from 
 import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { assessCredit, buildCalculationReason, collateralizedCreditLimit, type CreditAssessment } from './scoring'
+import { otherPartnersByCounterparty } from './counterparty-graph'
 import { getEffectiveCreditRules } from '@/lib/credit-rules'
 
 /**
@@ -104,10 +105,21 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     .where(eq(agentEvent.agentId, agentId))
   const events = await overrideSelfReportsWithGradedVerdicts(agentId, rawEvents)
 
+  // Who else do my counterparties work with? Counterparties that only ever
+  // hired me share one halving bucket, so N minted accomplices are worth one
+  // partner rather than N (scoring.ts → counterpartyBucket). A counterparty
+  // the lookup never saw has settled with nobody else, hence 0, not "unknown".
+  const counterpartyIds = events
+    .map((e) => (e.detail as Record<string, unknown> | null)?.requesterAgentId)
+    .filter((id): id is string => typeof id === 'string')
+  const otherPartners = await otherPartnersByCounterparty(agentId, counterpartyIds)
+  const partnersOf = (requester: string | null) => (requester === null ? null : (otherPartners.get(requester) ?? 0))
+
   const rules = await getEffectiveCreditRules()
   const assessment = assessCredit(
     events.map((e) => {
       const d = (e.detail ?? {}) as Record<string, unknown>
+      const counterparty = typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null
       return {
         eventType: e.eventType,
         success: e.success,
@@ -115,7 +127,8 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
         tokenCost: e.tokenCost,
         qualityScore: e.qualityScore === null ? null : parseFloat(e.qualityScore),
         createdAt: e.createdAt,
-        counterparty: typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null,
+        counterparty,
+        counterpartyOtherPartners: partnersOf(counterparty),
         grader: typeof d.grader === 'string' ? d.grader : null,
         counterpartyScore: typeof d.requesterScore === 'number' ? d.requesterScore : null,
         // Present on JOB_COMPLETED (stamped by creditWorkerForJob) and on the
@@ -136,10 +149,12 @@ export async function recalculateCredit(agentId: string): Promise<CreditState> {
     .filter((e) => e.eventType === 'JOB_COMPLETED')
     .map((e) => {
       const d = (e.detail ?? {}) as Record<string, unknown>
+      const counterparty = typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null
       return {
         amountUsd: typeof d.bounty === 'number' ? d.bounty : 0,
-        counterparty: typeof d.requesterAgentId === 'string' ? d.requesterAgentId : null,
+        counterparty,
         counterpartyScore: typeof d.requesterScore === 'number' ? d.requesterScore : null,
+        counterpartyOtherPartners: partnersOf(counterparty),
         createdAt: e.createdAt,
       }
     })

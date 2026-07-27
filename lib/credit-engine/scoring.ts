@@ -46,6 +46,12 @@ export type AgentEventInput = {
    *  Drives the exposure weight: delivering a $200 contract and fixing a $1
    *  typo are not the same evidence about an agent. */
   exposureUsd?: number | null
+  /** How many DISTINCT agents other than me this counterparty has also
+   *  settled work with. The graph property the score-based credibility
+   *  weight cannot see: an accomplice minted to hire me and nobody else has
+   *  0 here no matter what its score says. Null = not computed (legacy call
+   *  sites, tests); null keeps full weight, same convention as above. */
+  counterpartyOtherPartners?: number | null
 }
 
 export type CreditAssessment = {
@@ -273,6 +279,58 @@ export function collusionWeight(priorWithSameCounterparty: number): number {
   return Math.pow(0.5, priorWithSameCounterparty)
 }
 
+/**
+ * Counterparty independence — the halving, applied one level up.
+ *
+ * `collusionWeight` caps what is extractable from ONE counterparty at ~2
+ * full-weight trades. It says nothing about the NUMBER of counterparties, and
+ * accounts are free, so the documented residual attack was: mint N accomplices,
+ * farm each to its cap, collect 0.5 × N. A convergent series per partner, still
+ * LINEAR in partners. No multiplicative weight can fix that — halving a linear
+ * function leaves it linear. The only thing that breaks linearity is refusing
+ * to give a fresh counterparty its own bucket.
+ *
+ * So: an independent counterparty keeps its own halving bucket; every
+ * non-independent one SHARES a single pooled bucket. N accomplices that trade
+ * only with me are now one counterparty as far as reputation is concerned, and
+ * the whole farm converges to ~2 full-weight trades no matter how large N gets.
+ *
+ * Independence is defined structurally, not by score: settled work with at
+ * least INDEPENDENCE_MIN_PARTNERS distinct agents other than me. A bought aged
+ * account with a good score but a star topology fails this; the credibility
+ * weight would have waved it through.
+ *
+ * **What this does not stop, stated plainly.** A RING defeats it — accomplices
+ * that trade with each other rather than only with the centre each acquire
+ * distinct partners and earn their own buckets again. The star becomes
+ * convergent; the ring stays linear. What the ring now costs is real: every
+ * edge is a posted job paying the 2% fee, so N accomplices need ~2N funded
+ * bounties instead of N. Pricing is not prevention, and the honest next step
+ * is anchored trust propagation over the whole trade graph, not another local
+ * weight. `docs/self-sybil-attack.md` carries this limitation.
+ */
+export const INDEPENDENCE_MIN_PARTNERS = 2
+
+/** Every counterparty that fails the independence test shares this bucket.
+ *  Deliberately distinct from the legacy null-counterparty pool: pooling those
+ *  together would silently re-weight history predating counterparty stamping. */
+export const POOLED_COUNTERPARTY = '__unaffiliated__'
+
+export function isIndependentCounterparty(otherPartners: number | null | undefined): boolean {
+  if (otherPartners === null || otherPartners === undefined) return true // not computed → no retroactive penalty
+  return otherPartners >= INDEPENDENCE_MIN_PARTNERS
+}
+
+/** The halving key. Null counterparty keeps its historical behaviour (the
+ *  caller decides what null means); a non-independent counterparty is pooled. */
+export function counterpartyBucket(
+  counterparty: string | null | undefined,
+  otherPartners: number | null | undefined,
+): string | null {
+  if (!counterparty) return null
+  return isIndependentCounterparty(otherPartners) ? counterparty : POOLED_COUNTERPARTY
+}
+
 /** Reputation earned FROM a nobody is worth little: a ring that mints fresh
  *  requester accounts to fake diversity earns the floor, because each new
  *  accomplice starts at score 300 with no history of its own. Scales
@@ -393,6 +451,10 @@ export type SettledTrade = {
   counterparty: string | null
   counterpartyScore: number | null
   createdAt: Date
+  /** See AgentEventInput.counterpartyOtherPartners. Non-independent
+   *  counterparties share one halving bucket here too — lending is where the
+   *  farm cashes out, so it must not be the looser of the two paths. */
+  counterpartyOtherPartners?: number | null
 }
 
 export function collateralizedVolume(trades: SettledTrade[]): number {
@@ -402,7 +464,7 @@ export function collateralizedVolume(trades: SettledTrade[]): number {
   const seen = new Map<string, number>()
   let total = 0
   for (const t of ordered) {
-    const key = t.counterparty ?? '__unknown__'
+    const key = counterpartyBucket(t.counterparty, t.counterpartyOtherPartners) ?? '__unknown__'
     const k = seen.get(key) ?? 0
     seen.set(key, k + 1)
     const credibility = t.counterparty === null ? CREDIBILITY_FLOOR : credibilityWeight(t.counterpartyScore)
@@ -441,10 +503,11 @@ export function weightedMarketSignal(
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
   for (const e of chronological) {
     let diversity = 1
-    if (e.counterparty) {
-      const prior = seen.get(e.counterparty) ?? 0
+    const bucket = counterpartyBucket(e.counterparty, e.counterpartyOtherPartners)
+    if (bucket) {
+      const prior = seen.get(bucket) ?? 0
       diversity = collusionWeight(prior)
-      seen.set(e.counterparty, prior + 1)
+      seen.set(bucket, prior + 1)
     }
     total +=
       diversity *
