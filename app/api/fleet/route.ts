@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 import { agent, agentTask } from '@/lib/db/schema'
-import { inArray, eq } from 'drizzle-orm'
+import { inArray, eq, sql } from 'drizzle-orm'
 import { classifyWorker, summarizeFleet } from '@/lib/worker-fleet'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +18,23 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET() {
   const now = new Date()
-  const agents = await db.select().from(agent)
+  // Name the eight fields this endpoint classifies on. Selecting with no
+  // column list asked Postgres for every column schema.ts declares —
+  // which on a PUBLIC, unauthenticated route meant pulling each worker's
+  // encrypted key ciphertext into memory to evaluate one Boolean, and made
+  // this route break the moment a new column ships ahead of its migration.
+  const agents = await db
+    .select({
+      id: agent.id,
+      name: agent.name,
+      runtimeType: agent.runtimeType,
+      lastPollAt: agent.lastPollAt,
+      smartAccountAddress: agent.smartAccountAddress,
+      hasKey: sql<boolean>`${agent.webhookSecretEnc} is not null`,
+      autoMine: agent.autoMine,
+      creditScore: agent.creditScore,
+    })
+    .from(agent)
 
   const running = await db
     .select({ agentId: agentTask.agentId })
@@ -33,7 +49,7 @@ export async function GET() {
         runtimeType: a.runtimeType,
         lastPollAt: a.lastPollAt,
         provisioned: Boolean(a.smartAccountAddress),
-        hasKey: Boolean(a.webhookSecretEnc),
+        hasKey: a.hasKey,
         autoMine: a.autoMine,
       },
       now,

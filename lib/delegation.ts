@@ -19,7 +19,7 @@
  */
 import { db } from '@/lib/db'
 import { agent, delegation, jobSpec, agentTask } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, inArray, or } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import Anthropic from '@anthropic-ai/sdk'
 import { getUserByok } from '@/lib/user-keys'
@@ -725,7 +725,22 @@ export async function tickDelegation(
   const jobs = jobsShared ?? (await readJobs().catch(() => []))
   if (jobs.length === 0) return
 
-  const specs = await db.select().from(jobSpec)
+  // This delegation's own subtasks, PLUS their repost successors — the
+  // Refunded branch below follows `parentSpecHash` lineage to a replacement
+  // job, which is the only reason the whole table was ever needed here. Both
+  // halves in one scoped query instead of a full scan (of every column) per
+  // active delegation per tick.
+  const wantedHashes = [...new Set(subtasks.map((s) => s.specHash).filter((h): h is string => Boolean(h)))]
+  const specs = wantedHashes.length > 0
+    ? await db
+        .select({
+          specHash: jobSpec.specHash,
+          agentTaskId: jobSpec.agentTaskId,
+          parentSpecHash: jobSpec.parentSpecHash,
+        })
+        .from(jobSpec)
+        .where(or(inArray(jobSpec.specHash, wantedHashes), inArray(jobSpec.parentSpecHash, wantedHashes)))
+    : []
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
   let complete: CompleteFn | null = null
