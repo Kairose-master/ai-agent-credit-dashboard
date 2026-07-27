@@ -84,7 +84,17 @@ export async function collectPostingFee(requesterAgentId: string, bountyUsd: num
   // up front turns that into one clear sentence and zero lost funds.
   const { usdcBalanceOf, transferUsdc } = await import('@/lib/onchain/treasury')
   const balanceUsd = await usdcBalanceOf(requester.address as `0x${string}`).catch(() => null)
-  if (balanceUsd !== null && balanceUsd < bountyUsd + feeUsd) {
+  // An unreadable balance is not an affordable one. Skipping the check on
+  // `null` meant an RPC hiccup charged the fee blind — and then the escrow
+  // reverts on `USDC: balance` and the fee is gone with no job and no refund,
+  // which is the exact outcome this check exists to prevent. Waive the fee
+  // instead: losing the platform's cut is strictly better than taking a
+  // requester's money for nothing, and the escrow still fails cleanly on its
+  // own if the wallet really is short.
+  if (balanceUsd === null) {
+    return { feeUsd: 0, skipped: 'could not read the requester balance — fee waived rather than charged blind' }
+  }
+  if (balanceUsd < bountyUsd + feeUsd) {
     throw new Error(
       `Not enough test USDC: posting a $${bountyUsd} bounty costs $${(bountyUsd + feeUsd).toFixed(2)} ` +
         `($${bountyUsd} escrowed + $${feeUsd.toFixed(2)} posting fee), and this agent holds $${balanceUsd.toFixed(2)}. ` +

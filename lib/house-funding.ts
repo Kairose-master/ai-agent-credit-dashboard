@@ -40,7 +40,7 @@ export type HouseFunding = {
 
 /** Current test-USDC balance of the house requester wallet. */
 export async function houseBalanceUsd(houseAgentId: string): Promise<{ address: string | null; balanceUsd: number | null }> {
-  const [house] = await db.select().from(agent).where(eq(agent.id, houseAgentId))
+  const [house] = await db.select({ smartAccountAddress: agent.smartAccountAddress }).from(agent).where(eq(agent.id, houseAgentId))
   const address = house?.smartAccountAddress ?? null
   if (!address) return { address: null, balanceUsd: null }
   try {

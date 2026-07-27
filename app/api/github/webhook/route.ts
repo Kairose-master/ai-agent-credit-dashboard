@@ -156,8 +156,14 @@ async function handleIssue(payload: any): Promise<Response> {
     await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
     const existing = await specsForIssue(repoFullName, issueNumber)
     if (existing.length > 0) {
-      const { readJobs } = await import('@/lib/onchain/labor')
-      const jobs = await readJobs().catch(() => [])
+      const { readJobsOrUnknown } = await import('@/lib/onchain/labor-read')
+      const jobs = await readJobsOrUnknown()
+      // An RPC hiccup here used to read as "nothing live for this issue" and
+      // escrow a SECOND bounty. Unknown chain state is not permission to spend.
+      if (jobs === null) {
+        await commentOnPr(repoFullName, issueNumber, `⚠️ Could not read the chain to check for an existing bounty — nothing was escrowed. Re-add the label to retry.`)
+        return Response.json({ status: 'deferred', reason: 'chain state unknown' })
+      }
       const statusById = new Map(jobs.map((j) => [j.id, j.status]))
       // ANY live job for this issue blocks a second escrow — not merely the
       // newest one, and not whichever row the database returned first.
@@ -228,8 +234,16 @@ async function handleIssue(payload: any): Promise<Response> {
     const candidates = await specsForIssue(repoFullName, issueNumber)
     if (candidates.length === 0) return Response.json({ status: 'ignored' })
 
-    const { readJobs, cancelJob } = await import('@/lib/onchain/labor')
-    const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
+    const { cancelJob } = await import('@/lib/onchain/labor')
+    const { readJobsOrUnknown } = await import('@/lib/onchain/labor-read')
+    const jobs = await readJobsOrUnknown({ maxAgeMs: 0 })
+    // Swallowing the read here answered "no Open job for this issue", which
+    // is a confident wrong answer to a question we could not see. `closed`
+    // fires once and the label is already gone, so nothing would retry —
+    // say what actually happened and leave it to the escrow sweeps.
+    if (jobs === null) {
+      return Response.json({ status: 'deferred', reason: 'chain state unknown — no refund attempted' })
+    }
     const statusById = new Map(jobs.map((j) => [j.id, j.status]))
     // Refund the job that is ACTUALLY Open, whichever spec row it belongs to.
     // A claimed job is a worker's committed work — a label cannot destroy it.

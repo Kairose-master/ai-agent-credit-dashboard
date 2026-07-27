@@ -383,6 +383,49 @@ because the defect was a missing clause and there is no function to call.
 
 ---
 
+## 12. `catch(() => [])` — when "I can't see" becomes "there's nothing there"
+
+**Symptom.** None observed. Found by auditing all 34 sites that swallow a
+chain read, and asking of each: *does anything spend when this comes back
+empty?*
+
+**Root cause.** `readJobs().catch(() => [])` is correct for a page that
+renders a list — a visitor sees nothing for a moment. It is inverted for
+anything that acts on absence:
+
+| Path | Reads absence as | Does |
+|---|---|---|
+| `restockBoard` | the board has drained | posts a fresh batch of escrowed jobs |
+| `tickJobFaucet` | the faucet has no Open jobs | refills to target |
+| `postI18nGapJobsCore` | no locale has an Open job | posts duplicates |
+| bounty-label idempotency | no job live for this issue | **escrows a second bounty** |
+
+`restockBoard` sits on the five-minute traffic tick, so a Sepolia hiccup
+doesn't misfire once — it bills once per tick for as long as the outage
+lasts. And the label path is the one users touch: an RPC blip while adding
+`bounty:$15` would double-escrow the issue.
+
+The same shape appeared in `collectPostingFee`, which skipped its
+affordability check when the balance read returned `null` — charging the fee
+blind, then watching the escrow revert on `USDC: balance`. Fee gone, no job,
+no refund: exactly what the check was written to prevent, reached through the
+check's own error handling.
+
+**Fix.** `lib/onchain/labor-read.ts` gives the distinction a type.
+`readJobsOrUnknown()` returns `null` for *unreadable* and `[]` for *empty*;
+`countOpenBy()` propagates the `null` so no caller can mistake it for zero.
+Every spending path now refuses on `null` with a stated reason, the webhook
+comments on the issue so the labeler knows to retry, and the posting fee is
+**waived** rather than charged against a balance nobody could read — losing
+the platform's cut beats taking a requester's money for nothing.
+
+Checked and left alone, because they already fail the safe way:
+`ensureHouseFunds` (won't mint on a `null` balance), `quoteReputationLimit`
+(returns a 0 limit on any error), `spentLast24h` (throws, so the cap blocks
+rather than opens), and every sweep whose empty result means "nothing to do".
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -415,7 +458,11 @@ Keep these true, and this class of bug stays dead:
 8. **Row order is not a decision.** No `.find` over an unordered result set
    where the choice matters — scope it in SQL, order it explicitly, and pick
    against live state (§10).
-9. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+9. **An empty result from a failed read is not an empty world.** Type the
+   difference (`null` = unknown, `[]` = empty) anywhere absence authorizes a
+   spend — and when in doubt, forgo the platform's revenue rather than take a
+   user's money on a guess (§12).
+10. **Ask for the rows and columns you need.** A read with no `WHERE` and no
    column list is a bug that has not surfaced yet — it silently grows, and it
    breaks the whole table's readers the day a column ships ahead of its
    migration (§11).

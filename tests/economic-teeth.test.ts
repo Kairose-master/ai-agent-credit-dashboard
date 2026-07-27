@@ -101,3 +101,24 @@ describe('collateralizedCreditLimit', () => {
     expect(collateralizedCreditLimit(25_000, [])).toBe(0)
   })
 })
+
+/**
+ * Unknown ≠ affordable. `collectPostingFee` used to skip its affordability
+ * check when the balance read failed, which charged the fee blind — and then
+ * the escrow reverts on `USDC: balance`, so the requester is out the fee with
+ * no job and no refund path. That is the precise outcome the check exists to
+ * prevent, reached by the check's own error handling.
+ */
+describe('posting fee under an unreadable balance', () => {
+  it('waives rather than charges blind', async () => {
+    const src = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('../lib/platform-fee.ts', import.meta.url), 'utf8'),
+    )
+    // The null branch must return before any transfer, not fall through it.
+    const nullBranch = src.indexOf('balanceUsd === null')
+    const transfer = src.indexOf('await transferUsdc(')
+    expect(nullBranch).toBeGreaterThan(-1)
+    expect(nullBranch).toBeLessThan(transfer)
+    expect(src.slice(nullBranch, transfer)).toContain('fee waived')
+  })
+})

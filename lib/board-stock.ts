@@ -50,13 +50,19 @@ export async function postI18nGapJobsCore(
   maxJobs: number,
   maxPerLocale: number = MAX_PER_LOCALE,
 ): Promise<{ posted: number; results: { title: string; ok: boolean; error?: string }[] }> {
-  const { readJobs, postJob } = await import('@/lib/onchain/labor')
+  const { postJob } = await import('@/lib/onchain/labor')
+  const { readJobsOrUnknown } = await import('@/lib/onchain/labor-read')
   const { keccak256, toHex } = await import('viem')
 
   const [existingJobs, existingSpecs] = await Promise.all([
-    readJobs().catch(() => []),
+    readJobsOrUnknown(),
     db.select().from(jobSpec).where(eq(jobSpec.requesterAgentId, houseAgentId)),
   ])
+  // The Open set below is the only thing stopping a locale being posted twice.
+  // Unknown chain state must not read as "no locale has an open job".
+  if (existingJobs === null) {
+    return { posted: 0, results: [{ title: '(all)', ok: false, error: 'chain read failed — refusing to post against unknown state' }] }
+  }
   const specByHash = new Map(existingSpecs.map((s) => [s.specHash, s]))
   const localesWithOpenJob = new Set(
     existingJobs
@@ -120,9 +126,14 @@ export async function restockBoard(target: number = BOARD_TARGET_OPEN): Promise<
   const [house] = await db.select({ address: agent.smartAccountAddress }).from(agent).where(eq(agent.id, houseAgentId))
   if (!house?.address) return { posted: 0, openBefore: 0, skipped: 'house agent not provisioned' }
 
-  const { readJobs } = await import('@/lib/onchain/labor')
-  const jobs = await readJobs().catch(() => [])
-  const openBefore = jobs.filter((j) => j.status === 'Open').length
+  // A failed chain read is NOT an empty board. This step runs on the
+  // five-minute traffic tick, so swallowing the error meant a Sepolia hiccup
+  // posted a fresh batch of escrowed jobs every tick it lasted.
+  const { readJobsOrUnknown, countOpenBy } = await import('@/lib/onchain/labor-read')
+  const openBefore = countOpenBy(await readJobsOrUnknown())
+  if (openBefore === null) {
+    return { posted: 0, openBefore: 0, skipped: 'chain read failed — refusing to restock against unknown state' }
+  }
   if (openBefore >= target) return { posted: 0, openBefore }
 
   const need = Math.min(MAX_PER_PASS, target - openBefore)

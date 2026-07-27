@@ -609,10 +609,15 @@ export async function tickJobFaucet(opts?: { force?: boolean }): Promise<FaucetR
   const faucet = await ensureFaucetAgent()
   if (!faucet?.smartAccountAddress) return { posted: 0, openBefore: 0, skipped: 'no faucet wallet' }
 
-  const { readJobs, postJob } = await import('@/lib/onchain/labor')
-  const jobs = await readJobs().catch(() => [])
-  const address = faucet.smartAccountAddress.toLowerCase()
-  const openCount = jobs.filter((j) => j.status === 'Open' && j.requester.toLowerCase() === address).length
+  const { postJob } = await import('@/lib/onchain/labor')
+  const { readJobsOrUnknown, countOpenBy } = await import('@/lib/onchain/labor-read')
+  // computeRefill posts against the shortfall, so a swallowed read error
+  // ("openCount = 0") is a standing instruction to refill a board that may
+  // already be full. The daily cap bounded the damage; it didn't prevent it.
+  const openCount = countOpenBy(await readJobsOrUnknown(), faucet.smartAccountAddress)
+  if (openCount === null) {
+    return { posted: 0, openBefore: 0, skipped: 'chain read failed — refusing to refill against unknown state' }
+  }
 
   const dayStart = new Date()
   dayStart.setUTCHours(0, 0, 0, 0)

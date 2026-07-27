@@ -78,8 +78,10 @@ export function isValidAddress(value: string): value is `0x${string}` {
 /** Sum of transfers in the last 24h, read from the event ledger. */
 export async function spentLast24h(agentId: string): Promise<number> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  // `detail` only: a bare select asks for every agent_events column, so a
+  // column shipped ahead of its migration would break EVERY withdrawal.
   const rows = await db
-    .select()
+    .select({ detail: agentEvent.detail })
     .from(agentEvent)
     .where(
       and(
