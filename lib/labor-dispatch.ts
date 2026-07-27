@@ -8,6 +8,7 @@ import { db } from '@/lib/db'
 import { jobSpec, agent as agentTable } from '@/lib/db/schema'
 import { and, eq, isNull, lt, or } from 'drizzle-orm'
 import { runAgentTask } from '@/lib/agent-tasks'
+import { fenceUntrusted, untrustedNonce, workerBriefClause } from '@/lib/untrusted-input'
 
 type AgentRow = typeof agentTable.$inferSelect
 type SpecRow = typeof jobSpec.$inferSelect
@@ -101,8 +102,22 @@ export function isClaimedByOther(spec: SpecRow, agentId: string): boolean {
   )
 }
 
-export function buildJobTaskPrompt(spec: SpecRow): string {
-  return [
+/**
+ * Build the prompt a worker agent actually runs.
+ *
+ * Everything the requester wrote — title, description, acceptance criteria,
+ * test code — is fenced with a nonce minted HERE, at dispatch, strictly after
+ * they wrote it. We spent real effort fencing the worker's submission against
+ * the grader and left this direction wide open, which was backwards: a grader
+ * only produces a verdict, while a worker has `run_python`, `fetch_url`, a
+ * wallet API, and (on the MCP path) whatever tools live in its operator's own
+ * session. Posting a $1 job was write access to somebody else's agent.
+ *
+ * `nonce` is injectable so the shape can be asserted in tests.
+ */
+export function buildJobTaskPrompt(spec: SpecRow, nonce?: string): string {
+  const n = nonce ?? untrustedNonce()
+  const brief = [
     spec.title,
     spec.description,
     spec.acceptanceCriteria ? `Acceptance criteria (what "done" means):\n${spec.acceptanceCriteria}` : '',
@@ -125,6 +140,10 @@ export function buildJobTaskPrompt(spec: SpecRow): string {
   ]
     .filter(Boolean)
     .join('\n\n')
+
+  // The clause comes FIRST and outside the fence: it is the platform
+  // speaking, and it has to be read before the customer's text, not after it.
+  return [workerBriefClause(n), fenceUntrusted('customer_task', brief, n)].join('\n\n')
 }
 
 /** Start the worker's real run for an already-accepted job and link the

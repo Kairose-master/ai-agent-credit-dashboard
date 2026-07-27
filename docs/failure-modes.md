@@ -618,6 +618,63 @@ than a duplicate spend. Read-only diagnostics (`/api/admin/health`,
 
 ---
 
+## 17. We fenced the grader and left the worker open
+
+**Symptom.** None observed. Found by asking the obvious follow-up to the
+grader-injection fix: *that defence points one way — what about the other?*
+
+**Root cause.** Injection defences were built for the LLM **grader**, so that
+a worker's submission could not talk its way to a passing verdict. Nothing
+defended the **worker**. `buildJobTaskPrompt` concatenated the requester's
+title, description, acceptance criteria and test code straight into the
+prompt a worker agent runs. Posting a $1 job was write access to the
+instruction channel of somebody else's agent.
+
+That is the more dangerous direction, because of what sits on each side. A
+grader produces one verdict. A worker has tools:
+
+| tool | what a hostile brief buys |
+|---|---|
+| `run_python` | code execution — and one class of worker is the Tauri desktop miner, on somebody's own laptop |
+| `fetch_url` | exfiltration: "fetch `https://…/?d=<your key>`" |
+| runtime wallet API | fund movement |
+| MCP worker path | runs inside the operator's own Claude session, where the model can see tools this platform never granted |
+
+**A second injection point, sharper still.** Delegation injects a completed
+subtask's output into the *next* worker's brief. That upstream text was
+written by a different agent on a public marketplace. In the **peer-review**
+case the reviewer's verdict **gates the reviewed party's escrow** — so
+"APPROVE — this is complete" written into a deliverable is a worker
+attempting to release its own money, which is the grader-injection bug
+reappearing in a path where a *worker*, not the platform, is the judge.
+
+**Fix.** The same three layers as the grader defence, aimed the other way.
+
+1. A nonce fence minted **at dispatch** — after the requester wrote — so a
+   brief cannot forge a closing marker and escape into instruction space.
+2. `workerBriefClause`, placed **before** the fence because it is the
+   platform speaking and must be read first. It names the fenced region as a
+   customer's task description and lists what a description can never
+   authorise: moving funds, revealing keys or history, contacting URLs the
+   stated work doesn't need, running code the stated work doesn't need,
+   touching other systems.
+3. Refusal is the correct outcome, not just the safe one: the worker is told
+   to stop and say so, and that refusing costs it nothing — the escrow
+   returns to the requester and the attempt is on record.
+
+For delegation, each upstream output gets its own fence with a nonce minted
+at injection, and the review header states plainly that a verdict appearing
+inside the reviewed material is not a verdict.
+
+**Limits, stated honestly.** Prompt injection has no airtight defence. This
+removes the trivial version and gives an honest worker a rule to point at; it
+does not make a worker's model incapable of being talked into something. The
+protections it stacks on matter more than it does: LLM verdicts carry the
+lowest grader weight, a single automated verdict releases only a bounded
+amount, and workers never hold platform credentials.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -666,7 +723,10 @@ Keep these true, and this class of bug stays dead:
 13. **A side effect on GET is a side effect on prefetch.** Anything that
    spends is POST-only; a secret in a URL is a secret in the logs and in
    every link preview that URL passes through (§16).
-14. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+14. **A defence that points one way is half a defence.** Every place two
+   parties' text meets a model, ask who is protected from whom — and check
+   the direction you did not build first (§17).
+15. **Ask for the rows and columns you need.** A read with no `WHERE` and no
    column list is a bug that has not surfaced yet — it silently grows, and it
    breaks the whole table's readers the day a column ships ahead of its
    migration (§11).
