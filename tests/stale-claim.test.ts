@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   CLAIM_WARN_AT,
   CLAIM_WARN_GRACE,
@@ -94,8 +95,11 @@ describe('claimPhase', () => {
     expect(claimPhase(now, at(48), new Date(now.getTime() - 60_000), deadline)).toBe('working')
   })
 
-  it('no evidence at all is working — never escalate against what we cannot see', () => {
-    expect(claimPhase(now, null, null, deadline)).toBe('working')
+  it('no evidence at all is UNKNOWN, not working', () => {
+    // Reporting it as `working` is what hid seven frozen jobs: for a job that
+    // has been Accepted on-chain for days with no claim record, "still
+    // working" is a false statement. It still must not be reclaimed.
+    expect(claimPhase(now, null, null, deadline)).toBe('unknown')
   })
 })
 
@@ -106,6 +110,11 @@ describe('reclaimDecision', () => {
 
   it('does nothing while the claim is being worked', () => {
     expect(reclaimDecision(now, 'working', null, deadline)).toBe('wait')
+  })
+
+  it('never escalates an unknown claim, warned or not — invariant 5 holds', () => {
+    expect(reclaimDecision(now, 'unknown', null, deadline)).toBe('wait')
+    expect(reclaimDecision(now, 'unknown', ago(deadline), deadline)).toBe('wait')
   })
 
   it('warns once inside the warning window, then waits', () => {
@@ -134,5 +143,29 @@ describe('reclaimDecision', () => {
     expect(CLAIM_WARN_AT).toBeLessThan(1)
     expect(CLAIM_WARN_GRACE).toBeGreaterThan(0)
     expect((1 - CLAIM_WARN_AT) * deadline).toBeGreaterThan(30 * 60_000)
+  })
+})
+
+
+/**
+ * `unknown` must be visible, or the safety rule that produces it becomes a
+ * silent escrow freeze — the third form of §5's limbo in one session, and this
+ * one was created by my own guard.
+ */
+describe('unknown claims are counted, not reported as healthy', () => {
+  const src = readFileSync(new URL('../lib/stale-claim.ts', import.meta.url), 'utf8')
+
+  it('is blocked with its own reason', () => {
+    expect(src).toContain("'no-claim-record'")
+    expect(src).toContain("block(job.id, 'no-claim-record'")
+  })
+
+  it('is still never reclaimed', () => {
+    // The fix is visibility. Acting on absent evidence would be the worse bug.
+    expect(src).toMatch(/phase === 'working' \|\| phase === 'unknown'\) return 'wait'/)
+  })
+
+  it('isClaimAbandoned stays false for unknown', () => {
+    expect(isClaimAbandoned(now, null, null, 6 * 3_600_000)).toBe(false)
   })
 })

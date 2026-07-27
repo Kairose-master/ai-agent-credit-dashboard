@@ -770,11 +770,49 @@ reasons — `no-spec`, `no-requester-on-spec`, `unresolvable-worker`,
 `block()` call sites rather than the presence of any one of them, precisely so
 the next added `continue` fails a test instead of quietly reading zero.
 
-**Still open.** Seven jobs hold escrow that this sweep structurally cannot
-free, because it needs a spec row to find the parties. They are now visible
-with a reason, which is the difference between a known problem and a silent
-one; the recovery for them is a separate job (resolve parties from the chain
-alone, without the spec) and is not built.
+**Re-measured again, and it was not that either.** The next tick still read
+`0/15 reclaimed, 0 warned` with **no** blocked count — so the seven were not
+hitting the spec check either. This time the arithmetic forced the answer
+rather than leaving room to guess: `examined` counts every job, so all 15
+entered the loop; no `block()` fired, so every spec exists; no error line
+appeared, so nothing threw. The only remaining exits are `phase === 'working'`
+and `action === 'wait'`, and eight were legitimately waiting out their grace
+window. The other seven were being classified **`working`**.
+
+Not from elapsed time — they had been `Accepted` for days. From this:
+
+```ts
+const last = Math.max(claimedAt?.getTime() ?? 0, lastActivityAt?.getTime() ?? 0)
+if (last === 0) return 'working'   // no evidence ⇒ don't touch it
+```
+
+Seven jobs have **no claim timestamp and no task activity** — precisely the
+situation §1's own safety notes describe, where the off-chain claim lock has
+been TTL'd away. Invariant 5 says never act on missing evidence, and that rule
+is correct and stays. **Calling it `working` is what was wrong.** For a job
+`Accepted` on-chain for days with no claim record, "still working" is a false
+statement, and it made the sweep report a healthy `0 warned` while escrow
+stayed locked. §5's limbo, third form in one session, and this time produced by
+my own guard.
+
+**Fix.** A fourth phase, `unknown`. It still never escalates —
+`reclaimDecision` returns `wait` for it whether or not a warning exists — but
+it is counted as `blocked: { 'no-claim-record': 7 }` and logged per job. The
+safety rule keeps its behaviour and loses its disguise.
+
+**Still open, and now actually named.** Recovering these needs the accept
+timestamp from the chain (the `AcceptedJob` event's block), which `readJobs`
+does not expose. Until that exists, seven jobs hold escrow that no sweep can
+free — visible, counted, and not silently reported as fine.
+
+**Three wrong hypotheses in one session**, each disproved by re-measuring
+rather than by reasoning harder: address casing, then a missing spec row, then
+the phase classifier. The thing that worked every time was writing down a
+number the next tick would either produce or not. The guard test now derives
+its expected `block()` count from the `BlockedReason` union instead of a
+hardcoded `4`, because the hardcoded version's first act was to fail when a
+fifth reason arrived — which would have made the test the thing you edit to
+get green.
 
 **What made this findable.** Writing the prediction down. "`Accepted` should
 fall" was cheap to state and cheap to check, and it was wrong in a way that

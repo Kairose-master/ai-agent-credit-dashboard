@@ -72,7 +72,25 @@ export const CLAIM_WARN_AT = 0.7
  *  With the 6h default that is ~54 minutes to finish or say something. */
 export const CLAIM_WARN_GRACE = 0.15
 
-export type ClaimPhase = 'working' | 'warn' | 'expired'
+/**
+ * `unknown` is the phase this file was missing, and its absence hid seven
+ * frozen jobs in plain sight.
+ *
+ * `claimPhase` treated "no claim timestamp and no task activity" as `working`,
+ * because of the rule that protects a genuinely-running job from being
+ * reclaimed out from under it (invariant 5: never act on missing evidence).
+ * The rule is right. Reporting it as `working` is not: for a job that has been
+ * `Accepted` on-chain for days with no off-chain claim record — the exact
+ * situation §1 warns about, where the claim lock has been TTL'd away — "still
+ * working" is a false statement, and it made the sweep look like it had
+ * nothing to do while escrow stayed locked.
+ *
+ * So: still never reclaimed, but named and counted. Recovering these needs the
+ * accept timestamp from the chain (the AcceptedJob event's block), which
+ * `readJobs` does not expose today — a separate change, tracked in
+ * docs/failure-modes.md §18 rather than guessed at here.
+ */
+export type ClaimPhase = 'working' | 'unknown' | 'warn' | 'expired'
 
 /**
  * Where this claim sits against its deadline. Pure.
@@ -88,7 +106,7 @@ export function claimPhase(
   deadlineMs: number = claimDeadlineMs(),
 ): ClaimPhase {
   const last = Math.max(claimedAt?.getTime() ?? 0, lastActivityAt?.getTime() ?? 0)
-  if (last === 0) return 'working'
+  if (last === 0) return 'unknown'
   const elapsed = now.getTime() - last
   if (elapsed > deadlineMs) return 'expired'
   if (elapsed > deadlineMs * CLAIM_WARN_AT) return 'warn'
@@ -111,7 +129,9 @@ export function reclaimDecision(
   warnedAt: Date | null,
   deadlineMs: number = claimDeadlineMs(),
 ): ClaimAction {
-  if (phase === 'working') return 'wait'
+  // `unknown` never escalates — that is invariant 5 and it stays. The caller
+  // is responsible for counting it as blocked rather than as "nothing to do".
+  if (phase === 'working' || phase === 'unknown') return 'wait'
   if (!warnedAt) return 'warn'
   if (phase === 'warn') return 'wait' // already warned, still inside the deadline
   return now.getTime() - warnedAt.getTime() >= deadlineMs * CLAIM_WARN_GRACE ? 'reclaim' : 'wait'
@@ -156,6 +176,7 @@ export async function abandonedResultHash(): Promise<`0x${string}`> {
 export type BlockedReason =
   | 'no-spec' // no job_specs row for this on-chain specHash
   | 'no-requester-on-spec' // spec exists but carries no requesterAgentId
+  | 'no-claim-record' // Accepted on-chain, but no claimedAt and no task activity
   | 'unresolvable-worker'
   | 'unresolvable-requester'
 
@@ -223,6 +244,12 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
       }
       const phase = claimPhase(now, spec.claimedAt, lastActivityAt)
       if (phase === 'working') continue
+      if (phase === 'unknown') {
+        // Deliberately not reclaimed — but it is frozen escrow, not idle work,
+        // so it gets counted and named instead of silently reading as healthy.
+        block(job.id, 'no-claim-record', `claimedAt is null and no task activity for spec ${job.specHash}`)
+        continue
+      }
 
       // Has this claim already been warned, and when?
       const [warnRow] = await db

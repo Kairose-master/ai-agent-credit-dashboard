@@ -60,16 +60,20 @@ describe('address comparisons on money paths', () => {
 describe('blocked jobs are surfaced by reason, not skipped', () => {
   const src = read('lib/stale-claim.ts')
 
-  it('EVERY continue that means frozen escrow goes through block()', () => {
+  it('EVERY declared reason has exactly one block() call site', () => {
     // The first version of this instrumentation covered the address lookups
     // and left `!spec?.requesterAgentId` silent — the same defect one line
     // earlier, which is why the counter read 0 while seven jobs were skipped.
-    // So assert on the count of reasons, not on any single one.
-    for (const reason of ['no-spec', 'no-requester-on-spec', 'unresolvable-worker', 'unresolvable-requester']) {
-      expect(src, reason).toContain(`'${reason}'`)
-    }
-    // Four block() calls, one per reason.
-    expect(src.match(/block\(job\.id, '/g)?.length).toBe(4)
+    //
+    // So the expected count is DERIVED from the BlockedReason union rather
+    // than hardcoded: adding a reason without a call site fails, and adding a
+    // call site without a reason fails to typecheck. A hardcoded number just
+    // made this test the thing you edit to make the build green.
+    const union = src.slice(src.indexOf('export type BlockedReason'), src.indexOf('export type ReclaimReport'))
+    const reasons = [...union.matchAll(/\| '([a-z-]+)'/g)].map((m) => m[1])
+    expect(reasons.length).toBeGreaterThanOrEqual(5)
+    for (const reason of reasons) expect(src, reason).toContain(`block(job.id, '${reason}'`)
+    expect(src.match(/block\(job\.id, '/g)?.length).toBe(reasons.length)
   })
 
   it('a bare continue no longer precedes the first block()', () => {
