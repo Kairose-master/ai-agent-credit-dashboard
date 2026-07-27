@@ -19,7 +19,7 @@
  */
 import { db } from '@/lib/db'
 import { agent, agentEvent, jobSpec } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { logPlatformEvent } from '@/lib/platform-feed'
 
@@ -428,11 +428,24 @@ export async function sweepStuckGradedJobs(): Promise<void> {
     // query silently skipped those jobs forever. specHash is always present on
     // both sides, so nothing Submitted escapes the sweep now; we backfill the
     // missing onchainJobId so downstream settlement (which keys off it) works.
-    const allSpecs = await db.select().from(jobSpec)
-    const specByHash = new Map(allSpecs.map((s) => [s.specHash.toLowerCase(), s]))
-
+    // Read the chain FIRST so the spec query can be narrowed to the jobs that
+    // could possibly need work. This used to load every spec row in the table
+    // to build a lookup and then use only the Submitted handful — fine at a
+    // few hundred jobs, and quietly worse every week, on a sweep that runs
+    // from traffic. (Column-level fragility is already handled here by the
+    // ensureJobSpecColumns call above; settlement genuinely reads most of the
+    // row, so the projection stays wide and only the row count narrows.)
     const { readJobs } = await import('@/lib/onchain/labor')
     const jobs = await readJobs()
+
+    const submittedHashes = jobs.filter((j) => j.status === 'Submitted').map((j) => j.specHash)
+    if (submittedHashes.length === 0) return
+    // Match tolerantly on case, exactly as the lowercased map below did: the
+    // chain and keccak256 both hand back lowercase hex today, but a single
+    // mismatched byte-case would silently skip a job's settlement forever.
+    const hashVariants = [...new Set(submittedHashes.flatMap((h) => [h, h.toLowerCase()]))]
+    const allSpecs = await db.select().from(jobSpec).where(inArray(jobSpec.specHash, hashVariants))
+    const specByHash = new Map(allSpecs.map((s) => [s.specHash.toLowerCase(), s]))
 
     for (const job of jobs) {
       if (job.status !== 'Submitted') continue
