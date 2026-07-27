@@ -306,6 +306,83 @@ ledger exists to prevent.
 
 ---
 
+## 10. `.find` over an unordered table: one issue, two money bugs
+
+**Symptom.** None reported — found by sweeping every unscoped table read
+after §1–§9, which turned out to be hiding a correctness bug rather than
+just a cost.
+
+**Root cause.** The label-to-bounty webhook answered both of its questions
+with a JavaScript `.find` over the *entire* `job_specs` table:
+
+```ts
+const existing = (await db.select().from(jobSpec)).find(
+  (sp) => sp.repoFullName === repo && sp.issueNumber === n && sp.onchainJobId !== null,
+)
+```
+
+One GitHub issue can own **several** spec rows over its life — label,
+cancel, re-label; or a failed grade that auto-reposted. `.find` returns
+whichever row Postgres happened to hand back first, and SQL guarantees no
+order at all without `ORDER BY`. So:
+
+- **Double escrow.** The idempotency check could match a *finished* row,
+  read "nothing live here", and escrow a second bounty for the same issue.
+- **Stranded escrow.** Removing the label could "cancel" a long-dead job id
+  while the real Open escrow stayed locked — and with the label now gone,
+  nothing left would ever release it.
+
+Both are silent. Neither throws.
+
+**Fix.** `specsForIssue()` scopes the read in SQL
+(`repoFullName` + `issueNumber` + `onchainJobId IS NOT NULL`,
+`ORDER BY created_at DESC`) and returns *all* candidates. The decision then
+comes from live chain state, not row order, via a pure
+`pickIssueJob(candidates, statusOf, allowed)` — **any** live job blocks a
+second escrow; an unlabel refunds the one that is actually `Open`.
+`tests/issue-job-pick.test.ts` has one case per bug above.
+
+The cancel path also learned §1's lesson: a `UserOpPendingError` now
+comments "the refund is confirming on-chain" instead of an error the
+issue's author would read as *my money is stuck*.
+
+---
+
+## 11. The query that looked scoped and wasn't
+
+**Symptom.** Nothing broken. Everything a little slower every week.
+
+**Root cause.** Three read paths contained this:
+
+```ts
+const taskIds = specs.map((s) => s.agentTaskId).filter(Boolean)
+const tasks = taskIds.length > 0 ? await db.select().from(agentTask) : []
+```
+
+The guard reads like a lookup by id. The query has **no `WHERE` clause** —
+it fetches every `agent_tasks` row, every column, including the full text of
+every deliverable the platform has ever produced. One of the three was
+`publicJobs()`, which backs the guest landing page, `GET /api/tasks`, and
+the Minecraft poller: the entire deliverable archive, pulled down to render
+ten cards.
+
+This is the failure mode that never trips an alarm. It is always correct,
+so tests pass and logs are clean; it only ever gets more expensive.
+
+**Fix.** Slice first, then fetch what the visible rows need:
+`inArray(agentTask.id, taskIds)` with the three columns the cards render.
+Same treatment for `getJobs`, `getDisputedJobs`, and the artifact list.
+`sweepPriceRaises` pushed its `pricing IS NOT NULL AND onchain_job_id IS NOT
+NULL` filter into SQL and now selects an explicit `RAISE_SPEC_COLUMNS` —
+which also closes the schema-ahead-of-migration trap that took the public
+job feed down twice (a bare `db.select()` asks for every column *schema.ts*
+declares, whether or not its migration has run).
+
+`tests/scoped-reads.test.ts` guards the shape rather than the behaviour,
+because the defect was a missing clause and there is no function to call.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -335,3 +412,10 @@ Keep these true, and this class of bug stays dead:
    is in — not the row that was convenient to read.
 7. **Publish the unflattering numbers.** Both §1 and §5 were found by looking
    at a page built to expose them.
+8. **Row order is not a decision.** No `.find` over an unordered result set
+   where the choice matters — scope it in SQL, order it explicitly, and pick
+   against live state (§10).
+9. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+   column list is a bug that has not surfaced yet — it silently grows, and it
+   breaks the whole table's readers the day a column ships ahead of its
+   migration (§11).

@@ -18,7 +18,40 @@
  */
 import { db } from '@/lib/db'
 import { jobSpec } from '@/lib/db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, isNotNull } from 'drizzle-orm'
+
+/**
+ * Every spec ever minted from one GitHub issue, newest first.
+ *
+ * The two callers below both used to read the WHOLE job_specs table and take
+ * the first JavaScript `.find` match, which is wrong twice over. Row order is
+ * unspecified, and an issue can legitimately have several specs — label,
+ * cancel, re-label, or a failed grade that auto-reposted. So `.find` could
+ * return a long-dead job while a live one existed, which meant the
+ * idempotency check below could pass and escrow a SECOND bounty for the same
+ * issue, and the unlabel/close path could "cancel" the dead one and leave the
+ * live escrow locked with no label left to release it.
+ *
+ * Scoped in SQL, ordered newest-first, and returning all candidates so the
+ * caller decides against live chain state rather than against row order.
+ */
+async function specsForIssue(repoFullName: string, issueNumber: number) {
+  return db
+    .select({
+      specHash: jobSpec.specHash,
+      requesterAgentId: jobSpec.requesterAgentId,
+      onchainJobId: jobSpec.onchainJobId,
+    })
+    .from(jobSpec)
+    .where(
+      and(
+        eq(jobSpec.repoFullName, repoFullName),
+        eq(jobSpec.issueNumber, issueNumber),
+        isNotNull(jobSpec.onchainJobId),
+      ),
+    )
+    .orderBy(desc(jobSpec.createdAt))
+}
 
 export const maxDuration = 300 // settlement runs on-chain UserOps
 
@@ -121,15 +154,17 @@ async function handleIssue(payload: any): Promise<Response> {
 
     // Idempotency: one open job per (repo, issue).
     await (await import('@/lib/db/ensure-columns')).ensureJobSpecColumns()
-    const existing = (await db.select().from(jobSpec)).find(
-      (sp) => sp.repoFullName === repoFullName && sp.issueNumber === issueNumber && sp.onchainJobId !== null,
-    )
-    if (existing) {
+    const existing = await specsForIssue(repoFullName, issueNumber)
+    if (existing.length > 0) {
       const { readJobs } = await import('@/lib/onchain/labor')
       const jobs = await readJobs().catch(() => [])
-      const live = jobs.find((j) => j.id === existing.onchainJobId)
-      if (live && (live.status === 'Open' || live.status === 'Accepted' || live.status === 'Submitted')) {
-        return Response.json({ status: 'ignored', reason: 'job already live for this issue' })
+      const statusById = new Map(jobs.map((j) => [j.id, j.status]))
+      // ANY live job for this issue blocks a second escrow — not merely the
+      // newest one, and not whichever row the database returned first.
+      const { pickIssueJob } = await import('@/lib/bounty-label')
+      const live = pickIssueJob(existing, (id) => statusById.get(id))
+      if (live) {
+        return Response.json({ status: 'ignored', reason: `job #${live.jobId} already live for this issue` })
       }
     }
 
@@ -165,7 +200,10 @@ async function handleIssue(payload: any): Promise<Response> {
         bountyUsd,
         issueNumber,
       })
-      const [posted] = (await db.select().from(jobSpec).where(eq(jobSpec.specHash, res.specHash)))
+      const [posted] = await db
+        .select({ onchainJobId: jobSpec.onchainJobId })
+        .from(jobSpec)
+        .where(eq(jobSpec.specHash, res.specHash))
       await commentOnPr(repoFullName, issueNumber, bountyPostedComment({ bountyUsd, jobId: posted?.onchainJobId ?? null, origin }))
       const { logPlatformEvent } = await import('@/lib/platform-feed')
       await logPlatformEvent('BOUNTY_LABELED', `A bounty label minted a $${bountyUsd} job from ${repoFullName}#${issueNumber}`).catch(() => {})
@@ -187,25 +225,37 @@ async function handleIssue(payload: any): Promise<Response> {
         return Response.json({ status: 'ignored', reason: 'another bounty label remains' })
       }
     }
-    const spec = (await db.select().from(jobSpec)).find(
-      (sp) => sp.repoFullName === repoFullName && sp.issueNumber === issueNumber && sp.onchainJobId !== null,
-    )
-    if (!spec?.requesterAgentId || spec.onchainJobId === null) return Response.json({ status: 'ignored' })
+    const candidates = await specsForIssue(repoFullName, issueNumber)
+    if (candidates.length === 0) return Response.json({ status: 'ignored' })
 
     const { readJobs, cancelJob } = await import('@/lib/onchain/labor')
     const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
-    const live = jobs.find((j) => j.id === spec.onchainJobId)
+    const statusById = new Map(jobs.map((j) => [j.id, j.status]))
+    // Refund the job that is ACTUALLY Open, whichever spec row it belongs to.
     // A claimed job is a worker's committed work — a label cannot destroy it.
-    if (!live || live.status !== 'Open') {
-      return Response.json({ status: 'ignored', reason: 'job not Open — a claimed job outlives its label' })
+    const { pickIssueJob } = await import('@/lib/bounty-label')
+    const match = pickIssueJob(candidates, (id) => statusById.get(id), ['Open'])
+    if (!match) {
+      return Response.json({ status: 'ignored', reason: 'no Open job for this issue — a claimed job outlives its label' })
     }
+    const { spec } = match
+    if (!spec.requesterAgentId) return Response.json({ status: 'ignored', reason: 'no requester on record' })
     try {
-      await cancelJob(spec.requesterAgentId, spec.onchainJobId)
+      await cancelJob(spec.requesterAgentId, match.jobId)
       await commentOnPr(repoFullName, issueNumber, `↩️ Bounty cancelled and the escrow refunded (job was still unclaimed).`)
       const { logPlatformEvent } = await import('@/lib/platform-feed')
       await logPlatformEvent('BOUNTY_UNLABELED', `Bounty on ${repoFullName}#${issueNumber} cancelled while unclaimed — escrow refunded`).catch(() => {})
       return Response.json({ status: 'ok', cancelled: spec.onchainJobId })
     } catch (error) {
+      // A cancel whose receipt never arrived was still accepted by the
+      // bundler and usually lands, so do not tell the issue it failed —
+      // that reads as "your money is stuck" for a refund that is in flight.
+      const { isUserOpPending } = await import('@/lib/onchain/account')
+      if (isUserOpPending(error)) {
+        console.warn(`[github/webhook] cancel of job ${spec.onchainJobId} is pending confirmation`)
+        await commentOnPr(repoFullName, issueNumber, `↩️ Bounty cancelled — the refund is confirming on-chain.`)
+        return Response.json({ status: 'pending', cancelled: spec.onchainJobId })
+      }
       console.error('[github/webhook] bounty cancel failed:', error)
       return Response.json({ status: 'error' }, { status: 200 })
     }

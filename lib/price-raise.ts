@@ -31,10 +31,45 @@ import { retry, retryRpc } from '@/lib/labor-settle'
 const RAISE_SWEEP_COOLDOWN_MS = 60_000
 let lastRaiseSweepAt = 0
 
+/**
+ * Exactly the columns a raise copies into its replacement row — no more.
+ *
+ * `raiseJobPrice` used to take a whole `jobSpec.$inferSelect`, which forced
+ * its caller to `db.select()` with no column list, which asks Postgres for
+ * every column schema.ts declares whether or not that column's migration has
+ * run yet. That is the failure that has taken the public job feed down twice.
+ * Naming the fields here makes the sweep's projection explicit and keeps a
+ * newly-declared column from breaking price raises before it exists.
+ */
+export const RAISE_SPEC_COLUMNS = {
+  specHash: jobSpec.specHash,
+  title: jobSpec.title,
+  description: jobSpec.description,
+  acceptanceCriteria: jobSpec.acceptanceCriteria,
+  requesterAgentId: jobSpec.requesterAgentId,
+  attachmentUrl: jobSpec.attachmentUrl,
+  attachmentName: jobSpec.attachmentName,
+  testCode: jobSpec.testCode,
+  deliverableKind: jobSpec.deliverableKind,
+  requiredCapabilities: jobSpec.requiredCapabilities,
+  repoFullName: jobSpec.repoFullName,
+  baseBranch: jobSpec.baseBranch,
+  autoApprove: jobSpec.autoApprove,
+  failedWorkerIds: jobSpec.failedWorkerIds,
+  repostCount: jobSpec.repostCount,
+  onchainJobId: jobSpec.onchainJobId,
+  pricing: jobSpec.pricing,
+  createdAt: jobSpec.createdAt,
+} as const
+
+export type RaisableSpec = {
+  [K in keyof typeof RAISE_SPEC_COLUMNS]: typeof jobSpec.$inferSelect[K]
+}
+
 /** Raise one Open job to `nextUsd`. Returns the new on-chain job id, or null
  *  if the raise did not happen (which is always a safe outcome). */
 export async function raiseJobPrice(
-  spec: typeof jobSpec.$inferSelect,
+  spec: RaisableSpec,
   nextUsd: number,
 ): Promise<number | null> {
   if (!spec.requesterAgentId || spec.onchainJobId === null || !spec.pricing) return null
@@ -208,7 +243,10 @@ export async function sweepPriceRaises(): Promise<number> {
     const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
     if (!isLaborMarketConfigured()) return 0
 
-    const specs = (await db.select().from(jobSpec)).filter((s) => s.pricing && s.onchainJobId !== null)
+    const specs = await db
+      .select(RAISE_SPEC_COLUMNS)
+      .from(jobSpec)
+      .where(and(isNotNull(jobSpec.pricing), isNotNull(jobSpec.onchainJobId)))
     if (specs.length === 0) return 0
 
     const { readJobs } = await import('@/lib/onchain/labor')

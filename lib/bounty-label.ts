@@ -83,3 +83,34 @@ export function bountyLabelOn(labels: Array<{ name?: string }> | undefined): num
   }
   return null
 }
+
+/**
+ * One GitHub issue can own several job specs over its life — label, cancel,
+ * re-label; or a failed grade that auto-reposted. Both webhook decisions that
+ * follow ("is a job already live for this issue?" and "which job does an
+ * unlabel refund?") therefore have to be answered against LIVE CHAIN STATE,
+ * never against whichever spec row the database happened to return first.
+ *
+ * Taking the first row was two separate money bugs. A stale row that reads as
+ * dead let a second `bounty:$N` label escrow the same issue twice. And an
+ * unlabel that matched a stale row "cancelled" a long-finished job id while
+ * the real escrow stayed locked — with the label now gone, nothing left would
+ * ever release it.
+ *
+ * `candidates` is expected newest-first, so among several live jobs the most
+ * recent wins; correctness does not depend on the order, only the tie-break.
+ */
+export const LIVE_JOB_STATUSES = ['Open', 'Accepted', 'Submitted'] as const
+
+export function pickIssueJob<T extends { onchainJobId: number | null }>(
+  candidates: readonly T[],
+  statusOf: (jobId: number) => string | undefined,
+  allowed: readonly string[] = LIVE_JOB_STATUSES,
+): { spec: T; jobId: number } | null {
+  for (const spec of candidates) {
+    if (spec.onchainJobId === null) continue
+    const status = statusOf(spec.onchainJobId)
+    if (status !== undefined && allowed.includes(status)) return { spec, jobId: spec.onchainJobId }
+  }
+  return null
+}

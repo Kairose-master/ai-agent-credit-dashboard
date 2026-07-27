@@ -6,7 +6,7 @@ import { db } from '@/lib/db'
 import { SAFE_JOB_SPEC_COLUMNS } from '@/lib/db/safe-select'
 import { agent, agentEvent, agentTask, jobSpec, user } from '@/lib/db/schema'
 import { recalculateCredit } from '@/lib/credit-engine'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { asActionError } from '@/lib/action-error'
@@ -86,8 +86,18 @@ export async function getJobs() {
   const specs = await db.select(SAFE_JOB_SPEC_COLUMNS).from(jobSpec)
   const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
-  const taskIds = specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id))
-  const tasks = taskIds.length > 0 ? await db.select().from(agentTask) : []
+  // The `taskIds.length > 0 ?` guard read like a scoped lookup, but the query
+  // behind it had no WHERE clause: every agent_tasks row, every column, on
+  // every load of this page — including the prompt and output text of every
+  // run the platform has ever done. Ask for the three fields the cards render,
+  // for the tasks actually referenced.
+  const taskIds = [...new Set(specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id)))]
+  const tasks = taskIds.length > 0
+    ? await db
+        .select({ id: agentTask.id, status: agentTask.status, output: agentTask.output, error: agentTask.error })
+        .from(agentTask)
+        .where(inArray(agentTask.id, taskIds))
+    : []
   const taskById = new Map(tasks.map((t) => [t.id, t]))
 
   const agents = await db.select().from(agent).where(eq(agent.userId, userId))
@@ -107,9 +117,12 @@ export async function getJobs() {
   const { artifact } = await import('@/lib/db/schema')
   let artifactRows: { id: string; taskId: string; name: string; mime: string }[] = []
   try {
-    artifactRows = await db
-      .select({ id: artifact.id, taskId: artifact.taskId, name: artifact.name, mime: artifact.mime })
-      .from(artifact)
+    if (taskIds.length > 0) {
+      artifactRows = await db
+        .select({ id: artifact.id, taskId: artifact.taskId, name: artifact.name, mime: artifact.mime })
+        .from(artifact)
+        .where(inArray(artifact.taskId, taskIds))
+    }
   } catch { /* table missing until migration runs */ }
   const artifactsByTask = new Map<string, { id: string; name: string; mime: string }[]>()
   for (const a of artifactRows) {
@@ -325,14 +338,21 @@ export async function getDisputedJobs() {
   const jobs = await readJobs()
   const disputed = jobs.filter((j) => j.status === 'Disputed')
 
-  const specs = await db.select().from(jobSpec)
-  const specByHash = new Map(specs.map((s) => [s.specHash, s]))
-  const taskIds = specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id))
-  const tasks = taskIds.length > 0 ? await db.select().from(agentTask) : []
+  if (disputed.length === 0) return []
+
+  // Disputes are a handful; read a handful. (Was: the whole job_specs table
+  // and the whole agent_tasks table, to render two or three rows.)
+  const disputedHashes = [...new Set(disputed.flatMap((j) => [j.specHash, j.specHash.toLowerCase()]))]
+  const specs = await db.select(SAFE_JOB_SPEC_COLUMNS).from(jobSpec).where(inArray(jobSpec.specHash, disputedHashes))
+  const specByHash = new Map(specs.map((s) => [s.specHash.toLowerCase(), s]))
+  const taskIds = [...new Set(specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id)))]
+  const tasks = taskIds.length > 0
+    ? await db.select({ id: agentTask.id, output: agentTask.output }).from(agentTask).where(inArray(agentTask.id, taskIds))
+    : []
   const taskById = new Map(tasks.map((t) => [t.id, t]))
 
   return disputed.map((j) => {
-    const spec = specByHash.get(j.specHash)
+    const spec = specByHash.get(j.specHash.toLowerCase())
     const task = spec?.agentTaskId ? taskById.get(spec.agentTaskId) : undefined
     return {
       id: j.id,

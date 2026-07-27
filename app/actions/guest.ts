@@ -38,11 +38,28 @@ export async function publicJobs(limit = 10) {
   await reapStuckTasks()
 
   const onchainJobs = await readJobs().catch(() => [])
-  const specs = await db.select(SAFE_JOB_SPEC_COLUMNS).from(jobSpec)
-  const specByHash = new Map(specs.map((s) => [s.specHash, s]))
 
-  const taskIds = specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id))
-  const tasks = taskIds.length > 0 ? await db.select().from(agentTask) : []
+  // Slice FIRST, then fetch only what the visible cards need. This used to
+  // read every job_specs row and — worse — every agent_tasks row, because the
+  // task query was guarded by `taskIds.length > 0 ?` but carried no WHERE
+  // clause at all: it looked scoped and wasn't. agent_tasks.output holds the
+  // full text of every deliverable ever submitted, so the busiest read path on
+  // the site (this page, GET /api/tasks, the Minecraft poller) was pulling the
+  // entire deliverable archive down to render ten cards.
+  const visible = onchainJobs.slice(0, limit)
+  const wantedHashes = [...new Set(visible.flatMap((j) => [j.specHash, j.specHash.toLowerCase()]))]
+  const specs = wantedHashes.length > 0
+    ? await db.select(SAFE_JOB_SPEC_COLUMNS).from(jobSpec).where(inArray(jobSpec.specHash, wantedHashes))
+    : []
+  const specByHash = new Map(specs.map((s) => [s.specHash.toLowerCase(), s]))
+
+  const taskIds = [...new Set(specs.map((s) => s.agentTaskId).filter((id): id is string => Boolean(id)))]
+  const tasks = taskIds.length > 0
+    ? await db
+        .select({ id: agentTask.id, status: agentTask.status, output: agentTask.output })
+        .from(agentTask)
+        .where(inArray(agentTask.id, taskIds))
+    : []
   const taskById = new Map(tasks.map((t) => [t.id, t]))
 
   // Agent DISPLAY NAMES for the two sides of a job. The truncated addresses
@@ -63,10 +80,9 @@ export async function publicJobs(limit = 10) {
     : []
   const nameByAgentId = new Map(parties.map((p) => [p.id, p.name]))
 
-  return onchainJobs
-    .slice(0, limit)
+  return visible
     .map((j) => {
-      const spec = specByHash.get(j.specHash)
+      const spec = specByHash.get(j.specHash.toLowerCase())
       const task = spec?.agentTaskId ? taskById.get(spec.agentTaskId) : undefined
       return {
         id: j.id,
