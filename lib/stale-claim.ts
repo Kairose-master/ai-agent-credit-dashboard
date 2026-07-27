@@ -144,7 +144,16 @@ export async function abandonedResultHash(): Promise<`0x${string}`> {
   return keccak256(toHex('ledgermind:claim-abandoned'))
 }
 
-export type ReclaimReport = { reclaimed: number; warned: number; examined: number; skipped?: string }
+export type ReclaimReport = {
+  reclaimed: number
+  warned: number
+  /** Accepted jobs whose worker or requester could not be resolved to an agent
+   *  row. These are frozen and this sweep cannot free them — surfaced rather
+   *  than skipped in silence. */
+  unresolvable: number
+  examined: number
+  skipped?: string
+}
 
 /** The event row that records a warning was issued. Durable and idempotent
  *  on the job, the same shape as the `abandoned-${id}` failure marker — no
@@ -153,15 +162,16 @@ const warnTaskId = (jobId: number) => `claim-warn-${jobId}`
 
 export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimReport> {
   const { isLaborMarketConfigured } = await import('@/lib/onchain/config')
-  if (!isLaborMarketConfigured()) return { reclaimed: 0, warned: 0, examined: 0, skipped: 'labor market not configured' }
+  if (!isLaborMarketConfigured()) return { reclaimed: 0, warned: 0, unresolvable: 0, examined: 0, skipped: 'labor market not configured' }
 
   const { readJobs, submitWork, raiseDispute, resolveDispute } = await import('@/lib/onchain/labor')
   const jobs = await readJobs({ maxAgeMs: 0 }).catch(() => [])
   const accepted = jobs.filter((j) => j.status === 'Accepted')
-  if (accepted.length === 0) return { reclaimed: 0, warned: 0, examined: 0 }
+  if (accepted.length === 0) return { reclaimed: 0, warned: 0, unresolvable: 0, examined: 0 }
 
   let reclaimed = 0
   let warned = 0
+  let unresolvable = 0
   let examined = 0
 
   for (const job of accepted) {
@@ -194,17 +204,25 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
       // `raiseDispute` reverts with NotRequester unless the caller is
       // literally job.requester (which differs from spec.requesterAgentId
       // for house-fronted x402 postings).
-      const [workerAgent] = await db
-        .select({ id: agent.id, name: agent.name, userId: agent.userId })
-        .from(agent)
-        .where(eq(agent.smartAccountAddress, job.worker))
-      if (!workerAgent) continue
-
-      const [requesterAgent] = await db
-        .select({ id: agent.id })
-        .from(agent)
-        .where(eq(agent.smartAccountAddress, job.requester))
-      if (!requesterAgent) continue
+      const { agentByAddress } = await import('@/lib/agent-by-address')
+      const workerLookup = await agentByAddress(job.worker)
+      const requesterLookup = await agentByAddress(job.requester)
+      if (!workerLookup.found || !requesterLookup.found) {
+        // A silent `continue` here is invisible limbo: the escrow stays frozen
+        // and nothing anywhere says why. Name the side that could not be
+        // resolved — an unresolvable party means this job can never be walked
+        // out of `Accepted` by this sweep, which is worth knowing loudly.
+        const why = !workerLookup.found
+          ? `worker ${job.worker} (${workerLookup.reason})`
+          : !requesterLookup.found
+            ? `requester ${job.requester} (${requesterLookup.reason})`
+            : 'unknown'
+        console.warn(`[stale-claim] job ${job.id} cannot be recovered — unresolvable ${why}`)
+        unresolvable++
+        continue
+      }
+      const workerAgent = workerLookup.agent
+      const requesterAgent = requesterLookup.agent
 
       if (action === 'warn') {
         if (warned >= MAX_WARNINGS_PER_PASS) continue
@@ -329,5 +347,5 @@ export async function reclaimAbandonedJobs(now = new Date()): Promise<ReclaimRep
     }
   }
 
-  return { reclaimed, warned, examined }
+  return { reclaimed, warned, unresolvable, examined }
 }

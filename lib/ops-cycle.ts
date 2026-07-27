@@ -54,7 +54,11 @@ export const OPS_STEPS: OpsStep[] = [
       const r = await reclaimAbandonedJobs()
       // Warnings are reported separately: a tick that warns 3 and reclaims 0
       // is the escalation working, not the sweep failing to find anything.
-      return r.skipped ?? `${r.reclaimed}/${r.examined} reclaimed, ${r.warned} warned`
+      return (
+        r.skipped ??
+        `${r.reclaimed}/${r.examined} reclaimed, ${r.warned} warned` +
+          (r.unresolvable > 0 ? `, ${r.unresolvable} UNRESOLVABLE` : '')
+      )
     },
   },
   {

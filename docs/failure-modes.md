@@ -699,6 +699,67 @@ amount, and workers never hold platform credentials.
 
 ---
 
+## 18. The same address, compared two different ways
+
+**Symptom.** A prediction that failed. After the warning stage (§1) shipped I
+predicted `Accepted` would fall and `Refunded` rise. It didn't, and chasing
+*why* found this — the ops line said `0/15 reclaimed, 3 warned` when the
+warning cap is 5, so seven of the fifteen were being skipped before they ever
+reached a decision.
+
+**Root cause.** An EVM address is the same address checksummed (`0xAbC…`) or
+lowercased (`0xabc…`). This codebase compared them **both ways**:
+
+```
+lib/labor-dispatch.ts    lower(smart_account_address) = lower($1)   ← correct
+app/actions/labor.ts:38  lower(smart_account_address) = lower($1)   ← correct
+lib/stale-claim.ts       eq(smart_account_address, job.worker)      ← exact
+lib/exhausted-refund.ts  eq(smart_account_address, job.requester)   ← exact
+app/actions/labor.ts:416 eq(smart_account_address, workerAddress)   ← exact
+```
+
+Two call sites already lowercase, which means the problem had been hit before
+and fixed **locally instead of centrally** — the most expensive kind of fix,
+because it leaves the other call sites looking deliberate.
+
+The exact-match half is worse than it looks, because every one of them is a
+silent `continue` on a money path:
+
+| Call site | Lookup misses ⇒ |
+|---|---|
+| `stale-claim` (worker) | the job is never walked out of `Accepted` ⇒ **escrow frozen forever** — the exact state §1 exists to repair |
+| `exhausted-refund` (requester) | no refund |
+| `creditWorkerForJob` (worker) | **paid on-chain with no credit event** — §8 from the other direction |
+
+That last one already had an error message: *"no agent found for worker
+address"*. It reads like a deleted agent. It may only ever have been a
+checksummed address compared exactly.
+
+**Fix.** `lib/agent-by-address.ts` — one lookup, lowercased on both sides,
+returning a **discriminated result** (`zero-address` | `no-agent-row`) rather
+than `undefined`, so a caller can say *which* reason it skipped.
+
+And the second half, which matters as much: **the skips are no longer silent.**
+`reclaimAbandonedJobs` counts `unresolvable` jobs, logs the address and the
+reason for each, and the ops-cycle line prints `, N UNRESOLVABLE` when any
+exist. An escrow this sweep cannot free is exactly the thing that must not be
+invisible — §5's lesson, applied to a `continue` instead of a log message.
+
+**Honest limit.** Whether case was actually the cause of any of those seven is
+**still unproven** — an agent row genuinely can be missing (a deleted agent, a
+house-fronted x402 job). The fix is right either way, and the point of the
+`unresolvable` counter is that the next occurrence is answerable from a log
+line instead of by inference. Re-measure after the deploy: if the skip count
+drops, case was the cause; if it holds at seven, those jobs need a different
+recovery and now say so out loud.
+
+**What made this findable.** Writing the prediction down. "`Accepted` should
+fall" was cheap to state and cheap to check, and it was wrong in a way that
+pointed at a real defect two layers below it. A vaguer claim — "the sweep now
+works better" — would have been unfalsifiable and this would still be here.
+
+---
+
 ## Diagnostic surfaces
 
 Check these before reading code:
@@ -750,7 +811,12 @@ Keep these true, and this class of bug stays dead:
 14. **A defence that points one way is half a defence.** Every place two
    parties' text meets a model, ask who is protected from whom — and check
    the direction you did not build first (§17).
-15. **Ask for the rows and columns you need.** A read with no `WHERE` and no
+15. **Compare identifiers the way the identifier is defined.** An address is
+   case-insensitive; if one call site lowercases and another doesn't, one of
+   them is wrong and the codebase already knows it (§18).
+16. **A `continue` on a money path is a log line you forgot to write.** Skipping
+   silently is how escrow stays frozen with nothing saying why (§18).
+17. **Ask for the rows and columns you need.** A read with no `WHERE` and no
    column list is a bug that has not surfaced yet — it silently grows, and it
    breaks the whole table's readers the day a column ships ahead of its
    migration (§11).

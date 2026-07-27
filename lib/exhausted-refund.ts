@@ -87,12 +87,16 @@ export async function refundExhaustedJobs(now = new Date()): Promise<ExhaustedRe
       // The on-chain requester is the authority — raiseDispute reverts with
       // NotRequester for anyone else (house-fronted x402 jobs differ from
       // the spec's requesterAgentId).
-      const { agent } = await import('@/lib/db/schema')
-      const [requesterAgent] = await db
-        .select({ id: agent.id })
-        .from(agent)
-        .where(eq(agent.smartAccountAddress, job.requester))
-      if (!requesterAgent) continue
+      // Case-insensitive: an address is the same address checksummed or
+      // lowercased, and an exact match that misses here means no refund, with
+      // nothing in the log to say so. See lib/agent-by-address.ts.
+      const { agentByAddress } = await import('@/lib/agent-by-address')
+      const requesterLookup = await agentByAddress(job.requester)
+      if (!requesterLookup.found) {
+        console.warn(`[exhausted-refund] job ${job.id} not refundable — unresolvable requester ${job.requester} (${requesterLookup.reason})`)
+        continue
+      }
+      const requesterAgent = requesterLookup.agent
 
       let status = job.status as string
       if (status === 'Submitted') {

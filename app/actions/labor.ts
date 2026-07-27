@@ -413,14 +413,21 @@ export async function resolveDisputeAction(jobId: number, releaseToWorker: boole
  * explicit authorization check here first.
  */
 export async function creditWorkerForJob(workerAddress: string, jobId: number, bounty: number, txHash: string) {
-  const [workerAgent] = await db.select().from(agent).where(eq(agent.smartAccountAddress, workerAddress))
-  if (!workerAgent) {
-    // The on-chain payout already happened by the time this runs — losing
-    // the credit event silently would hide that fact entirely, so log it
-    // even though there's no agent row left to act on.
-    console.error(`[labor] creditWorkerForJob: no agent found for worker address ${workerAddress} (job ${jobId}) — payout succeeded on-chain but no credit event was recorded`)
+  // Case-insensitive, and it matters more here than anywhere: the payout has
+  // ALREADY happened by the time this runs, so a lookup that misses means a
+  // worker was paid with no credit event — docs/failure-modes.md §8, from the
+  // other direction. The error below used to read like a deleted agent; it may
+  // only ever have been a checksummed address compared exactly.
+  const { agentByAddress } = await import('@/lib/agent-by-address')
+  const workerLookup = await agentByAddress(workerAddress)
+  if (!workerLookup.found) {
+    console.error(
+      `[labor] creditWorkerForJob: no agent for worker address ${workerAddress} (job ${jobId}, reason: ${workerLookup.reason}) — ` +
+        'payout succeeded on-chain but no credit event was recorded',
+    )
     return
   }
+  const workerAgent = workerLookup.agent
 
   // Idempotent on the job. Five call sites can observe the same completed
   // job — the settlement sweep, a delegation tick, the two approve paths —
