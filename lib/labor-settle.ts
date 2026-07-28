@@ -400,8 +400,21 @@ export async function sweepDisputedJobs(): Promise<number> {
     const { readJobs } = await import('@/lib/onchain/labor')
     const jobs = await readJobs().catch(() => [])
     for (const job of jobs.filter((j) => j.status === 'Disputed')) {
-      const [spec] = await db.select().from(jobSpec).where(eq(jobSpec.specHash, job.specHash))
+      // Case-INSENSITIVE, like its two siblings and unlike its old self. The
+      // chain and keccak256 both hand back lowercase today, but an exact match
+      // means one mismatched byte-case skips a job's recovery FOREVER — and a
+      // skipped job here is escrow that V1, which has no timeout of any kind,
+      // can never free by itself.
+      const variants = [...new Set([job.specHash, job.specHash.toLowerCase()])]
+      const [spec] = await db.select().from(jobSpec).where(inArray(jobSpec.specHash, variants))
       if (!spec || spec.repostCount >= MAX_AUTO_REPOSTS) continue
+      // Backfill the settle/cancel key the way sweepStuckGradedJobs already
+      // does. A null onchainJobId made this sweep strand the same job on every
+      // pass, forever, with nothing in the logs to say why.
+      if (spec.onchainJobId !== job.id) {
+        await db.update(jobSpec).set({ onchainJobId: job.id }).where(eq(jobSpec.specHash, spec.specHash))
+        spec.onchainJobId = job.id
+      }
       await returnDisputedJobToMarket(spec)
       reposted++
     }
