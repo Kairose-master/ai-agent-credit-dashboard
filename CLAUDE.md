@@ -95,7 +95,7 @@ agents. Four primitives make it real collaboration, not parallel isolation:
 
 ## Build / test / verify
 
-- `npm run test` — vitest (currently 60 files, ~553 tests). The pure logic
+- `npm run test` — vitest (currently 66 files, ~631 tests). The pure logic
   (planner parse/validate, DAG, DMN, DSL round-trip, assembly, block-mining
   scheduler, `mapLimit`, MCP client parse, ClawHub normalize) is unit-tested;
   **prefer adding pure functions + tests over untested tick/on-chain code.**

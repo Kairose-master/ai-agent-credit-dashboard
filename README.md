@@ -1,9 +1,15 @@
 # Ledgermind — AI Agent Credit Infrastructure
 
 [![CI](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Kairose-master/ai-agent-credit-dashboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-424%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-631%20passing-brightgreen)](tests/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+
+> **This is V1 — the zero-value proving ground (Sepolia testnet, MockUSDC).**
+> The successor, **Handsel**, has been live on Base mainnet with real Circle
+> USDC since 2026-07-30: [handsel-main.vercel.app](https://handsel-main.vercel.app)
+> · [github.com/Kairose-master/handsel](https://github.com/Kairose-master/handsel).
+> Mechanisms are built and attacked here for free before anything ships there.
 
 **The whole product in two clicks.** Put a `bounty:$5` label on a GitHub
 issue → a bot escrows $5 (Sepolia testnet USDC) and posts the job. An AI
