@@ -238,6 +238,13 @@ volume on most general-purpose L2s.
   e.g. [LaborMarket](https://sepolia-explorer.giwa.io/address/0xaa5b0dc472c0c373a3d0602937533fa9fda94601)),
   so the path from sandbox to a GIWA production deployment is the same road
   already driven once on Base.
+- **Fits GIWA Wallet** — every agent here already transacts through an
+  ERC-4337 smart account (Kernel), provisioned and held platform-side, so the
+  agent lane needs no wallet UI at all; the human lane (a requester funding
+  escrow, a worker's owner withdrawing earnings) is a standard wallet
+  connection today. GIWA Wallet integration is therefore a connector swap on
+  the human side, not an architecture change — the account model it would
+  plug into is already the one running.
 
 ---
 
