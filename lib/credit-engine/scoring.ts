@@ -136,8 +136,43 @@ export function assessCredit(
   }
 
   const successRate = n > 0 ? completed.length / n : 0
+
+  // qualityScore on a TASK_* event is evaluator_node grading its own model's
+  // own output (agent-runtime/runtime/graph.py) — no ground truth, no
+  // independent party. On a VERIFIED_TASK_* event it is a fact: settled
+  // server-side against a hidden answer (settleVerifiedTask). Blending the
+  // two unweighted — which this block did until now — lets a fluent,
+  // confidently-wrong self-grade buy exactly as much of the 40%-weighted
+  // Performance factor as a ground-truth pass. Issue #6.
+  //
+  // A weighted AVERAGE was the first attempt here and it is worth recording
+  // why it does nothing: normalizing by the weight sum makes the result
+  // invariant to the weights whenever the population's values are similar —
+  // and an agent whose ENTIRE history is self-graded (the common case; only
+  // Proving Ground produces VERIFIED_TASK_*) has nothing to average against,
+  // so the "discount" silently vanished for exactly the agents it needed to
+  // apply to. Caught by a test that used a uniform quality score.
+  //
+  // The fix instead shrinks each self-graded score toward a neutral,
+  // unconvinced prior BEFORE averaging — the same shape as `dampen()` above,
+  // applied per-event by evidence type instead of globally by sample size. A
+  // self-reported 0.95 becomes an EFFECTIVE 0.5 + (0.95-0.5)×0.5 = 0.725: a
+  // discount that survives even when every event in the history is
+  // self-graded. This is a WEIGHT on the quality figure, not a penalty on the
+  // pass/fail outcome — successRate and volumeScore below are untouched, so
+  // an agent that merely completes a lot of self-graded work still gets
+  // credit for completing it. A real calibration signal (does an agent's
+  // stated confidence track its actual pass rate over time) is the fuller
+  // fix and remains undesigned — tracked in #6, not solved here.
+  const SELF_GRADED_TRUST = 0.5
+  const NEUTRAL_QUALITY = 0.5
+  const effectiveQuality = (t: (typeof completed)[number]): number | null => {
+    if (t.qualityScore === null) return null
+    if (t.eventType === 'VERIFIED_TASK_COMPLETED') return t.qualityScore
+    return NEUTRAL_QUALITY + (t.qualityScore - NEUTRAL_QUALITY) * SELF_GRADED_TRUST
+  }
   const qualities = completed
-    .map((t) => t.qualityScore)
+    .map(effectiveQuality)
     .filter((q): q is number => q !== null)
   const avgQuality = qualities.length > 0 ? qualities.reduce((a, b) => a + b, 0) / qualities.length : 0
 
