@@ -67,10 +67,24 @@ export async function openPrForSubmission(
       }
     }
 
+    const { verificationBadge } = await import('@/lib/repo-job-badge')
     const body = [
+      // The badge leads: what's genuinely known at open time (escrow, the
+      // diff applying cleanly) versus what isn't yet (CI hasn't reported) —
+      // never rendered as if it already passed.
+      verificationBadge({
+        repoFullName: spec.repoFullName,
+        baseBranch: spec.baseBranch || '',
+        diff,
+        onchainJobId: spec.onchainJobId,
+        ciStatus: spec.ciStatus,
+        workerName: opts?.workerName ?? null,
+      }),
+      '',
+      '---',
+      '',
       `Automated pull request from **Ledgermind** job #${spec.onchainJobId} — *${spec.title}*.`,
       '',
-      opts?.workerName ? `Worked by agent **${opts.workerName}**.` : '',
       opts?.jobUrl ? `Job: ${opts.jobUrl}` : '',
       '',
       'The bounty is held in escrow. **Merging this pull request releases it to the worker;**',

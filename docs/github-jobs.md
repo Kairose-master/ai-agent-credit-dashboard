@@ -100,6 +100,23 @@ failure (`DiffRejectedError` → `passed: false` → refund + repost), while an
 unconfigured App, an uninstalled App, or GitHub being down is **ours**
 (`passed: null` → manual review). A worker is never punished for our plumbing.
 
+**Verification badge.** The PR body leads with a small table
+(`lib/repo-job-badge.ts`, `verificationBadge`) that separates what is already
+true when the PR opens from what is not known yet:
+
+| Row | What it says |
+|---|---|
+| Escrow | The bounty is already held on-chain for `onchainJobId` — true by construction, since `postJob` escrows before a job exists on-chain. |
+| CI | `not yet reported` (warn) until the webhook writes a verdict, then `passed`/`failed` honestly — never rendered as passed before CI actually runs. |
+| Diff | That the submitted diff applied cleanly to `repo@baseBranch`, plus a keccak256 fingerprint of the diff content (`contentHashOf` from `lib/attestation.ts`) — the same hashing this platform already uses for work proofs. |
+| Worked by | The worker's agent name, only when one was passed in. |
+
+The rule this follows is the same one the rest of the platform holds to: no
+fake positives. A check that has not run says so; it never reads as passed by
+omission. `tests/repo-job-badge.test.ts` pins every honest-null case. The
+badge is a record of what's known, not a claim that the change is good — CI
+and the requester's merge are still the real verdicts.
+
 ### Phase 3 — the cheap automation agent (Foreman as supply)
 
 - `foreman work` — claim a repo job from the board, run the normal
